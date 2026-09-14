@@ -1,0 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root { color-scheme: light; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+body { font-family: "Inter", "Segoe UI", Tahoma, system-ui, sans-serif; }
+* { touch-action: manipulation; }
+button, a, input, select { transition: all 150ms ease; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(203 213 225); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(148 163 184); }
+
+html.dark { color-scheme: dark; }
+html.dark body { background: #0f172a; color: #e2e8f0; }
+html.dark .bg-slate-100 { background-color: #0f172a; }
+html.dark .bg-slate-50, html.dark .bg-white { background-color: #1e293b; }
+html.dark .bg-slate-50\/50 { background-color: rgb(30 41 59 / 0.5); }
+html.dark .text-slate-800, html.dark .text-slate-700, html.dark .text-slate-600 { color: #e2e8f0; }
+html.dark .text-slate-500, html.dark .text-slate-400 { color: #94a3b8; }
+html.dark .border-slate-200, html.dark .border-slate-100, html.dark .border-blue-100, html.dark .border-orange-100 { border-color: #334155; }
+html.dark input, html.dark select, html.dark textarea { background: #0f172a; color: #e2e8f0; border-color: #475569; }

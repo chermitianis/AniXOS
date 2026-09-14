@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment secrets (never commit real keys)
+.env
+.env.local
+apps/web/.env
+
+# Editor/OS
+.DS_Store
+.vscode/
+*.log
+
+# Supabase local dev
+supabase/.branches/
+supabase/.temp/

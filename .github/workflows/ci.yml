@@ -1,0 +1,40 @@
+name: AnixOS CI - Typecheck & Build
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-and-check:
+    name: Typecheck & Build Web App
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Build & Typecheck
+        run: npm --prefix apps/web run build
+        env:
+          VITE_SUPABASE_URL: https://loqgaepskvqkhmcweszd.supabase.co
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Verify Build Output
+        run: |
+          if [ -d "apps/web/dist" ]; then
+            echo "Build succeeded: apps/web/dist found."
+          else
+            echo "Build failed: apps/web/dist missing!"
+            exit 1
+          fi
