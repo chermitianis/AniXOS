@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard, FileBarChart, Factory, CalendarClock, FolderKanban,
   ClipboardList, Calculator, ShoppingCart, Package, Users2, HardHat,
-  Cog, ListChecks, OctagonAlert, Archive, Settings as SettingsIcon,
-  LogOut, type LucideIcon,
+  Cog, ListChecks, Archive, Settings as SettingsIcon,
+  LogOut, Menu, X, type LucideIcon,
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { hasPermission } from "../../../auth/permissions";
@@ -20,8 +20,7 @@ import { InventoryAdminPage } from "./InventoryAdminPage";
 import { ClientsAdminPage } from "./ClientsAdminPage";
 import { WorkersAdminPage } from "./WorkersAdminPage";
 import { MachinesAdminPage } from "./MachinesAdminPage";
-import { TaskTypesAdminPage } from "./TaskTypesAdminPage";
-import { StopReasonsAdminPage } from "./StopReasonsAdminPage";
+import { OperationsAdminPage } from "./OperationsAdminPage";
 import { WorkshopInfoPage } from "./WorkshopInfoPage";
 import { ArchivePage } from "./ArchivePage";
 import { SettingsPage } from "../../settings/pages/SettingsPage";
@@ -32,7 +31,7 @@ import { connectivityMonitor } from "../../../lib/connectivity";
 type AdminSection =
   | "dashboard" | "workshop" | "planning" | "projects" | "manufacturing_orders"
   | "nomenclature" | "sales" | "inventory" | "clients" | "workers" | "machines"
-  | "task_types" | "stop_reasons" | "archive" | "reports" | "settings";
+  | "operations" | "archive" | "reports" | "settings";
 
 interface NavItem {
   key: AdminSection;
@@ -64,8 +63,7 @@ const RAW_GROUPS: SectionGroup[] = [
   { titleKey: "navGroup.resources", items: [
     { key: "workers", labelKey: "nav.workers", icon: HardHat },
     { key: "machines", labelKey: "nav.machines", icon: Cog },
-    { key: "task_types", labelKey: "nav.task_types", icon: ListChecks },
-    { key: "stop_reasons", labelKey: "nav.stop_reasons", icon: OctagonAlert },
+    { key: "operations", labelKey: "nav.operations", icon: ListChecks },
   ]},
   { titleKey: "navGroup.admin", items: [
     { key: "archive", labelKey: "nav.archive", icon: Archive },
@@ -78,7 +76,7 @@ const PAGES: Record<AdminSection, React.ComponentType> = {
   planning: PlanningAdminPage, projects: ProjectsAdminPage, manufacturing_orders: ManufacturingOrdersAdminPage,
   nomenclature: NomenclaturePage, sales: SalesAdminPage, inventory: InventoryAdminPage,
   clients: ClientsAdminPage, workers: WorkersAdminPage, machines: MachinesAdminPage,
-  task_types: TaskTypesAdminPage, stop_reasons: StopReasonsAdminPage, archive: ArchivePage,
+  operations: OperationsAdminPage, archive: ArchivePage,
   settings: SettingsPage,
 };
 
@@ -100,6 +98,7 @@ export function AdminHomePage() {
 
   const allVisibleItems = visibleGroups.flatMap((g) => g.items);
   const [activeSection, setActiveSection] = useState<AdminSection | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const currentSection = activeSection && allVisibleItems.some((i) => i.key === activeSection)
     ? activeSection
     : (allVisibleItems[0]?.key ?? null);
@@ -108,14 +107,41 @@ export function AdminHomePage() {
   const currentItem = allVisibleItems.find((i) => i.key === currentSection);
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
+    <div className="flex min-h-screen bg-slate-50 md:flex-row">
+      {/* شريط علوي مخصص للجوال فقط — يحل محل الشريط الجانبي الثابت الذي كان
+          يُقتطع عرضه على شاشة هاتف (w-64 من أصل ~375px لا يترك مساحة للمحتوى) */}
+      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
+        <button onClick={() => setIsSidebarOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label={t("common.menu")}>
+          <Menu size={20} />
+        </button>
+        <div className="flex items-center gap-2">
+          <AppLogo size="sm" />
+          <span className="text-sm font-extrabold tracking-tight text-slate-800">AniXOS</span>
+        </div>
+        <ReclamationsBell />
+      </div>
+
+      {/* خلفية معتمة عند فتح الدرج على الجوال */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 z-40 bg-slate-900/40 md:hidden" onClick={() => setIsSidebarOpen(false)} />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 start-0 z-50 w-72 flex-col overflow-y-auto border-e border-slate-200 bg-white transition-transform ${
+          isSidebarOpen ? "flex" : "hidden"
+        } md:static md:z-auto md:flex md:w-64`}
+      >
         <div className="border-b border-slate-100 p-4">
           <div className="mb-2 flex items-center gap-2.5">
             <AppLogo size="sm" />
             <span className="flex-1 text-base font-extrabold tracking-tight text-slate-800">AniXOS</span>
             {/* جرس التنبيهات: مرئي من أي قسم إداري لأن réclamations العمال تتطلب رد فعل سريع بغض النظر عن الشاشة المفتوحة */}
-            <ReclamationsBell />
+            <div className="hidden md:block">
+              <ReclamationsBell />
+            </div>
+            <button onClick={() => setIsSidebarOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 md:hidden" aria-label={t("common.close")}>
+              <X size={18} />
+            </button>
           </div>
           <div className="rounded-lg bg-slate-50 px-2.5 py-2">
             <p className="truncate text-sm font-semibold text-slate-700">{staffUser?.full_name}</p>
@@ -135,7 +161,10 @@ export function AdminHomePage() {
                 return (
                   <button
                     key={item.key}
-                    onClick={() => setActiveSection(item.key)}
+                    onClick={() => {
+                      setActiveSection(item.key);
+                      setIsSidebarOpen(false);
+                    }}
                     className={`group mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm font-semibold transition-all ${
                       isActive
                         ? "bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100"
@@ -165,11 +194,11 @@ export function AdminHomePage() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
         {currentItem && (
-          <div className="mb-6 flex items-center gap-2.5">
+          <div className="mb-4 flex items-center gap-2.5 md:mb-6">
             <currentItem.icon size={22} className="text-indigo-600" />
-            <h1 className="text-xl font-extrabold tracking-tight text-slate-800">{t(currentItem.labelKey)}</h1>
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 md:text-xl">{t(currentItem.labelKey)}</h1>
           </div>
         )}
 

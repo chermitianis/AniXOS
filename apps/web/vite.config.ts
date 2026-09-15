@@ -23,7 +23,7 @@ export default defineConfig({
       ],
       manifest: {
         id: '/',
-        name: 'AnixOS MES - Workshop Management',
+        name: 'AnixOS',
         short_name: 'AnixOS',
         description: 'Industrial Shop Floor Execution and Workshop MES Platform',
         theme_color: '#0f172a',

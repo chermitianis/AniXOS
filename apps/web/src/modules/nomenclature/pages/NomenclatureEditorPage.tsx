@@ -123,7 +123,13 @@ export function NomenclatureEditorPage({ nomenclature, onBack }: NomenclatureEdi
           piece_task_id: p.id,
           sequence_order: liveRows.length + i,
         }));
-        const { data: inserted } = await supabase.from("nomenclature_rows").insert(inserts).select();
+        // upsert مع تجاهل التكرار بدل insert: يحمي من فشل 409 Conflict إذا
+        // نُفِّذت هذه الدالة مرتين بالتوازي (مثلاً إعادة تركيب المكوّن في
+        // وضع التطوير) وحاولتا استيراد نفس القطعة في آن واحد
+        const { data: inserted } = await supabase
+          .from("nomenclature_rows")
+          .upsert(inserts, { onConflict: "nomenclature_id,piece_task_id", ignoreDuplicates: true })
+          .select();
         if (inserted) liveRows = [...liveRows, ...(inserted as RowExt[])];
       }
 
@@ -184,18 +190,23 @@ export function NomenclatureEditorPage({ nomenclature, onBack }: NomenclatureEdi
     const key = cellKey(rowId, columnId);
     const existing = cells.get(key);
 
+    // تحديث تفاؤلي فوري للعرض أثناء الكتابة
     setCells((prev) => new Map(prev).set(key, { ...(existing as NomenclatureCell), row_id: rowId, column_id: columnId, value_text: value }));
 
-    if (existing) {
-      await supabase.from("nomenclature_cells").update({ value_text: value }).eq("id", existing.id);
-    } else {
-      const { data } = await supabase
-        .from("nomenclature_cells")
-        .insert({ nomenclature_id: nomenclature.id, row_id: rowId, column_id: columnId, company_id: staffUser.company_id, value_text: value })
-        .select()
-        .single();
-      if (data) setCells((prev) => new Map(prev).set(key, data as NomenclatureCell));
-    }
+    // upsert على القيد الفريد (row_id, column_id) بدل التمييز بين إدراج/تعديل
+    // يدوياً: الطريقة القديمة كانت تعتمد على "هل توجد خلية محلياً بمعرّف
+    // حقيقي؟" وهو ما يفشل عند كتابة أحرف متتالية بسرعة قبل اكتمال أول
+    // إدراج (السطر الثاني يجد كائناً تفاؤلياً بلا id فيحاول PATCH بمعرّف
+    // فارغ → 400 Bad Request). upsert يتجنب هذا السباق كلياً.
+    const { data } = await supabase
+      .from("nomenclature_cells")
+      .upsert(
+        { nomenclature_id: nomenclature.id, row_id: rowId, column_id: columnId, company_id: staffUser.company_id, value_text: value },
+        { onConflict: "row_id,column_id" }
+      )
+      .select()
+      .single();
+    if (data) setCells((prev) => new Map(prev).set(key, data as NomenclatureCell));
   }
 
   /** تكلفة خلية واحدة: عمود "عملية" بسعر ساعة محدد → ساعات×سعر، وإلا القيمة

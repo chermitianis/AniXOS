@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, type FormEvent } from "react";
+import { Trash2 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { localDb } from "../../../lib/localDb";
 import { connectivityMonitor } from "../../../lib/connectivity";
@@ -195,6 +196,17 @@ export function MachinesAdminPage() {
     stopped: t("setup.statusStopped"),
   };
 
+  async function deleteMachine(id: string) {
+    if (!window.confirm(t("setup.confirmDelete"))) return;
+    const { error: deleteError } = await supabase.from("machines").delete().eq("id", id);
+    if (deleteError) {
+      setError(deleteError.message.includes("foreign key") || deleteError.message.includes("violates") ? t("setup.cannotDeleteInUse") : t("setup.genericError"));
+      return;
+    }
+    if (editingId === id) resetForm();
+    await loadMachines();
+  }
+
   return (
     <div className="grid gap-6 md:grid-cols-2">
       <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5">
@@ -248,6 +260,9 @@ export function MachinesAdminPage() {
               <span className="rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-600">
                 {statusLabels[m.current_status]}
               </span>
+              <button onClick={() => void deleteMachine(m.id)} className="ms-1.5 rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200">
+                <Trash2 size={13} />
+              </button>
             </li>
           ))}
           {machines.length === 0 && <li className="text-sm text-slate-400">{t("setup.noDataYet")}</li>}

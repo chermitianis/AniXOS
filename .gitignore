@@ -7,14 +7,19 @@ build/
 
 # Environment secrets (never commit real keys)
 .env
-.env.local
+.env.*
+!.env.example
 apps/web/.env
 
-# Editor/OS
+# Supabase local dev & database backups
+supabase/.branches/
+supabase/.temp/
+*.zip
+*.tar.gz
+*.dump
+
+# Editor / OS / Logs
 .DS_Store
 .vscode/
 *.log
-
-# Supabase local dev
-supabase/.branches/
-supabase/.temp/
+Thumbs.db

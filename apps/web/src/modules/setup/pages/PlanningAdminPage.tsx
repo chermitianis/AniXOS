@@ -134,15 +134,15 @@ export function PlanningAdminPage() {
   const selectedMachine = machines.find((m) => m.id === selectedMachineId);
 
   return (
-    <div className="flex gap-5">
-      {/* تبويبات الآلات — عمودية على اليسار */}
-      <aside className="w-52 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div className="flex flex-col gap-5 md:flex-row">
+      {/* تبويبات الآلات — عمودية على اليسار في الشاشات الكبيرة، شريط أفقي قابل للتمرير على الجوال */}
+      <aside className="flex shrink-0 gap-1.5 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 md:w-52 md:flex-col md:gap-0 md:overflow-hidden md:p-0">
         {machines.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => setSelectedMachineId(m.id)}
-            className={`block w-full border-b border-slate-100 px-4 py-3 text-start text-sm font-semibold transition-colors last:border-0 ${
+            className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2.5 text-start text-sm font-semibold transition-colors md:block md:w-full md:rounded-none md:border-b md:border-slate-100 md:py-3 md:last:border-0 ${
               selectedMachineId === m.id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"
             }`}
           >

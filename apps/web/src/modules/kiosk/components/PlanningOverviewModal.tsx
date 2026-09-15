@@ -58,7 +58,7 @@ export function PlanningOverviewModal({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex h-[85vh] w-[85vw] max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:h-[85vh] sm:w-[90vw]">
         {/* Header + navigation par date */}
         <div className="flex flex-col gap-3 bg-gradient-to-r from-indigo-600 to-blue-600 px-5 py-4 text-white sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-extrabold">{t("kiosk.planningOverviewTitle")}</h2>
@@ -94,15 +94,15 @@ export function PlanningOverviewModal({ onClose }: Props) {
             {t("kiosk.noPlanningYet")}
           </div>
         ) : (
-          <div className="flex flex-1 overflow-hidden">
-            {/* قائمة الآلات العمودية — على اليسار */}
-            <div className="w-56 shrink-0 overflow-y-auto border-e border-slate-200 bg-slate-50">
+          <div className="flex flex-1 flex-col overflow-hidden sm:flex-row">
+            {/* قائمة الآلات — عمودية على اليسار في الشاشات الكبيرة، شريط أفقي قابل للتمرير على الجوال */}
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 p-1.5 sm:w-48 sm:flex-col sm:gap-0 sm:overflow-y-auto sm:overflow-x-hidden sm:border-b-0 sm:border-e sm:p-0">
               {machines.map((m) => (
                 <button
                   key={m.id}
                   type="button"
                   onClick={() => setSelectedMachineId(m.id)}
-                  className={`block w-full px-4 py-3 text-start text-sm font-semibold transition-colors ${
+                  className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2.5 text-start text-sm font-semibold transition-colors sm:block sm:w-full sm:rounded-none sm:py-3 ${
                     selectedMachineId === m.id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
                   }`}
                 >
@@ -112,7 +112,7 @@ export function PlanningOverviewModal({ onClose }: Props) {
             </div>
 
             {/* محتوى الآلة المختارة */}
-            <div className="flex-1 overflow-y-auto p-5">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5">
               <h3 className="mb-3 flex items-center gap-2 font-bold text-slate-800">
                 <Factory size={17} className="text-indigo-500" />
                 {machines.find((m) => m.id === selectedMachineId)?.name}
