@@ -109,43 +109,32 @@ const RAW_GROUPS: SectionGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Mapping section → Composant (sauf 'settings' — traité séparément)
+// Mapping section → Composant (sauf 'settings')
 // ---------------------------------------------------------------------------
 const PAGES: Record<Exclude<AdminSection, "settings">, React.ComponentType> = {
   dashboard: ManagerDashboardPage,
   reports: ReportsPage,
   workshop: WorkshopInfoPage,
-
   crm: CRMAdminPage,
-
   nomenclature: NomenclaturePage,
   projects: ProjectsAdminPage,
   manufacturing_orders: ManufacturingOrdersAdminPage,
   planning: PlanningAdminPage,
   accounting: AccountingAdminPage,
-
   quotes: SalesAdminPage,
   sales: SalesAdminPage,
   invoices: SalesAdminPage,
   inventory: InventoryAdminPage,
   purchases: InventoryAdminPage,
   clients: ClientsAdminPage,
-
   workers: WorkersAdminPage,
   machines: MachinesAdminPage,
   operations: OperationsAdminPage,
-
   archive: ArchivePage,
 };
 
-// ---------------------------------------------------------------------------
-// localStorage — mode replié
-// ---------------------------------------------------------------------------
 const SIDEBAR_COLLAPSED_KEY = "anixos_sidebar_collapsed";
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
 interface AdminHomePageProps {
   onNavigateToSubscription?: () => void;
   onNavigateToDeveloperPanel?: () => void;
@@ -212,9 +201,22 @@ export function AdminHomePage({
       ? activeSection
       : (allVisibleItems[0]?.key ?? null);
 
+  // Reset scroll du contenu à chaque changement de section
   useLayoutEffect(() => {
     mainScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [currentSection]);
+
+  // Bloquer le scroll du body quand le drawer mobile est ouvert
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isSidebarOpen]);
 
   function handleItemDoubleClick() {
     setIsCollapsed((v) => !v);
@@ -222,8 +224,11 @@ export function AdminHomePage({
   function handleToggleCollapse() {
     setIsCollapsed((v) => !v);
   }
+  function handleSelectSection(key: AdminSection) {
+    setActiveSection(key);
+    setIsSidebarOpen(false);
+  }
 
-  // Composant de la section active
   const ActivePage =
     currentSection && currentSection !== "settings"
       ? PAGES[currentSection]
@@ -234,38 +239,51 @@ export function AdminHomePage({
   // Render
   // -------------------------------------------------------------------------
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 md:flex-row">
-      {/* Barre mobile */}
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50 md:flex-row">
+      {/* ============================================================= */}
+      {/* MOBILE : barre supérieure (visible uniquement < md)            */}
+      {/* ============================================================= */}
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 active:bg-slate-200"
           aria-label={t("common.menu")}
         >
           <Menu size={20} />
         </button>
         <div className="flex items-center gap-2">
           <AppLogo size="sm" />
-          <span className="text-sm font-extrabold tracking-tight text-slate-800">AniXOS</span>
+          <span className="text-sm font-extrabold tracking-tight text-slate-800">
+            AniXOS
+          </span>
         </div>
         <ReclamationsBell />
-      </div>
+      </header>
 
+      {/* ============================================================= */}
+      {/* MOBILE : overlay sombre quand le drawer est ouvert             */}
+      {/* ============================================================= */}
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
+          className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden"
           onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
 
-      {/* SIDEBAR */}
+      {/* ============================================================= */}
+      {/* SIDEBAR (drawer sur mobile, colonne fixe sur desktop)          */}
+      {/* ============================================================= */}
       <aside
-        className={`fixed inset-y-0 start-0 z-50 flex-col border-e border-slate-200 bg-white transition-all duration-300 ${
-          isSidebarOpen ? "flex" : "hidden"
-        } md:static md:z-auto md:flex ${
-          isCollapsed ? "md:w-16" : "md:w-64"
-        } w-72`}
+        className={`
+          fixed inset-y-0 start-0 z-50 flex w-64 flex-col border-e border-slate-200 bg-white
+          transition-transform duration-300 ease-in-out
+          ${isSidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"}
+          md:static md:z-auto md:translate-x-0
+          ${isCollapsed ? "md:w-16" : "md:w-64"}
+        `}
       >
+        {/* Header du sidebar */}
         <div className={`flex-shrink-0 border-b border-slate-100 transition-all ${isCollapsed ? "md:p-2 p-4" : "p-4"}`}>
           <div className={`flex items-center ${isCollapsed ? "md:flex-col md:gap-2 md:mb-0 mb-2 gap-2.5" : "mb-2 gap-2.5"}`}>
             <AppLogo size="sm" />
@@ -292,6 +310,7 @@ export function AdminHomePage({
                 </svg>
               </button>
             )}
+            {/* Bouton fermer (mobile uniquement) */}
             <button
               onClick={() => setIsSidebarOpen(false)}
               className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 md:hidden"
@@ -347,10 +366,7 @@ export function AdminHomePage({
                 return (
                   <button
                     key={item.key}
-                    onClick={() => {
-                      setActiveSection(item.key);
-                      setIsSidebarOpen(false);
-                    }}
+                    onClick={() => handleSelectSection(item.key)}
                     onDoubleClick={handleItemDoubleClick}
                     className={`group relative mb-0.5 flex items-center rounded-lg transition-all ${
                       isCollapsed
@@ -411,21 +427,22 @@ export function AdminHomePage({
         </div>
       </aside>
 
-      {/* MAIN */}
+      {/* ============================================================= */}
+      {/* MAIN : prend 100% de l'espace restant                         */}
+      {/* ============================================================= */}
       <main
         ref={mainScrollRef}
-        className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6"
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6"
       >
         {currentItem && (
           <div className="mb-4 flex items-center gap-2.5 md:mb-6">
-            <currentItem.icon size={22} className="text-indigo-600" />
-            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 md:text-xl">
+            <currentItem.icon size={20} className="shrink-0 text-indigo-600 md:size-[22px]" />
+            <h1 className="min-w-0 flex-1 truncate text-base font-extrabold tracking-tight text-slate-800 md:text-xl">
               {t(currentItem.labelKey)}
             </h1>
           </div>
         )}
 
-        {/* Section "settings" — rendu séparé avec props */}
         {currentSection === "settings" ? (
           <SettingsPage
             onNavigateToSubscription={onNavigateToSubscription}
