@@ -1,4 +1,5 @@
-# Dependencies
+# Cache & Dependencies
+.vite/
 node_modules/
 
 # Build outputs
@@ -25,7 +26,6 @@ supabase/.temp/
 Thumbs.db
 
 # AniXOS — Explicit excludes for Edge Functions & secrets
-# (les règles ci-dessus couvrent déjà, mais on est explicite pour la clarté)
 supabase/functions/.env
 supabase/functions/.env.*
 !supabase/functions/.env.example
