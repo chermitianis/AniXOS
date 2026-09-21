@@ -67,8 +67,9 @@ Deno.serve(async (req) => {
     const { data: callerStaff, error: staffError } = await callerClient
       .from("staff_users")
       .select("company_id, is_owner")
-      .eq("id", callerUser.id)
-      .single();
+      .eq("auth_user_id", callerUser.id)
+      .limit(1)
+      .maybeSingle();
 
     if (staffError || !callerStaff) {
       return jsonResponse({ error: "forbidden", message: "المستخدم ليس موظفاً في أي شركة" }, 403);

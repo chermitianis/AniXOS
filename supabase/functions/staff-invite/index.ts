@@ -46,11 +46,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "unauthorized", message: "Session invalide" }, 401);
     }
 
-    const { data: callerStaff, error: callerStaffError } = await callerClient
+    // ملاحظة: بعد 0059، شخص واحد (auth_user_id) قد يملك أكثر من صف staff_users
+    // (مالك بعدة قواعد بيانات) — عند تعدد الاحتمالات نأخذ الأول بحكم الشركة،
+    // وهذا يكفي طالما ميزة "اختيار الشركة قبل الدعوة" لم تُبنَ بعد (لاحقة)
+    const { data: callerStaffRows, error: callerStaffError } = await callerClient
       .from("staff_users")
-      .select("company_id, is_owner")
-      .eq("id", callerUser.id)
-      .single();
+      .select("company_id, is_owner, account_id")
+      .eq("auth_user_id", callerUser.id)
+      .eq("is_owner", true)
+      .limit(1);
+
+    const callerStaff = callerStaffRows?.[0];
 
     if (callerStaffError || !callerStaff) {
       return jsonResponse({ error: "unauthorized", message: "Utilisateur non trouvé" }, 403);
@@ -109,7 +115,8 @@ Deno.serve(async (req) => {
       createdAuthUserId = authData.user.id;
 
       const { error: staffError } = await adminClient.from("staff_users").insert({
-        id: createdAuthUserId,
+        auth_user_id: createdAuthUserId,
+        account_id: callerStaff.account_id ?? null,
         company_id: callerStaff.company_id,
         role_id: foundRoleId,
         full_name: invitee_full_name,

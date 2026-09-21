@@ -1,13 +1,11 @@
-// ============================================================================
-// StaffAuthContext: جلسة الموظف الإداري (مدير، مشرف، محاسب...)
-// مرتبطة بحساب Supabase Auth حقيقي. مسؤولة أيضاً عن جلب صف staff_users
-// المرتبط + الدور والصلاحيات، لأن معظم قرارات الواجهة (القائمة الجانبية،
-// إتاحة الأزرار...) تعتمد على تلك الصلاحيات.
-// ============================================================================
-
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
+import {
+  syncActiveCompanyFromServer,
+  clearActiveCompany,
+} from "../lib/activeCompany";
+import { clearCompanyIdCache } from "../lib/companyContext";
 import type { StaffUser, Role } from "../shared/types/database";
 
 interface StaffAuthState {
@@ -30,16 +28,31 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   async function loadStaffProfile(userId: string) {
-    const staffResponse = await supabase.from("staff_users").select("*").eq("id", userId).single();
-    const staff = staffResponse.data as StaffUser | null;
+    // منذ 0059: شخص واحد (auth_user_id) قد يملك أكثر من صف staff_users (مالك
+    // بعدة قواعد بيانات) — لهذا لم نعد نستخدم .single() هنا. الحالة الشائعة
+    // (100% من المستخدمين اليوم، وكل موظف مستقبلاً بلا استثناء) تبقى صفاً
+    // واحداً فقط فيُختار مباشرة؛ عند التعدد نُفضّل القاعدة المحفوظة محلياً من
+    // آخر اختيار (شاشة اختيار القاعدة)، وإلا الأقدم إنشاءً كتراجع آمن.
+    const staffResponse = await supabase.from("staff_users").select("*").eq("auth_user_id", userId);
+    const staffRows = (staffResponse.data as StaffUser[] | null) ?? [];
 
-    if (staffResponse.error || !staff) {
-      // مستخدم موجود في Supabase Auth لكن بلا صف staff_users مرتبط —
-      // حالة غير طبيعية (ربما جهاز Kiosk سجّل دخول هنا بالخطأ)
+    if (staffResponse.error || staffRows.length === 0) {
       setStaffUser(null);
       setRole(null);
       setError("staffAuth.notLinked");
       return;
+    }
+
+    let staff = staffRows[0];
+    if (staffRows.length > 1) {
+      const savedCompanyId = (() => {
+        try {
+          return localStorage.getItem("anixos_active_company_id");
+        } catch {
+          return null;
+        }
+      })();
+      staff = staffRows.find((s) => s.company_id === savedCompanyId) ?? staffRows[0];
     }
 
     setStaffUser(staff);
@@ -47,6 +60,10 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
 
     const roleResponse = await supabase.from("roles").select("*").eq("id", staff.role_id).single();
     setRole((roleResponse.data as Role | null) ?? null);
+
+    // مزامنة القاعدة النشطة من السيرفر (best-effort) — تُكتب في localStorage
+    // ليقرأها AppRouter فورًا. لا تنتظر النتيجة (لا تُعطِّل تحميل الملف).
+    void syncActiveCompanyFromServer(userId);
   }
 
   useEffect(() => {
@@ -90,6 +107,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    clearActiveCompany();
+    clearCompanyIdCache();
     await supabase.auth.signOut();
     setStaffUser(null);
     setRole(null);

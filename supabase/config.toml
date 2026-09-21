@@ -30,3 +30,12 @@ enabled = true
 
 [functions.worker-login]
 verify_jwt = false
+
+[functions.worker-planning-access]
+verify_jwt = false
+
+[functions.paddle-webhook]
+verify_jwt = false
+
+[functions.create-checkout-session]
+verify_jwt = true

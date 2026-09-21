@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
     // الخطوة 4: ربط الموظف (المالك) بالشركة
     // ------------------------------------------------------------------
     const { error: staffError } = await adminClient.from("staff_users").insert({
-      id: createdAuthUserId,
+      auth_user_id: createdAuthUserId,
       company_id: company.id,
       role_id: ownerRole.id,
       full_name: owner_full_name,

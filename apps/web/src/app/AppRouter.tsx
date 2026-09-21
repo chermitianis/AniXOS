@@ -1,32 +1,21 @@
-// ============================================================================
-// AppRouter: يُطبِّق سيناريو "أول فتحة" بالكامل كما اتُّفق عليه:
-//
-//   1) لا يوجد device_mode محلي بعد:
-//        - لا يوجد موظف مسجّل دخول → CreateCompanyPage أو StaffLoginPage
-//        - يوجد موظف مسجّل دخول لكن الجهاز لم يُحدَّد بعد → DeviceRoleSelectionPage
-//   2) device_mode = 'kiosk' → KioskRouter مباشرة (بلا أي شاشة إدارية إطلاقاً)
-//   3) device_mode = 'admin' → شاشة دخول موظف عادية ثم مساحة العمل الإدارية
-//
-// كلا المسارين (2) و(3) يمران عبر SubscriptionGate أولاً — يحجب الوصول فقط
-// عند انتهاء الفترة التجريبية/الاشتراك (البيانات تبقى محفوظة كاملة).
-// ============================================================================
-
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StaffAuthProvider, useStaffAuth } from "../auth/StaffAuthContext";
 import { getLocalDeviceMode } from "../lib/deviceContext";
-import { CreateCompanyPage } from "../modules/setup/pages/CreateCompanyPage";
+import { getActiveCompanyIdSync } from "../lib/activeCompany";
+import { CreateAccountPage } from "../modules/setup/pages/CreateAccountPage";
 import { StaffLoginPage } from "../modules/setup/pages/StaffLoginPage";
 import { DeviceRoleSelectionPage } from "../modules/setup/pages/DeviceRoleSelectionPage";
+import { DatabaseSelectorPage } from "../modules/setup/pages/DatabaseSelectorPage";
+import { DatabasesManagerPage } from "../modules/setup/pages/DatabasesManagerPage";
 import { KioskRouter } from "../modules/kiosk/pages/KioskRouter";
 import { WorkerSessionProvider } from "../auth/WorkerSessionContext";
 import { AdminHomePage } from "../modules/setup/pages/AdminHomePage";
+import { SubscriptionPage } from "../modules/subscription/pages/SubscriptionPage";
+import { DeveloperPanelPage } from "../modules/developer/pages/DeveloperPanelPage";
 import { SubscriptionGate } from "./SubscriptionGate";
 
 export function AppRouter() {
-  // القرار الأول والأهم: هل هذا الجهاز Kiosk أصلاً؟ إن كان كذلك، لا داعي
-  // لتحميل أي من منطق المصادقة الإدارية (StaffAuthProvider) إطلاقاً —
-  // الكشك يعتمد فقط على جلسة الجهاز الدائمة + جلسة العامل المنطقية.
   const deviceMode = getLocalDeviceMode();
 
   if (deviceMode === "kiosk") {
@@ -39,8 +28,6 @@ export function AppRouter() {
     );
   }
 
-  // بقية الحالات (جهاز إداري، أو جهاز لم يُحدَّد دوره بعد) تحتاج طبقة
-  // المصادقة الإدارية لأنها جميعاً تمر عبر تسجيل دخول موظف أولاً
   return (
     <StaffAuthProvider>
       <StaffFlowRouter />
@@ -52,8 +39,17 @@ function StaffFlowRouter() {
   const { t } = useTranslation();
   const { session, isLoading, signOut } = useStaffAuth();
   const [authView, setAuthView] = useState<"login" | "create">("login");
-  // إعادة عرض بعد تسجيل جهاز إداري بنجاح (لا يحتاج تبديل جلسة، فقط إعادة قراءة الحالة)
   const [, forceRerender] = useState(0);
+  const [showSubscription, setShowSubscription] = useState(false);
+  const [showDeveloperPanel, setShowDeveloperPanel] = useState(false);
+  const [showDatabasesManager, setShowDatabasesManager] = useState(false);
+
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => getActiveCompanyIdSync());
+
+  const refreshActiveCompany = useCallback(() => {
+    setActiveCompanyId(getActiveCompanyIdSync());
+    forceRerender((n) => n + 1);
+  }, []);
 
   if (isLoading) {
     return (
@@ -65,7 +61,10 @@ function StaffFlowRouter() {
 
   if (!session) {
     return authView === "create" ? (
-      <CreateCompanyPage onCreated={() => forceRerender((n) => n + 1)} onSwitchToLogin={() => setAuthView("login")} />
+      <CreateAccountPage
+        onCreated={() => forceRerender((n) => n + 1)}
+        onSwitchToLogin={() => setAuthView("login")}
+      />
     ) : (
       <StaffLoginPage onSwitchToCreateCompany={() => setAuthView("create")} />
     );
@@ -77,11 +76,40 @@ function StaffFlowRouter() {
     return <DeviceRoleSelectionPage onRegistered={() => forceRerender((n) => n + 1)} />;
   }
 
-  // deviceMode === "admin" من هنا فصاعداً (حالة "kiosk" عولجت في AppRouter
-  // نفسه قبل الوصول لهذا المكوّن أصلاً)
+  if (!activeCompanyId) {
+    return (
+      <DatabaseSelectorPage
+        onSelected={refreshActiveCompany}
+        onLogout={() => void signOut()}
+      />
+    );
+  }
+
+  // Panneau développeur (state-based, avant SubscriptionGate car il n'y est pas soumis)
+  if (showDeveloperPanel) {
+    return <DeveloperPanelPage onBack={() => setShowDeveloperPanel(false)} />;
+  }
+
+  // Page d'abonnement dédiée
+  if (showSubscription) {
+    return <SubscriptionPage onBack={() => setShowSubscription(false)} />;
+  }
+
+  // Page de gestion des bases de données (multi-database)
+  if (showDatabasesManager) {
+    return <DatabasesManagerPage onBack={() => setShowDatabasesManager(false)} />;
+  }
+
   return (
-    <SubscriptionGate onLogout={() => void signOut()}>
-      <AdminHomePage />
+    <SubscriptionGate
+      onLogout={() => void signOut()}
+      onRenew={() => setShowSubscription(true)}
+    >
+      <AdminHomePage
+        onNavigateToSubscription={() => setShowSubscription(true)}
+        onNavigateToDeveloperPanel={() => setShowDeveloperPanel(true)}
+        onNavigateToDatabasesManager={() => setShowDatabasesManager(true)}
+      />
     </SubscriptionGate>
   );
 }

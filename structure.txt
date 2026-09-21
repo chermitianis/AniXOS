@@ -1,264 +1,353 @@
-.vscode
-apps
-docs
-supabase
-.gitignore
-structure.txt
-.vscode\settings.json
-apps\web
-apps\web\dist
-apps\web\node_modules
-apps\web\public
-apps\web\src
-apps\web\.env
-apps\web\.gitignore
-apps\web\.oxlintrc.json
-apps\web\index.html
-apps\web\package-lock.json
-apps\web\package.json
-apps\web\postcss.config.js
-apps\web\README.md
-apps\web\tsconfig.app.json
-apps\web\tsconfig.json
-apps\web\tsconfig.node.json
-apps\web\vite.config.ts
-apps\web\dist\assets
-apps\web\dist\apple-touch-icon.png
-apps\web\dist\favicon.svg
-apps\web\dist\generate.html
-apps\web\dist\icon-1254.png
-apps\web\dist\icon-128.png
-apps\web\dist\icon-144.png
-apps\web\dist\icon-152.png
-apps\web\dist\icon-192.png
-apps\web\dist\icon-384.png
-apps\web\dist\icon-512.png
-apps\web\dist\icon-72.png
-apps\web\dist\icon-96.png
-apps\web\dist\icons.svg
-apps\web\dist\index.html
-apps\web\dist\manifest.webmanifest
-apps\web\dist\registerSW.js
-apps\web\dist\sw.js
-apps\web\dist\workbox-efbd304a.js
-apps\web\dist\assets\index-C9KhX7dx.css
-apps\web\dist\assets\index-CekSq1GX.js
-apps\web\public\apple-touch-icon.png
-apps\web\public\favicon.svg
-apps\web\public\icon-1254.png
-apps\web\public\icon-128.png
-apps\web\public\icon-144.png
-apps\web\public\icon-152.png
-apps\web\public\icon-192.png
-apps\web\public\icon-384.png
-apps\web\public\icon-512.png
-apps\web\public\icon-72.png
-apps\web\public\icon-96.png
-apps\web\public\icons.svg
-apps\web\src\app
-apps\web\src\assets
-apps\web\src\auth
-apps\web\src\i18n
-apps\web\src\lib
-apps\web\src\locales
-apps\web\src\modules
-apps\web\src\shared
-apps\web\src\styles
-apps\web\src\types
-apps\web\src\App.tsx
-apps\web\src\index.css
-apps\web\src\main.tsx
-apps\web\src\vite-env.d.ts
-apps\web\src\app\AppRouter.tsx
-apps\web\src\app\SubscriptionGate.tsx
-apps\web\src\assets\hero.png
-apps\web\src\assets\vite.svg
-apps\web\src\auth\permissions.ts
-apps\web\src\auth\StaffAuthContext.tsx
-apps\web\src\auth\WorkerSessionContext.tsx
-apps\web\src\i18n\config.ts
-apps\web\src\lib\companyContext.ts
-apps\web\src\lib\connectivity.ts
-apps\web\src\lib\credentialsSync.ts
-apps\web\src\lib\deviceContext.ts
-apps\web\src\lib\ephemeralAuthClient.ts
-apps\web\src\lib\localDb.ts
-apps\web\src\lib\supabaseClient.ts
-apps\web\src\lib\syncEngine.ts
-apps\web\src\lib\syncQueue.ts
-apps\web\src\locales\ar
-apps\web\src\locales\en
-apps\web\src\locales\fr
-apps\web\src\locales\ar\translation.json
-apps\web\src\locales\en\translation.json
-apps\web\src\locales\fr\translation.json
-apps\web\src\modules\accounting
-apps\web\src\modules\admin
-apps\web\src\modules\crm
-apps\web\src\modules\engineering
-apps\web\src\modules\hr
-apps\web\src\modules\inventory
-apps\web\src\modules\kiosk
-apps\web\src\modules\manager
-apps\web\src\modules\nomenclature
-apps\web\src\modules\planning
-apps\web\src\modules\procurement
-apps\web\src\modules\reports
-apps\web\src\modules\sales
-apps\web\src\modules\settings
-apps\web\src\modules\setup
-apps\web\src\modules\kiosk\api
-apps\web\src\modules\kiosk\components
-apps\web\src\modules\kiosk\hooks
-apps\web\src\modules\kiosk\pages
-apps\web\src\modules\kiosk\api\kioskApi.ts
-apps\web\src\modules\kiosk\components\ContextBar.tsx
-apps\web\src\modules\kiosk\components\EventLogTab.tsx
-apps\web\src\modules\kiosk\components\FooterBar.tsx
-apps\web\src\modules\kiosk\components\LogoutConfirmModal.tsx
-apps\web\src\modules\kiosk\components\MachineToolsModal.tsx
-apps\web\src\modules\kiosk\components\ManagerDeviceResetModal.tsx
-apps\web\src\modules\kiosk\components\PassationPanel.tsx
-apps\web\src\modules\kiosk\components\PlanningOverviewModal.tsx
-apps\web\src\modules\kiosk\components\ProductionTasksGrid.tsx
-apps\web\src\modules\kiosk\components\ProjectPieceSelectorModal.tsx
-apps\web\src\modules\kiosk\components\ReclamationModal.tsx
-apps\web\src\modules\kiosk\components\SessionCorrectionModal.tsx
-apps\web\src\modules\kiosk\components\SidePanel.tsx
-apps\web\src\modules\kiosk\components\StopReasonsGrid.tsx
-apps\web\src\modules\kiosk\components\SummaryTab.tsx
-apps\web\src\modules\kiosk\components\TaskCard.tsx
-apps\web\src\modules\kiosk\components\TopNavBar.tsx
-apps\web\src\modules\kiosk\hooks\useActiveTask.ts
-apps\web\src\modules\kiosk\hooks\useActivityLog.ts
-apps\web\src\modules\kiosk\hooks\useOfflineSync.ts
-apps\web\src\modules\kiosk\hooks\usePieceHandoffsUnread.ts
-apps\web\src\modules\kiosk\hooks\useSessionSummary.ts
-apps\web\src\modules\kiosk\hooks\useSessionTimer.ts
-apps\web\src\modules\kiosk\hooks\useStopReasons.ts
-apps\web\src\modules\kiosk\hooks\useTaskTypes.ts
-apps\web\src\modules\kiosk\hooks\useWorkerPlanning.ts
-apps\web\src\modules\kiosk\pages\KioskMainPage.tsx
-apps\web\src\modules\kiosk\pages\KioskRouter.tsx
-apps\web\src\modules\kiosk\pages\WorkerLoginPage.tsx
-apps\web\src\modules\nomenclature\pages
-apps\web\src\modules\nomenclature\pages\NomenclatureEditorPage.tsx
-apps\web\src\modules\nomenclature\pages\NomenclatureListPage.tsx
-apps\web\src\modules\nomenclature\pages\NomenclaturePage.tsx
-apps\web\src\modules\reports\pages
-apps\web\src\modules\reports\pages\MachineReportTab.tsx
-apps\web\src\modules\reports\pages\ProjectsReportTab.tsx
-apps\web\src\modules\reports\pages\ReportsPage.tsx
-apps\web\src\modules\reports\pages\WorkerReportTab.tsx
-apps\web\src\modules\settings\components
-apps\web\src\modules\settings\pages
-apps\web\src\modules\settings\permissionModules.ts
-apps\web\src\modules\settings\components\SettingsGate.tsx
-apps\web\src\modules\settings\pages\DeviceSettingsPage.tsx
-apps\web\src\modules\settings\pages\RolesAdminPage.tsx
-apps\web\src\modules\settings\pages\SettingsPage.tsx
-apps\web\src\modules\settings\pages\StaffAdminPage.tsx
-apps\web\src\modules\setup\components
-apps\web\src\modules\setup\pages
-apps\web\src\modules\setup\steps
-apps\web\src\modules\setup\components\AdminField.tsx
-apps\web\src\modules\setup\components\ProjectReportModal.tsx
-apps\web\src\modules\setup\pages\AdminHomePage.tsx
-apps\web\src\modules\setup\pages\ArchivePage.tsx
-apps\web\src\modules\setup\pages\ClientsAdminPage.tsx
-apps\web\src\modules\setup\pages\CreateCompanyPage.tsx
-apps\web\src\modules\setup\pages\DeviceRoleSelectionPage.tsx
-apps\web\src\modules\setup\pages\InventoryAdminPage.tsx
-apps\web\src\modules\setup\pages\MachinesAdminPage.tsx
-apps\web\src\modules\setup\pages\ManagerDashboardPage.tsx
-apps\web\src\modules\setup\pages\ManufacturingOrdersAdminPage.tsx
-apps\web\src\modules\setup\pages\PlanningAdminPage.tsx
-apps\web\src\modules\setup\pages\ProjectsAdminPage.tsx
-apps\web\src\modules\setup\pages\SalesAdminPage.tsx
-apps\web\src\modules\setup\pages\StaffLoginPage.tsx
-apps\web\src\modules\setup\pages\StopReasonsAdminPage.tsx
-apps\web\src\modules\setup\pages\TaskTypesAdminPage.tsx
-apps\web\src\modules\setup\pages\WorkersAdminPage.tsx
-apps\web\src\modules\setup\pages\WorkshopInfoPage.tsx
-apps\web\src\shared\components
-apps\web\src\shared\constants
-apps\web\src\shared\layouts
-apps\web\src\shared\types
-apps\web\src\shared\utils
-apps\web\src\shared\components\LanguageSwitcher.tsx
-apps\web\src\shared\constants\materials.ts
-apps\web\src\shared\constants\toolTypes.ts
-apps\web\src\shared\types\database.ts
-apps\web\src\types\database.ts
-docs\architecture.md
-docs\ERD.md
-docs\RBAC_matrix.md
-supabase\.temp
-supabase\functions
-supabase\migrations
-supabase\config.toml
-supabase\seed.sql
-supabase\supabase.zip
-supabase\.temp\cli-latest
-supabase\.temp\gotrue-version
-supabase\.temp\linked-project.json
-supabase\.temp\pooler-url
-supabase\.temp\postgres-version
-supabase\.temp\project-ref
-supabase\.temp\rest-version
-supabase\.temp\storage-migration
-supabase\.temp\storage-version
-supabase\functions\accept-quote
-supabase\functions\generate-invoice
-supabase\functions\kiosk-credentials-sync
-supabase\functions\register-device
-supabase\functions\staff-invite
-supabase\functions\tenant-provisioning
-supabase\functions\worker-login
-supabase\functions\accept-quote\index.ts
-supabase\functions\generate-invoice\index.ts
-supabase\functions\kiosk-credentials-sync\index.ts
-supabase\functions\register-device\index.ts
-supabase\functions\staff-invite\index.ts
-supabase\functions\tenant-provisioning\index.ts
-supabase\functions\worker-login\index.ts
-supabase\migrations\0001_companies.sql
-supabase\migrations\0002_roles_permissions.sql
-supabase\migrations\0003_staff_users.sql
-supabase\migrations\0004_devices.sql
-supabase\migrations\0005_workers.sql
-supabase\migrations\0006_machines.sql
-supabase\migrations\0007_clients.sql
-supabase\migrations\0008_projects.sql
-supabase\migrations\0009_pieces_tasks.sql
-supabase\migrations\0010_task_types.sql
-supabase\migrations\0011_stop_reasons.sql
-supabase\migrations\0012_planning.sql
-supabase\migrations\0013_work_sessions.sql
-supabase\migrations\0014_activity_log.sql
-supabase\migrations\0015_odoo_config.sql
-supabase\migrations\0016_rls_helpers.sql
-supabase\migrations\0017_rls_policies.sql
-supabase\migrations\0018_worker_login_security.sql
-supabase\migrations\0019_workers_column_security.sql
-supabase\migrations\0020_manufacturing_orders.sql
-supabase\migrations\0021_inventory.sql
-supabase\migrations\0022_sales.sql
-supabase\migrations\0023_new_tables_rls.sql
-supabase\migrations\0024_reports_views.sql
-supabase\migrations\0025_workflow_linkage_columns.sql
-supabase\migrations\0026_completion_triggers.sql
-supabase\migrations\0027_piece_actuals_view.sql
-supabase\migrations\0028_subscription_trial.sql
-supabase\migrations\0029_nomenclature.sql
-supabase\migrations\0030_nomenclature_rls.sql
-supabase\migrations\0031_kiosk_tools_and_handoffs.sql
-supabase\migrations\0032_machine_tools_and_handoffs.sql
-supabase\migrations\0041_french_company_roles.sql
-supabase\migrations\0042_fix_role_rls_and_backfill.sql
-supabase\migrations\0043_fix_machine_tools_schema.sql
-supabase\migrations\0044_shifts_corrections_realtime.sql
-supabase\migrations\0045_unify_machine_tool_count.sql
-supabase\migrations\0046_shift_session_detail_view.sql
-supabase\migrations\0047_shift_piece_work.sql
-supabase\migrations\0048_tool_length_material_reclamations_maintenance.sql
+﻿
+AniXOS
+├── .github
+│   └── workflows
+│       └── ci.yml
+├── .vite
+│   └── deps
+│       ├── _metadata.json
+│       └── package.json
+├── .vscode
+│   └── settings.json
+├── apps
+│   └── web
+│       ├── public
+│       │   ├── apple-touch-icon.png
+│       │   ├── favicon.svg
+│       │   ├── icon-1254.png
+│       │   ├── icon-128.png
+│       │   ├── icon-144.png
+│       │   ├── icon-152.png
+│       │   ├── icon-192.png
+│       │   ├── icon-384.png
+│       │   ├── icon-512.png
+│       │   ├── icon-72.png
+│       │   ├── icon-96.png
+│       │   ├── icons.svg
+│       │   └── planning-manifest.webmanifest
+│       ├── src
+│       │   ├── app
+│       │   │   ├── AppRouter.tsx
+│       │   │   └── SubscriptionGate.tsx
+│       │   ├── assets
+│       │   │   ├── hero.png
+│       │   │   └── vite.svg
+│       │   ├── auth
+│       │   │   ├── permissions.ts
+│       │   │   ├── StaffAuthContext.tsx
+│       │   │   └── WorkerSessionContext.tsx
+│       │   ├── i18n
+│       │   │   └── config.ts
+│       │   ├── lib
+│       │   │   ├── activeCompany.ts
+│       │   │   ├── companyContext.ts
+│       │   │   ├── connectivity.ts
+│       │   │   ├── credentialsSync.ts
+│       │   │   ├── deviceContext.ts
+│       │   │   ├── ephemeralAuthClient.ts
+│       │   │   ├── localDb.ts
+│       │   │   ├── paddleConfig.ts
+│       │   │   ├── realtimeChannel.ts
+│       │   │   ├── supabaseClient.ts
+│       │   │   ├── syncEngine.ts
+│       │   │   └── syncQueue.ts
+│       │   ├── locales
+│       │   │   ├── ar
+│       │   │   │   └── translation.json
+│       │   │   ├── en
+│       │   │   │   └── translation.json
+│       │   │   └── fr
+│       │   │       └── translation.json
+│       │   ├── modules
+│       │   │   ├── accounting
+│       │   │   ├── admin
+│       │   │   ├── crm
+│       │   │   ├── developer
+│       │   │   │   ├── components
+│       │   │   │   │   ├── AccountDetailsModal.tsx
+│       │   │   │   │   ├── AccountsTab.tsx
+│       │   │   │   │   ├── AnalyticsTab.tsx
+│       │   │   │   │   ├── EventsTab.tsx
+│       │   │   │   │   ├── OverviewTab.tsx
+│       │   │   │   │   └── PricingTab.tsx
+│       │   │   │   └── pages
+│       │   │   │       └── DeveloperPanelPage.tsx
+│       │   │   ├── engineering
+│       │   │   ├── hr
+│       │   │   ├── inventory
+│       │   │   ├── kiosk
+│       │   │   │   ├── api
+│       │   │   │   │   └── kioskApi.ts
+│       │   │   │   ├── components
+│       │   │   │   │   ├── ContextBar.tsx
+│       │   │   │   │   ├── EventLogTab.tsx
+│       │   │   │   │   ├── FooterBar.tsx
+│       │   │   │   │   ├── LogoutConfirmModal.tsx
+│       │   │   │   │   ├── MachineToolsModal.tsx
+│       │   │   │   │   ├── ManagerDeviceResetModal.tsx
+│       │   │   │   │   ├── PassationPanel.tsx
+│       │   │   │   │   ├── PlanningOverviewModal.tsx
+│       │   │   │   │   ├── ProductionTasksGrid.tsx
+│       │   │   │   │   ├── ProjectPieceSelectorModal.tsx
+│       │   │   │   │   ├── ReclamationModal.tsx
+│       │   │   │   │   ├── SessionCorrectionModal.tsx
+│       │   │   │   │   ├── SidePanel.tsx
+│       │   │   │   │   ├── StopReasonsGrid.tsx
+│       │   │   │   │   ├── SummaryTab.tsx
+│       │   │   │   │   ├── TaskCard.tsx
+│       │   │   │   │   └── TopNavBar.tsx
+│       │   │   │   ├── hooks
+│       │   │   │   │   ├── useActiveTask.ts
+│       │   │   │   │   ├── useActivityLog.ts
+│       │   │   │   │   ├── useOfflineSync.ts
+│       │   │   │   │   ├── usePieceHandoffsUnread.ts
+│       │   │   │   │   ├── useSessionSummary.ts
+│       │   │   │   │   ├── useSessionTimer.ts
+│       │   │   │   │   ├── useStopReasons.ts
+│       │   │   │   │   ├── useTaskTypes.ts
+│       │   │   │   │   └── useWorkerPlanning.ts
+│       │   │   │   └── pages
+│       │   │   │       ├── KioskMainPage.tsx
+│       │   │   │       ├── KioskRouter.tsx
+│       │   │   │       └── WorkerLoginPage.tsx
+│       │   │   ├── manager
+│       │   │   ├── nomenclature
+│       │   │   │   ├── components
+│       │   │   │   │   └── CostingModal.tsx
+│       │   │   │   ├── defaults
+│       │   │   │   │   └── defaultTemplate.ts
+│       │   │   │   └── pages
+│       │   │   │       ├── CostingArchivePage.tsx
+│       │   │   │       ├── CostingPage.tsx
+│       │   │   │       ├── NomenclatureEditorPage.tsx
+│       │   │   │       ├── NomenclatureListPage.tsx
+│       │   │   │       └── NomenclaturePage.tsx
+│       │   │   ├── planning
+│       │   │   ├── procurement
+│       │   │   ├── reports
+│       │   │   │   ├── components
+│       │   │   │   │   ├── ChartCard.tsx
+│       │   │   │   │   ├── EmptyState.tsx
+│       │   │   │   │   ├── KpiCard.tsx
+│       │   │   │   │   └── PeriodSelector.tsx
+│       │   │   │   ├── pages
+│       │   │   │   │   ├── FinanceReportTab.tsx
+│       │   │   │   │   ├── MachinesReportTab.tsx
+│       │   │   │   │   ├── OverviewTab.tsx
+│       │   │   │   │   ├── ProjectsReportTab.tsx
+│       │   │   │   │   ├── ReportsPage.tsx
+│       │   │   │   │   └── WorkersReportTab.tsx
+│       │   │   │   └── types.ts
+│       │   │   ├── sales
+│       │   │   ├── settings
+│       │   │   │   ├── components
+│       │   │   │   │   ├── OdooActivationModal.tsx
+│       │   │   │   │   ├── OdooIntegrationPanel.tsx
+│       │   │   │   │   ├── PlanningQrSecurityCard.tsx
+│       │   │   │   │   └── SettingsGate.tsx
+│       │   │   │   ├── hooks
+│       │   │   │   │   └── useOdooConfig.ts
+│       │   │   │   ├── pages
+│       │   │   │   │   ├── DatabasePage.tsx
+│       │   │   │   │   ├── DeviceSettingsPage.tsx
+│       │   │   │   │   ├── RolesAdminPage.tsx
+│       │   │   │   │   ├── SettingsPage.tsx
+│       │   │   │   │   └── StaffAdminPage.tsx
+│       │   │   │   └── permissionModules.ts
+│       │   │   ├── setup
+│       │   │   │   ├── components
+│       │   │   │   │   ├── AdminField.tsx
+│       │   │   │   │   ├── CreateDatabaseModal.tsx
+│       │   │   │   │   ├── DeleteDatabaseModal.tsx
+│       │   │   │   │   ├── ProjectReportModal.tsx
+│       │   │   │   │   └── ReclamationsBell.tsx
+│       │   │   │   ├── pages
+│       │   │   │   │   ├── AdminHomePage.tsx
+│       │   │   │   │   ├── ArchivePage.tsx
+│       │   │   │   │   ├── ClientsAdminPage.tsx
+│       │   │   │   │   ├── CreateAccountPage.tsx
+│       │   │   │   │   ├── CreateCompanyPage.tsx
+│       │   │   │   │   ├── DatabaseSelectorPage.tsx
+│       │   │   │   │   ├── DatabasesManagerPage.tsx
+│       │   │   │   │   ├── DeviceRoleSelectionPage.tsx
+│       │   │   │   │   ├── InventoryAdminPage.tsx
+│       │   │   │   │   ├── MachinesAdminPage.tsx
+│       │   │   │   │   ├── ManagerDashboardPage.tsx
+│       │   │   │   │   ├── ManufacturingOrdersAdminPage.tsx
+│       │   │   │   │   ├── OperationsAdminPage.tsx
+│       │   │   │   │   ├── PlanningAdminPage.tsx
+│       │   │   │   │   ├── ProjectsAdminPage.tsx
+│       │   │   │   │   ├── SalesAdminPage.tsx
+│       │   │   │   │   ├── StaffLoginPage.tsx
+│       │   │   │   │   ├── StopReasonsAdminPage.tsx
+│       │   │   │   │   ├── TaskTypesAdminPage.tsx
+│       │   │   │   │   ├── WorkersAdminPage.tsx
+│       │   │   │   │   └── WorkshopInfoPage.tsx
+│       │   │   │   └── steps
+│       │   │   ├── subscription
+│       │   │   │   ├── components
+│       │   │   │   │   ├── BillingToggle.tsx
+│       │   │   │   │   └── PlanCard.tsx
+│       │   │   │   └── pages
+│       │   │   │       └── SubscriptionPage.tsx
+│       │   │   └── worker-planning
+│       │   │       ├── api
+│       │   │       │   └── workerPlanningApi.ts
+│       │   │       ├── context
+│       │   │       │   └── PlanningSessionContext.tsx
+│       │   │       └── pages
+│       │   │           ├── WorkerPlanningApp.tsx
+│       │   │           ├── WorkerPlanningHomePage.tsx
+│       │   │           └── WorkerPlanningQRScannerPage.tsx
+│       │   ├── shared
+│       │   │   ├── components
+│       │   │   │   ├── AppLogo.tsx
+│       │   │   │   └── LanguageSwitcher.tsx
+│       │   │   ├── constants
+│       │   │   │   ├── materials.ts
+│       │   │   │   └── toolTypes.ts
+│       │   │   ├── layouts
+│       │   │   ├── types
+│       │   │   │   └── database.ts
+│       │   │   └── utils
+│       │   │       └── planningQrToken.ts
+│       │   ├── styles
+│       │   ├── types
+│       │   │   └── database.ts
+│       │   ├── App.tsx
+│       │   ├── index.css
+│       │   ├── main.tsx
+│       │   └── vite-env.d.ts
+│       ├── .env.local
+│       ├── .env.local.example
+│       ├── .gitignore
+│       ├── .oxlintrc.json
+│       ├── index.html
+│       ├── package.json
+│       ├── package-lock.json
+│       ├── postcss.config.js
+│       ├── README.md
+│       ├── tsconfig.app.json
+│       ├── tsconfig.json
+│       ├── tsconfig.node.json
+│       └── vite.config.ts
+├── docs
+│   ├── MASTER_DOCUMENTATION_part1.md
+│   ├── MASTER_DOCUMENTATION_part2.md
+│   └── MISSION_worker_planning_pwa.md
+├── supabase
+│   ├── .temp
+│   │   ├── .supabase-output-create-checkout-session-54O2W7
+│   │   ├── cli-latest
+│   │   ├── gotrue-version
+│   │   ├── linked-project.json
+│   │   ├── pooler-url
+│   │   ├── postgres-version
+│   │   ├── project-ref
+│   │   ├── rest-version
+│   │   ├── storage-migration
+│   │   └── storage-version
+│   ├── functions
+│   │   ├── accept-quote
+│   │   │   └── index.ts
+│   │   ├── create-account
+│   │   │   └── index.ts
+│   │   ├── create-checkout-session
+│   │   │   └── index.ts
+│   │   ├── create-database
+│   │   │   └── index.ts
+│   │   ├── delete-database
+│   │   │   └── index.ts
+│   │   ├── dev-delete-account
+│   │   │   └── index.ts
+│   │   ├── dev-update-account
+│   │   │   └── index.ts
+│   │   ├── generate-invoice
+│   │   │   └── index.ts
+│   │   ├── kiosk-credentials-sync
+│   │   │   └── index.ts
+│   │   ├── paddle-webhook
+│   │   │   └── index.ts
+│   │   ├── register-device
+│   │   │   └── index.ts
+│   │   ├── staff-invite
+│   │   │   └── index.ts
+│   │   ├── sync-odoo-pull
+│   │   │   └── index.ts
+│   │   ├── sync-odoo-push
+│   │   │   └── index.ts
+│   │   ├── tenant-provisioning
+│   │   │   └── index.ts
+│   │   ├── test-odoo-connection
+│   │   │   └── index.ts
+│   │   ├── worker-login
+│   │   │   └── index.ts
+│   │   ├── worker-planning-access
+│   │   │   └── index.ts
+│   │   ├── .env
+│   │   └── .env.example
+│   ├── migrations
+│   │   ├── 0001_companies.sql
+│   │   ├── 0002_roles_permissions.sql
+│   │   ├── 0003_staff_users.sql
+│   │   ├── 0004_devices.sql
+│   │   ├── 0005_workers.sql
+│   │   ├── 0006_machines.sql
+│   │   ├── 0007_clients.sql
+│   │   ├── 0008_projects.sql
+│   │   ├── 0009_pieces_tasks.sql
+│   │   ├── 0010_task_types.sql
+│   │   ├── 0011_stop_reasons.sql
+│   │   ├── 0012_planning.sql
+│   │   ├── 0013_work_sessions.sql
+│   │   ├── 0014_activity_log.sql
+│   │   ├── 0015_odoo_config.sql
+│   │   ├── 0016_rls_helpers.sql
+│   │   ├── 0017_rls_policies.sql
+│   │   ├── 0018_worker_login_security.sql
+│   │   ├── 0019_workers_column_security.sql
+│   │   ├── 0020_manufacturing_orders.sql
+│   │   ├── 0021_inventory.sql
+│   │   ├── 0022_sales.sql
+│   │   ├── 0023_new_tables_rls.sql
+│   │   ├── 0024_reports_views.sql
+│   │   ├── 0025_workflow_linkage_columns.sql
+│   │   ├── 0026_completion_triggers.sql
+│   │   ├── 0027_piece_actuals_view.sql
+│   │   ├── 0028_subscription_trial.sql
+│   │   ├── 0029_nomenclature.sql
+│   │   ├── 0030_nomenclature_rls.sql
+│   │   ├── 0031_kiosk_tools_and_handoffs.sql
+│   │   ├── 0032_machine_tools_and_handoffs.sql
+│   │   ├── 0041_french_company_roles.sql
+│   │   ├── 0042_fix_role_rls_and_backfill.sql
+│   │   ├── 0043_fix_machine_tools_schema.sql
+│   │   ├── 0044_shifts_corrections_realtime.sql
+│   │   ├── 0045_unify_machine_tool_count.sql
+│   │   ├── 0046_shift_session_detail_view.sql
+│   │   ├── 0047_shift_piece_work.sql
+│   │   ├── 0048_tool_length_material_reclamations_maintenance.sql
+│   │   ├── 0049_live_operations_production_only.sql
+│   │   ├── 0050_live_operations_add_piece.sql
+│   │   ├── 0051_workshop_reclamations_read_tracking.sql
+│   │   ├── 0052_clients_auto_code.sql
+│   │   ├── 0053_nomenclature_costing.sql
+│   │   ├── 0054_planning_shift_and_mo.sql
+│   │   ├── 0055_nomenclature_stages_and_cnc.sql
+│   │   ├── 0056_permissions_operations_key_fix.sql
+│   │   ├── 0057_live_operations_by_shift.sql
+│   │   ├── 0058_piece_actuals_estimated_cost.sql
+│   │   ├── 0059_accounts_and_databases.sql
+│   │   ├── 0060_platform_settings.sql
+│   │   ├── 0061_machine_report_view.sql
+│   │   ├── 0062_fix_auth_company_id.sql
+│   │   ├── 0063_harden_insert_policies.sql
+│   │   ├── 0064_odoo_config_extend.sql
+│   │   ├── 0065_odoo_sync_tracking.sql
+│   │   ├── 0066_odoo_sync_modules_extend.sql
+│   │   └── 0067_worker_planning_qr.sql
+│   ├── config.toml
+│   ├── seed.sql
+│   └── supabase.zip
+├── .gitignore
+└── structure.txt

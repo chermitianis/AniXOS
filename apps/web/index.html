@@ -5,6 +5,26 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>ANIXOS</title>
+    <script>
+      // La PWA "Planning opérateur" (/planning) a son propre manifest dédié
+      // (nom, icône logique, start_url) — cf. Mission 1. On le substitue au
+      // manifest principal injecté par vite-plugin-pwa AVANT que le
+      // navigateur n'évalue l'installabilité de la page, pour que "Ajouter à
+      // l'écran d'accueil" propose bien la bonne fiche d'app sur cette route.
+      if (window.location.pathname.startsWith("/planning")) {
+        document.addEventListener("DOMContentLoaded", function () {
+          var link = document.querySelector('link[rel="manifest"]');
+          if (link) {
+            link.setAttribute("href", "/planning-manifest.webmanifest");
+          } else {
+            var newLink = document.createElement("link");
+            newLink.rel = "manifest";
+            newLink.href = "/planning-manifest.webmanifest";
+            document.head.appendChild(newLink);
+          }
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

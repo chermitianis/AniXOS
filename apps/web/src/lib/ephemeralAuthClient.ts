@@ -39,21 +39,23 @@ export async function verifyManagerCredentials(
     return { success: false, message: "تعذر التحقق من الهوية" };
   }
 
-  const { data: staff, error: staffError } = await ephemeralClient
+  // منذ 0059: شخص واحد قد يملك أكثر من صف staff_users (مالك بعدة قواعد) —
+  // .maybeSingle() لم يعد آمناً هنا (يفشل عند أكثر من صف). نتحقق بدل ذلك من
+  // وجود صلاحية settings:edit في أيٍّ من شركاته (كافٍ لهذه البوابة الخاصة
+  // بإعادة تهيئة جهاز الكشك؛ ربطها بشركة الجهاز تحديداً موضوع لاحق).
+  const { data: staffRows, error: staffError } = await ephemeralClient
     .from("staff_users")
     .select("is_owner, roles(permissions)")
-    .eq("id", user.id)
-    .maybeSingle();
+    .eq("auth_user_id", user.id);
 
-  if (staffError || !staff) {
+  if (staffError || !staffRows || staffRows.length === 0) {
     return { success: false, message: "هذا الحساب ليس حساب موظف إداري في هذه الشركة" };
   }
 
-  const permissions = (staff.roles as unknown as { permissions?: Record<string, string[]> } | null)?.permissions;
-  const hasSettingsAccess =
-    staff.is_owner ||
-    permissions?.["all"]?.includes("edit") ||
-    permissions?.["settings"]?.includes("edit");
+  const hasSettingsAccess = staffRows.some((staff) => {
+    const permissions = (staff.roles as unknown as { permissions?: Record<string, string[]> } | null)?.permissions;
+    return staff.is_owner || permissions?.["all"]?.includes("edit") || permissions?.["settings"]?.includes("edit");
+  });
 
   if (!hasSettingsAccess) {
     return { success: false, message: "هذا الحساب لا يملك صلاحية تعديل إعدادات الجهاز" };

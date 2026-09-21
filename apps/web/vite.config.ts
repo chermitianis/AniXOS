@@ -11,6 +11,7 @@ export default defineConfig({
       includeAssets: [
         'favicon.svg',
         'icons.svg',
+        'planning-manifest.webmanifest',
         'apple-touch-icon.png',
         'icon-72.png',
         'icon-96.png',

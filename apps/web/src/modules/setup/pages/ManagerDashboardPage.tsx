@@ -6,20 +6,25 @@ import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import type { ProjectProfitability, InventoryItem } from "../../../shared/types/database";
 
-/** صف من v_live_operations — نُعرّفه محلياً (بدل الاعتماد على النوع المولّد
- * القديم) لأنه يتضمن الآن عمود piece_name المُضاف في migration 0050 */
+/** صف من v_live_operations (migration 0057) — نُعرّفه محلياً لأنه يعتمد الآن
+ * على تسجيل الدخول (work_shifts) لا الجلسة النشطة فقط: session_id/session_type
+ * يكونان null إن كان العامل متصلاً بلا مهمة جارية بعد */
 interface LiveOperationRow {
-  session_id: string;
+  shift_id: string;
   worker_id: string;
   worker_name: string;
+  shift_started_at: string;
+  session_id: string | null;
+  session_type: "production" | "downtime" | null;
+  started_at: string | null;
   machine_id: string | null;
   machine_name: string | null;
   project_id: string | null;
   project_name: string | null;
   piece_task_id: string | null;
   piece_name: string | null;
-  started_at: string;
-  elapsed_seconds: number | null;
+  task_type_name: string | null;
+  stop_reason_name: string | null;
 }
 
 const RISK_LABEL_KEYS: Record<string, { key: string; className: string }> = {
@@ -38,6 +43,13 @@ function formatElapsed(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
+/** ثوانٍ منقضية منذ تاريخ ISO، محسوبة لحظياً عند العرض (بلا الحاجة لعمود
+ * محسوب في القاعدة، ولا لمؤقّت دوري — الصفحة تُحدَّث فورياً عبر Realtime
+ * وكل 15 ثانية احتياطياً، وهو كافٍ لعرض "منذ متى" بدقة معقولة). */
+function elapsedSecondsSince(iso: string): number {
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+}
+
 export function ManagerDashboardPage() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
@@ -49,7 +61,7 @@ export function ManagerDashboardPage() {
   const loadDashboard = useCallback(async () => {
     const [{ data: profit }, { data: live }, { data: stock }] = await Promise.all([
       supabase.from("v_project_profitability").select("*").order("net_profit", { ascending: true }),
-      supabase.from("v_live_operations").select("*").order("started_at", { ascending: false }),
+      supabase.from("v_live_operations").select("*").order("shift_started_at", { ascending: false }),
       supabase.from("v_inventory_low_stock").select("*"),
     ]);
 
@@ -66,15 +78,21 @@ export function ManagerDashboardPage() {
     return () => clearInterval(interval);
   }, [loadDashboard]);
 
-  // بث حي: أي بداية/نهاية جلسة إنتاج (دخول/خروج عامل، تبديل مهمة) تُحدّث
-  // "المشاهدة الحية" فوراً — بلا انتظار الـ 15 ثانية — لتختفي الجلسة مباشرة
-  // من اللوحة عند تسجيل الخروج
+  // بث حي: أي دخول/خروج عامل (work_shifts) أو بداية/نهاية/تبديل مهمة
+  // (work_sessions) يُحدّث "المشاهدة الحية" فوراً — بلا انتظار الـ 15 ثانية.
+  // الاشتراك بـwork_shifts ضروري الآن: عامل يسجّل دخوله بلا بدء أي مهمة بعد
+  // كان سيبقى غائباً عن اللوحة حتى أول تحديث دوري لولا هذا الاشتراك
   useEffect(() => {
     if (!staffUser?.company_id) return;
     const channel = createSafeChannel(`live-ops-${staffUser.company_id}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "work_sessions", filter: `company_id=eq.${staffUser.company_id}` },
+        () => void loadDashboard()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "work_shifts", filter: `company_id=eq.${staffUser.company_id}` },
         () => void loadDashboard()
       )
       .subscribe();
@@ -130,27 +148,55 @@ export function ManagerDashboardPage() {
           <p className="text-sm text-slate-400">{t("setup.noLiveOperations")}</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {liveOps.map((op) => (
-              <li key={op.session_id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <div className="flex items-center gap-2">
-                  {/* نقطة نابضة: تؤكد بصرياً أن هذا نشاط إنتاجي حي الآن على آلة، وليس مجرد جلسة مفتوحة */}
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
-                  </span>
-                  <span className="font-semibold text-slate-700">{op.worker_name}</span>
-                  <span className="text-slate-400">
-                    {op.machine_name && `— ${op.machine_name}`} {op.project_name && `— ${op.project_name}`}
-                    {op.piece_name && (
-                      <span className="ms-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">{op.piece_name}</span>
-                    )}
-                  </span>
-                </div>
-                <span className="text-xs text-slate-400" dir="ltr">
-                  {formatElapsed(op.elapsed_seconds ?? 0)}
-                </span>
-              </li>
-            ))}
+            {[...liveOps]
+              .sort((a, b) => {
+                const rank = (r: LiveOperationRow) => (r.session_type === "production" ? 0 : r.session_type === "downtime" ? 1 : 2);
+                return rank(a) - rank(b) || new Date(b.shift_started_at).getTime() - new Date(a.shift_started_at).getTime();
+              })
+              .map((op) => {
+                const isProduction = op.session_type === "production";
+                const isDowntime = op.session_type === "downtime";
+                const dotColor = isProduction ? "bg-blue-500" : isDowntime ? "bg-amber-500" : "bg-slate-300";
+                const pingColor = isProduction ? "bg-blue-400" : isDowntime ? "bg-amber-400" : "";
+                const currentEventLabel = isProduction
+                  ? op.task_type_name ?? t("setup.inProduction")
+                  : isDowntime
+                    ? op.stop_reason_name ?? t("setup.inDowntime")
+                    : t("setup.workerLoggedInWaiting");
+                const elapsed = elapsedSecondsSince(op.started_at ?? op.shift_started_at);
+                return (
+                  <li key={op.shift_id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      {/* نقطة نابضة زرقاء = عملية إنتاج جارية، كهرمانية = في توقف، رمادية ثابتة = متصل فقط بانتظار بدء مهمة */}
+                      <span className="relative flex h-2 w-2">
+                        {pingColor && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pingColor} opacity-75`} />}
+                        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
+                      </span>
+                      <span className="font-semibold text-slate-700">{op.worker_name}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          isProduction
+                            ? "bg-blue-50 text-blue-600"
+                            : isDowntime
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {currentEventLabel}
+                      </span>
+                      <span className="text-slate-400">
+                        {op.machine_name && `— ${op.machine_name}`} {op.project_name && `— ${op.project_name}`}
+                        {op.piece_name && (
+                          <span className="ms-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">{op.piece_name}</span>
+                        )}
+                      </span>
+                    </div>
+                    <span className="text-xs text-slate-400" dir="ltr">
+                      {formatElapsed(elapsed)}
+                    </span>
+                  </li>
+                );
+              })}
           </ul>
         )}
       </div>

@@ -12,6 +12,9 @@ interface PieceActual {
   estimated_time_minutes: number | null;
   actual_time_minutes: number;
   actual_cost: number;
+  /** تكلفة usinage CNC التقديرية، مأخوذة تلقائياً من جدول دراسة المشروع
+   * (migration 0055/0058) — أساس المقارنة المباشرة مع actual_cost */
+  estimated_cost: number | null;
 }
 
 interface SessionDetail {
@@ -100,6 +103,7 @@ export function ProjectReportModal({ projectId, onClose }: ProjectReportModalPro
 
   const totalActualMinutes = pieces.reduce((sum, p) => sum + p.actual_time_minutes, 0);
   const totalActualCost = pieces.reduce((sum, p) => sum + p.actual_cost, 0);
+  const totalEstimatedCost = pieces.reduce((sum, p) => sum + (p.estimated_cost ?? 0), 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -160,12 +164,16 @@ export function ProjectReportModal({ projectId, onClose }: ProjectReportModalPro
                     <th className="px-3 py-2.5 text-start">{t("setup.piece")}</th>
                     <th className="px-3 py-2.5 text-start">{t("common.active")}</th>
                     <th className="px-3 py-2.5 text-left">{t("setup.estimated")}</th>
+                    <th className="px-3 py-2.5 text-left">{t("setup.estimatedCost")}</th>
                     <th className="px-3 py-2.5 text-left">{t("setup.actual")}</th>
                     <th className="px-3 py-2.5 text-left">{t("setup.cost")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pieces.map((p) => (
+                  {pieces.map((p) => {
+                    const hasBothCosts = p.estimated_cost !== null && p.estimated_cost > 0;
+                    const isOverBudget = hasBothCosts && p.actual_cost > (p.estimated_cost ?? 0);
+                    return (
                     <tr key={p.piece_task_id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
                       <td className="px-3 py-2.5 text-start font-semibold text-slate-700">{p.piece_name}</td>
                       <td className="px-3 py-2.5 text-start text-slate-500">{t(STATUS_LABEL_KEYS[p.status] ?? p.status)}</td>
@@ -173,16 +181,19 @@ export function ProjectReportModal({ projectId, onClose }: ProjectReportModalPro
                         {p.estimated_time_minutes ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
-                        {p.actual_time_minutes.toFixed(0)}
+                        {hasBothCosts ? p.estimated_cost!.toFixed(2) : "—"}
                       </td>
                       <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
+                        {p.actual_time_minutes.toFixed(0)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-left font-semibold ${isOverBudget ? "text-red-600" : hasBothCosts ? "text-green-600" : "text-slate-500"}`} dir="ltr" title={isOverBudget ? t("setup.overBudgetHint") : undefined}>
                         {p.actual_cost.toFixed(2)}
                       </td>
                     </tr>
-                  ))}
+                  );})}
                   {pieces.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-4 text-center text-slate-400">
+                      <td colSpan={6} className="py-4 text-center text-slate-400">
                         {t("setup.noPiecesReport")}
                       </td>
                     </tr>
@@ -195,9 +206,12 @@ export function ProjectReportModal({ projectId, onClose }: ProjectReportModalPro
                         {t("setup.totalRow")}
                       </td>
                       <td className="px-3 py-2.5 text-left" dir="ltr">
-                        {totalActualMinutes.toFixed(0)}
+                        {totalEstimatedCost.toFixed(2)}
                       </td>
                       <td className="px-3 py-2.5 text-left" dir="ltr">
+                        {totalActualMinutes.toFixed(0)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-left ${totalEstimatedCost > 0 && totalActualCost > totalEstimatedCost ? "text-red-600" : ""}`} dir="ltr">
                         {totalActualCost.toFixed(2)}
                       </td>
                     </tr>

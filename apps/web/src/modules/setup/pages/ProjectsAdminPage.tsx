@@ -176,9 +176,9 @@ export function ProjectsAdminPage() {
 
   return (
     <div>
-      <div className="mb-5 flex gap-2 rounded-xl border border-slate-200 bg-white p-2">
-        <button type="button" onClick={() => setActiveTab("pieces")} className={`flex-1 rounded-lg px-4 py-2 text-sm font-bold ${activeTab === "pieces" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("setup.pieces")}</button>
-        <button type="button" onClick={() => setActiveTab("projects")} className={`flex-1 rounded-lg px-4 py-2 text-sm font-bold ${activeTab === "projects" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("setup.projects")}</button>
+      <div className="mb-5 flex gap-2 border-b border-slate-200">
+        <button type="button" onClick={() => setActiveTab("pieces")} className={`px-4 py-2 text-sm font-semibold ${activeTab === "pieces" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-400"}`}>{t("setup.pieces")}</button>
+        <button type="button" onClick={() => setActiveTab("projects")} className={`px-4 py-2 text-sm font-semibold ${activeTab === "projects" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-400"}`}>{t("setup.projects")}</button>
       </div>
 
       {activeTab === "projects" ? <div className="grid gap-6 md:grid-cols-2">

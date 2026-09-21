@@ -23,3 +23,13 @@ supabase/.temp/
 .vscode/
 *.log
 Thumbs.db
+
+# AniXOS — Explicit excludes for Edge Functions & secrets
+# (les règles ci-dessus couvrent déjà, mais on est explicite pour la clarté)
+supabase/functions/.env
+supabase/functions/.env.*
+!supabase/functions/.env.example
+
+# AniXOS — Examples are tracked
+!.env.local.example
+!.env.example

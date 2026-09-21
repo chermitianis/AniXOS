@@ -134,25 +134,26 @@ export function PlanningAdminPage() {
   const selectedMachine = machines.find((m) => m.id === selectedMachineId);
 
   return (
-    <div className="flex flex-col gap-5 md:flex-row">
-      {/* تبويبات الآلات — عمودية على اليسار في الشاشات الكبيرة، شريط أفقي قابل للتمرير على الجوال */}
-      <aside className="flex shrink-0 gap-1.5 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 md:w-52 md:flex-col md:gap-0 md:overflow-hidden md:p-0">
+    <div>
+      {/* تبويبات الآلات — بنفس شكل تبويبات قسم rapports (خط سفلي)، بشريط قابل
+          للتمرير أفقياً عند كثرة الآلات */}
+      <div className="mb-5 flex gap-2 overflow-x-auto border-b border-slate-200">
         {machines.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => setSelectedMachineId(m.id)}
-            className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2.5 text-start text-sm font-semibold transition-colors md:block md:w-full md:rounded-none md:border-b md:border-slate-100 md:py-3 md:last:border-0 ${
-              selectedMachineId === m.id ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"
+            className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-semibold ${
+              selectedMachineId === m.id ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-400"
             }`}
           >
             {m.name}
           </button>
         ))}
-        {machines.length === 0 && <p className="p-4 text-sm text-slate-400">{t("setup.noDataYet")}</p>}
-      </aside>
+        {machines.length === 0 && <p className="p-2 text-sm text-slate-400">{t("setup.noDataYet")}</p>}
+      </div>
 
-      <div className="grid flex-1 gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2">
         <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-5">
           <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
             <Factory size={17} className="text-indigo-500" />
