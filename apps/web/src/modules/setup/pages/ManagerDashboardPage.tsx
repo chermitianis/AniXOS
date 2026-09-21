@@ -6,9 +6,6 @@ import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import type { ProjectProfitability, InventoryItem } from "../../../shared/types/database";
 
-/** صف من v_live_operations (migration 0057) — نُعرّفه محلياً لأنه يعتمد الآن
- * على تسجيل الدخول (work_shifts) لا الجلسة النشطة فقط: session_id/session_type
- * يكونان null إن كان العامل متصلاً بلا مهمة جارية بعد */
 interface LiveOperationRow {
   shift_id: string;
   worker_id: string;
@@ -34,7 +31,6 @@ const RISK_LABEL_KEYS: Record<string, { key: string; className: string }> = {
   completed: { key: "setup.riskCompleted", className: "bg-slate-200 text-slate-600" },
 };
 
-/** القيمة الافتراضية عند غياب risk_status */
 const DEFAULT_RISK = { key: "setup.riskOnTrack", className: "bg-green-100 text-green-700" };
 
 function formatElapsed(seconds: number): string {
@@ -43,9 +39,6 @@ function formatElapsed(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
-/** ثوانٍ منقضية منذ تاريخ ISO، محسوبة لحظياً عند العرض (بلا الحاجة لعمود
- * محسوب في القاعدة، ولا لمؤقّت دوري — الصفحة تُحدَّث فورياً عبر Realtime
- * وكل 15 ثانية احتياطياً، وهو كافٍ لعرض "منذ متى" بدقة معقولة). */
 function elapsedSecondsSince(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
 }
@@ -73,15 +66,10 @@ export function ManagerDashboardPage() {
 
   useEffect(() => {
     void loadDashboard();
-    // فحص احتياطي كل 15 ثانية (شبكة غير مستقرة مثلاً) — التحديث الفعلي يأتي فورياً عبر Realtime أدناه
     const interval = setInterval(loadDashboard, 15_000);
     return () => clearInterval(interval);
   }, [loadDashboard]);
 
-  // بث حي: أي دخول/خروج عامل (work_shifts) أو بداية/نهاية/تبديل مهمة
-  // (work_sessions) يُحدّث "المشاهدة الحية" فوراً — بلا انتظار الـ 15 ثانية.
-  // الاشتراك بـwork_shifts ضروري الآن: عامل يسجّل دخوله بلا بدء أي مهمة بعد
-  // كان سيبقى غائباً عن اللوحة حتى أول تحديث دوري لولا هذا الاشتراك
   useEffect(() => {
     if (!staffUser?.company_id) return;
     const channel = createSafeChannel(`live-ops-${staffUser.company_id}`)
@@ -117,23 +105,37 @@ export function ManagerDashboardPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* بطاقات ملخص سريعة */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className="flex flex-col gap-4 sm:gap-6">
+      {/* ============================================================= */}
+      {/* KPI Cards — 2 colonnes sur mobile, 4 sur desktop              */}
+      {/* ============================================================= */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {statCards.map((card) => {
           const Icon = card.icon;
           return (
-            <div key={card.label} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-              <div className={`absolute -left-4 -top-4 h-20 w-20 rounded-full bg-gradient-to-br ${card.from} ${card.to} opacity-10`} />
-              <div className="relative flex items-start justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-slate-400">{card.label}</div>
-                  <div className={`mt-1 text-2xl font-extrabold ${card.text}`} dir={card.ltr ? "ltr" : undefined}>
+            <div
+              key={card.label}
+              className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-3 shadow-sm sm:p-4"
+            >
+              <div
+                className={`absolute -left-4 -top-4 h-16 w-16 rounded-full bg-gradient-to-br ${card.from} ${card.to} opacity-10 sm:h-20 sm:w-20`}
+              />
+              <div className="relative flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[11px] font-semibold text-slate-400 sm:text-xs">
+                    {card.label}
+                  </div>
+                  <div
+                    className={`mt-1 text-xl font-extrabold sm:text-2xl ${card.text}`}
+                    dir={card.ltr ? "ltr" : undefined}
+                  >
                     {card.value}
                   </div>
                 </div>
-                <div className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${card.from} ${card.to} text-white shadow-md`}>
-                  <Icon size={18} />
+                <div
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${card.from} ${card.to} text-white shadow-md sm:h-9 sm:w-9`}
+                >
+                  <Icon size={16} />
                 </div>
               </div>
             </div>
@@ -141,17 +143,25 @@ export function ManagerDashboardPage() {
         })}
       </div>
 
-      {/* المشاهدة الحية */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.liveOpsTitle")}</h2>
+      {/* ============================================================= */}
+      {/* Live Operations — cartes empilées sur mobile                  */}
+      {/* ============================================================= */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-3 text-base font-bold text-slate-800 sm:mb-4 sm:text-lg">
+          {t("setup.liveOpsTitle")}
+        </h2>
         {liveOps.length === 0 ? (
           <p className="text-sm text-slate-400">{t("setup.noLiveOperations")}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {[...liveOps]
               .sort((a, b) => {
-                const rank = (r: LiveOperationRow) => (r.session_type === "production" ? 0 : r.session_type === "downtime" ? 1 : 2);
-                return rank(a) - rank(b) || new Date(b.shift_started_at).getTime() - new Date(a.shift_started_at).getTime();
+                const rank = (r: LiveOperationRow) =>
+                  r.session_type === "production" ? 0 : r.session_type === "downtime" ? 1 : 2;
+                return (
+                  rank(a) - rank(b) ||
+                  new Date(b.shift_started_at).getTime() - new Date(a.shift_started_at).getTime()
+                );
               })
               .map((op) => {
                 const isProduction = op.session_type === "production";
@@ -164,17 +174,27 @@ export function ManagerDashboardPage() {
                     ? op.stop_reason_name ?? t("setup.inDowntime")
                     : t("setup.workerLoggedInWaiting");
                 const elapsed = elapsedSecondsSince(op.started_at ?? op.shift_started_at);
+
                 return (
-                  <li key={op.shift_id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      {/* نقطة نابضة زرقاء = عملية إنتاج جارية، كهرمانية = في توقف، رمادية ثابتة = متصل فقط بانتظار بدء مهمة */}
-                      <span className="relative flex h-2 w-2">
-                        {pingColor && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pingColor} opacity-75`} />}
+                  <li
+                    key={op.shift_id}
+                    className="rounded-lg bg-slate-50 p-3 text-sm transition-colors hover:bg-slate-100 sm:flex sm:items-center sm:justify-between sm:px-3 sm:py-2"
+                  >
+                    {/* Ligne 1 : worker + status */}
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <span className="relative flex h-2 w-2 shrink-0">
+                        {pingColor && (
+                          <span
+                            className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pingColor} opacity-75`}
+                          />
+                        )}
                         <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
                       </span>
-                      <span className="font-semibold text-slate-700">{op.worker_name}</span>
+                      <span className="truncate font-semibold text-slate-700">
+                        {op.worker_name}
+                      </span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
                           isProduction
                             ? "bg-blue-50 text-blue-600"
                             : isDowntime
@@ -184,14 +204,24 @@ export function ManagerDashboardPage() {
                       >
                         {currentEventLabel}
                       </span>
-                      <span className="text-slate-400">
-                        {op.machine_name && `— ${op.machine_name}`} {op.project_name && `— ${op.project_name}`}
-                        {op.piece_name && (
-                          <span className="ms-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">{op.piece_name}</span>
-                        )}
-                      </span>
                     </div>
-                    <span className="text-xs text-slate-400" dir="ltr">
+
+                    {/* Ligne 2 : machine/projet/pièce (mobile) ou inline (desktop) */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400 sm:mt-0 sm:ms-3 sm:shrink">
+                      {op.machine_name && <span>— {op.machine_name}</span>}
+                      {op.project_name && <span>— {op.project_name}</span>}
+                      {op.piece_name && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">
+                          {op.piece_name}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Ligne 3 : durée */}
+                    <span
+                      className="mt-1.5 inline-block text-xs text-slate-400 sm:mt-0 sm:ms-3 sm:shrink-0"
+                      dir="ltr"
+                    >
                       {formatElapsed(elapsed)}
                     </span>
                   </li>
@@ -201,10 +231,79 @@ export function ManagerDashboardPage() {
         )}
       </div>
 
-      {/* تحليل صافي الربح ومؤشرات المخاطر */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.profitabilityTable")}</h2>
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+      {/* ============================================================= */}
+      {/* Profitability — table sur desktop, cartes sur mobile          */}
+      {/* ============================================================= */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-3 text-base font-bold text-slate-800 sm:mb-4 sm:text-lg">
+          {t("setup.profitabilityTable")}
+        </h2>
+
+        {/* Vue mobile : cartes empilées */}
+        <div className="flex flex-col gap-2 md:hidden">
+          {profitability.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 py-4 text-center text-sm text-slate-400">
+              {t("setup.noDataYet")}
+            </p>
+          ) : (
+            profitability.map((p) => {
+              const risk = (p.risk_status && RISK_LABEL_KEYS[p.risk_status]) || DEFAULT_RISK;
+              return (
+                <div
+                  key={p.project_id}
+                  className="rounded-lg border border-slate-100 bg-slate-50/60 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">
+                      {p.project_name}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${risk.className}`}
+                    >
+                      {t(risk.key)}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-[10px] uppercase text-slate-400">
+                        {t("setup.actualHours")}
+                      </div>
+                      <div className="font-semibold text-slate-600" dir="ltr">
+                        {(p.actual_production_hours ?? 0).toFixed(1)} {t("setup.hoursShort")}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-slate-400">
+                        {t("setup.timeVariance")}
+                      </div>
+                      <div className="font-semibold text-slate-600" dir="ltr">
+                        {p.time_variance_percent !== null
+                          ? `${p.time_variance_percent > 0 ? "+" : ""}${p.time_variance_percent}%`
+                          : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-slate-400">
+                        {t("setup.netProfit")}
+                      </div>
+                      <div
+                        className={`font-bold ${
+                          (p.net_profit ?? 0) >= 0 ? "text-green-600" : "text-red-600"
+                        }`}
+                        dir="ltr"
+                      >
+                        {p.net_profit !== null ? p.net_profit.toFixed(0) : "—"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Vue desktop : tableau */}
+        <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
@@ -219,18 +318,34 @@ export function ManagerDashboardPage() {
               {profitability.map((p) => {
                 const risk = (p.risk_status && RISK_LABEL_KEYS[p.risk_status]) || DEFAULT_RISK;
                 return (
-                  <tr key={p.project_id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5 text-start font-semibold text-slate-700">{p.project_name}</td>
+                  <tr
+                    key={p.project_id}
+                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
+                  >
+                    <td className="px-3 py-2.5 text-start font-semibold text-slate-700">
+                      {p.project_name}
+                    </td>
                     <td className="px-3 py-2.5 text-start">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${risk.className}`}>{t(risk.key)}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${risk.className}`}
+                      >
+                        {t(risk.key)}
+                      </span>
                     </td>
                     <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
                       {(p.actual_production_hours ?? 0).toFixed(1)} {t("setup.hoursShort")}
                     </td>
                     <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
-                      {p.time_variance_percent !== null ? `${p.time_variance_percent > 0 ? "+" : ""}${p.time_variance_percent}%` : "—"}
+                      {p.time_variance_percent !== null
+                        ? `${p.time_variance_percent > 0 ? "+" : ""}${p.time_variance_percent}%`
+                        : "—"}
                     </td>
-                    <td className={`px-3 py-2.5 text-left font-bold ${(p.net_profit ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`} dir="ltr">
+                    <td
+                      className={`px-3 py-2.5 text-left font-bold ${
+                        (p.net_profit ?? 0) >= 0 ? "text-green-600" : "text-red-600"
+                      }`}
+                      dir="ltr"
+                    >
                       {p.net_profit !== null ? p.net_profit.toFixed(0) : "—"}
                     </td>
                   </tr>
@@ -248,14 +363,20 @@ export function ManagerDashboardPage() {
         </div>
       </div>
 
-      {/* تنبيهات المخزون */}
+      {/* ============================================================= */}
+      {/* Low Stock alert                                                */}
+      {/* ============================================================= */}
       {lowStock.length > 0 && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-5">
-          <h2 className="mb-3 text-lg font-bold text-red-700">{t("setup.reorderAlert")}</h2>
-          <ul className="flex flex-col gap-1">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 sm:p-5">
+          <h2 className="mb-3 text-base font-bold text-red-700 sm:text-lg">
+            {t("setup.reorderAlert")}
+          </h2>
+          <ul className="flex flex-col gap-1.5">
             {lowStock.map((item) => (
               <li key={item.id} className="text-sm text-red-600">
-                {item.name}: {item.quantity_on_hand} {item.unit} {t("setup.minOnly")} ({t("setup.minThreshold")}: {item.reorder_threshold})
+                <span className="font-semibold">{item.name}</span>: {item.quantity_on_hand}{" "}
+                {item.unit} {t("setup.minOnly")} ({t("setup.minThreshold")}:{" "}
+                {item.reorder_threshold})
               </li>
             ))}
           </ul>

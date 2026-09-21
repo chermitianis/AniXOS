@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Plus, X as XIcon } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
@@ -157,9 +158,12 @@ export function SalesAdminPage() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.createQuote")}</h2>
+    <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      {/* Formulaire de création */}
+      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.createQuote")}
+        </h2>
 
         <AdminField label={t("setup.client")}>
           <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={adminInputClass} required>
@@ -181,39 +185,63 @@ export function SalesAdminPage() {
         </AdminField>
 
         <p className="mb-2 text-sm font-semibold text-slate-600">{t("setup.items")}</p>
-        {items.map((item, index) => (
-          <div key={index} className="mb-2 flex gap-2">
-            <input
-              value={item.description}
-              onChange={(e) => updateItem(index, "description", e.target.value)}
-              placeholder={t("setup.description")}
-              className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-            />
-            <input
-              type="number"
-              value={item.quantity}
-              onChange={(e) => updateItem(index, "quantity", e.target.value)}
-              className="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
-            />
-            <input
-              type="number"
-              value={item.unit_price}
-              onChange={(e) => updateItem(index, "unit_price", e.target.value)}
-              className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
-            />
-            {items.length > 1 && (
-              <button type="button" onClick={() => removeItemRow(index)} className="text-red-400">
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
-        <button type="button" onClick={addItemRow} className="mb-3 text-sm font-semibold text-blue-600">
+
+        {/* Lignes d'items — layout responsive */}
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <div key={index} className="rounded-lg border border-slate-200 bg-slate-50/40 p-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={item.description}
+                  onChange={(e) => updateItem(index, "description", e.target.value)}
+                  placeholder={t("setup.description")}
+                  className="w-full flex-1 rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(index, "quantity", e.target.value)}
+                    placeholder={t("setup.quantity")}
+                    className="w-16 shrink-0 rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-center"
+                    dir="ltr"
+                  />
+                  <input
+                    type="number"
+                    value={item.unit_price}
+                    onChange={(e) => updateItem(index, "unit_price", e.target.value)}
+                    placeholder="TND"
+                    className="w-20 shrink-0 rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-center"
+                    dir="ltr"
+                  />
+                  {items.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeItemRow(index)}
+                      className="shrink-0 rounded p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label={t("common.delete")}
+                    >
+                      <XIcon size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={addItemRow}
+          className="mb-3 mt-2 inline-flex items-center gap-1 text-sm font-semibold text-blue-600 hover:text-blue-700"
+        >
+          <Plus size={14} />
           {t("setup.addItem")}
         </button>
 
-        <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700" dir="ltr">
-          {t("setup.totalLabel")}: {draftTotal.toFixed(2)}
+        <div className="mb-3 flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
+          <span>{t("setup.totalLabel")}</span>
+          <span dir="ltr">{draftTotal.toFixed(2)} TND</span>
         </div>
 
         {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
@@ -227,22 +255,25 @@ export function SalesAdminPage() {
         </button>
       </form>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.quotesList")} ({quotes.length})</h2>
+      {/* Liste des devis */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.quotesList")} ({quotes.length})
+        </h2>
         <ul className="flex flex-col gap-2">
           {quotes.map((q) => (
             <li key={q.id} className="rounded-lg bg-slate-50 p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-700">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">
                   {q.quote_number} — {q.client_name}
                 </span>
-                <span className="font-bold text-slate-800" dir="ltr">
-                  {(q.total ?? 0).toFixed(2)}
+                <span className="shrink-0 font-bold text-slate-800" dir="ltr">
+                  {(q.total ?? 0).toFixed(2)} TND
                 </span>
               </div>
-              <div className="mt-1 flex items-center justify-between">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                 <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                     q.status === "accepted" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-500"
                   }`}
                 >
@@ -263,13 +294,14 @@ export function SalesAdminPage() {
         </ul>
       </div>
 
+      {/* Modal accepter devis */}
       {acceptingQuote && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <form onSubmit={handleAcceptQuote} className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
-            <h3 className="mb-1 text-lg font-bold text-slate-800">{t("setup.acceptQuoteTitle")} {acceptingQuote.quote_number}</h3>
-            <p className="mb-4 text-sm text-slate-400">
-              {t("setup.acceptQuoteBody")}
-            </p>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <form onSubmit={handleAcceptQuote} className="w-full max-w-sm rounded-xl bg-white p-4 shadow-lg sm:p-5">
+            <h3 className="mb-1 text-base font-bold text-slate-800 sm:text-lg">
+              {t("setup.acceptQuoteTitle")} {acceptingQuote.quote_number}
+            </h3>
+            <p className="mb-4 text-xs text-slate-400 sm:text-sm">{t("setup.acceptQuoteBody")}</p>
 
             <AdminField label={t("setup.projectName")}>
               <input

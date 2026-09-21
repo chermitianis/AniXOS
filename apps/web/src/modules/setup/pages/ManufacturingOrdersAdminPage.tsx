@@ -21,18 +21,14 @@ const STATUS_COLORS: Record<ManufacturingOrderStatus, string> = {
   cancelled: "bg-red-100 text-red-700",
 };
 
-/** يعيد لون الحالة بشكل آمن حتى لو جاءت قيمة غير متوقعة من قاعدة البيانات */
 function getStatusColor(status: string): string {
   return STATUS_COLORS[status as ManufacturingOrderStatus] ?? "bg-slate-100 text-slate-600";
 }
 
-/** يعيد مفتاح الترجمة للحالة بشكل آمن مع fallback */
 function getStatusLabelKey(status: string): string {
   return STATUS_LABEL_KEYS[status as ManufacturingOrderStatus] ?? status;
 }
 
-/** الرقم التالي = آخر رقم أمر تصنيع رقمي تم إدخاله (يدوياً أو آلياً) + 1.
- * يتجاهل أي أرقام قديمة غير رقمية (مثل صيغة التاريخ السابقة) بدل أن تُعطّل الحساب */
 function computeNextOrderNumber(list: { order_number: string }[]): string {
   const numeric = list.map((o) => parseInt(o.order_number, 10)).filter((n) => !isNaN(n));
   const max = numeric.length > 0 ? Math.max(...numeric) : 0;
@@ -46,7 +42,6 @@ export function ManufacturingOrdersAdminPage() {
   const [orders, setOrders] = useState<(ManufacturingOrder & { project_name?: string })[]>([]);
   const [approvedPieces, setApprovedPieces] = useState<(PieceTask & { project_name: string; project_code: string })[]>([]);
 
-  // عناصر النموذج
   const [orderNumber, setOrderNumber] = useState("1");
   const [selectedPieceId, setSelectedPieceId] = useState("");
   const [selectedPieceName, setSelectedPieceName] = useState("");
@@ -72,8 +67,6 @@ export function ManufacturingOrdersAdminPage() {
     setOrderNumber(computeNextOrderNumber(rows));
   }
 
-  /** القطع "الجاهزة للتصنيع" فقط: تلك التابعة لمشاريع اعتمد قسم Nomenclature
-   * دراسة تكلفتها (status = 'valide') — الأحدث أولاً */
   async function loadApprovedPieces() {
     const { data: validated } = await supabase.from("nomenclatures").select("project_id").eq("status", "valide").not("project_id", "is", null);
     const projectIds = Array.from(new Set(((validated ?? []) as { project_id: string }[]).map((n) => n.project_id)));
@@ -102,7 +95,6 @@ export function ManufacturingOrdersAdminPage() {
     void loadApprovedPieces();
   }, []);
 
-  // اختيار قطعة من القائمة يحدد القطعة والمشروع معاً دفعة واحدة — لا لبس ممكن بعد الآن
   function handlePieceChange(pieceId: string) {
     setSelectedPieceId(pieceId);
     const piece = approvedPieces.find((p) => p.id === pieceId);
@@ -142,13 +134,10 @@ export function ManufacturingOrdersAdminPage() {
         return;
       }
 
-      // ربط القطعة بأمر التصنيع — يتيح لقسم Planification اشتقاق المشروع
-      // والقطعة تلقائياً بمجرد اختيار رقم أمر التصنيع فقط
       if (newOrder) {
         await supabase.from("pieces_tasks").update({ manufacturing_order_id: newOrder.id }).eq("id", selectedPieceId);
       }
 
-      // إعادة النموذج للوضع الافتراضي (رقم الأمر التالي يُحسب تلقائياً عبر loadOrders)
       setSelectedPieceId("");
       setSelectedPieceName("");
       setProjectId("");
@@ -168,12 +157,11 @@ export function ManufacturingOrdersAdminPage() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-1 text-lg font-bold text-slate-800">{t("setup.createOrder")}</h2>
-        <p className="mb-4 text-sm text-slate-400">{t("setup.manufacturingOrders")}</p>
+    <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-1 text-base font-bold text-slate-800 sm:text-lg">{t("setup.createOrder")}</h2>
+        <p className="mb-4 text-xs text-slate-400 sm:text-sm">{t("setup.manufacturingOrders")}</p>
 
-        {/* 1. Numéro d'ordre */}
         <AdminField label={t("setup.orderNumber")}>
           <input
             type="text"
@@ -185,7 +173,6 @@ export function ManufacturingOrdersAdminPage() {
           />
         </AdminField>
 
-        {/* 2. Référence / Nom de la pièce — uniquement les pièces validées en Nomenclature */}
         <AdminField label={t("setup.pieceReference")}>
           <select
             value={selectedPieceId}
@@ -203,7 +190,6 @@ export function ManufacturingOrdersAdminPage() {
           {approvedPieces.length === 0 && <p className="mt-1 text-xs text-amber-600">{t("setup.noApprovedPiecesYet")}</p>}
         </AdminField>
 
-        {/* 3. Nom du projet — détecté automatiquement, non modifiable */}
         <AdminField label={t("setup.projectName")}>
           <input
             type="text"
@@ -215,7 +201,6 @@ export function ManufacturingOrdersAdminPage() {
           />
         </AdminField>
 
-        {/* 4. Quantité — compacte et professionnelle */}
         <AdminField label={t("setup.quantity")}>
           <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-300">
             <button
@@ -244,7 +229,6 @@ export function ManufacturingOrdersAdminPage() {
           </div>
         </AdminField>
 
-        {/* 5. Début prévu / Fin prévue */}
         <div className="mb-3 grid grid-cols-2 gap-2">
           <AdminField label={t("setup.plannedStart")}>
             <input
@@ -275,23 +259,22 @@ export function ManufacturingOrdersAdminPage() {
         </button>
       </form>
 
-      {/* قائمة أجهزة/أوامر التصنيع */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
           {t("setup.manufacturingOrders")} ({orders.length})
         </h2>
         <ul className="flex flex-col gap-2">
           {orders.map((o) => (
             <li key={o.id} className="rounded-lg bg-slate-50 p-3 text-sm">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-semibold text-slate-700">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">
                   {o.order_number} — {o.product_name}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusColor(o.status)}`}>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${getStatusColor(o.status)}`}>
                   {t(getStatusLabelKey(o.status))}
                 </span>
               </div>
-              <div className="mb-2 text-xs text-slate-400">
+              <div className="mb-2 truncate text-xs text-slate-400">
                 {o.project_name} — {t("setup.quantityLabel")}: {o.quantity}
               </div>
               <select

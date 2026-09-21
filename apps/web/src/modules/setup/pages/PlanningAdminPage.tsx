@@ -92,7 +92,6 @@ export function PlanningAdminPage() {
         return;
       }
 
-      // اشتقاق القطعة تلقائياً من أمر التصنيع (الربط أُنشئ عند إنشاء الأمر في قسم Ordre de fabrication)
       const { data: linkedPiece } = await supabase
         .from("pieces_tasks")
         .select("id")
@@ -135,15 +134,14 @@ export function PlanningAdminPage() {
 
   return (
     <div>
-      {/* تبويبات الآلات — بنفس شكل تبويبات قسم rapports (خط سفلي)، بشريط قابل
-          للتمرير أفقياً عند كثرة الآلات */}
-      <div className="mb-5 flex gap-2 overflow-x-auto border-b border-slate-200">
+      {/* Onglets machines — scroll horizontal sur mobile */}
+      <div className="mb-4 flex gap-2 overflow-x-auto border-b border-slate-200 sm:mb-5">
         {machines.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => setSelectedMachineId(m.id)}
-            className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-semibold ${
+            className={`shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold sm:px-4 ${
               selectedMachineId === m.id ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-400"
             }`}
           >
@@ -153,15 +151,14 @@ export function PlanningAdminPage() {
         {machines.length === 0 && <p className="p-2 text-sm text-slate-400">{t("setup.noDataYet")}</p>}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
-            <Factory size={17} className="text-indigo-500" />
-            {selectedMachine?.name ?? t("setup.newAssignment")}
+      <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+        <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+          <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-slate-800 sm:text-lg">
+            <Factory size={17} className="shrink-0 text-indigo-500" />
+            <span className="truncate">{selectedMachine?.name ?? t("setup.newAssignment")}</span>
           </h2>
-          <p className="mb-4 text-sm text-slate-400">{t("setup.assignmentDesc")}</p>
+          <p className="mb-4 text-xs text-slate-400 sm:text-sm">{t("setup.assignmentDesc")}</p>
 
-          {/* 1. أمر التصنيع — آخر 20 إضافة، الأحدث أولاً */}
           <AdminField label={t("setup.manufacturingOrder")}>
             <select value={manufacturingOrderId} onChange={(e) => setManufacturingOrderId(e.target.value)} className={adminInputClass} required>
               <option value="">{t("setup.chooseOrder")}</option>
@@ -173,7 +170,6 @@ export function PlanningAdminPage() {
             </select>
           </AdminField>
 
-          {/* 2. العامل */}
           <AdminField label={t("setup.worker")}>
             <select value={workerId} onChange={(e) => setWorkerId(e.target.value)} className={adminInputClass} required>
               <option value="">{t("setup.selectWorker")}</option>
@@ -185,12 +181,10 @@ export function PlanningAdminPage() {
             </select>
           </AdminField>
 
-          {/* 3. التاريخ */}
           <AdminField label={t("setup.date")}>
             <input type="date" value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} className={adminInputClass} required />
           </AdminField>
 
-          {/* 4. الوردية */}
           <AdminField label={t("setup.shiftNumber")}>
             <select value={shiftNumber} onChange={(e) => setShiftNumber(e.target.value)} className={adminInputClass} required>
               {SHIFT_OPTIONS.map((s) => (
@@ -212,20 +206,20 @@ export function PlanningAdminPage() {
           </button>
         </form>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 text-lg font-bold text-slate-800">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+          <h2 className="mb-4 truncate text-base font-bold text-slate-800 sm:text-lg">
             {selectedMachine?.name} — {t("setup.recentAssignments")} ({machineEntries.length})
           </h2>
           <ul className="flex flex-col gap-2">
             {machineEntries.map((entry) => (
               <li key={entry.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-700">{entry.worker_name}</span>
-                  <span className="text-xs text-slate-400" dir="ltr">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{entry.worker_name}</span>
+                  <span className="shrink-0 text-xs text-slate-400" dir="ltr">
                     {entry.planned_date}
                   </span>
                 </div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="mt-1 truncate text-xs text-slate-500">
                   {entry.project_name && `${t("setup.projectLabel")}: ${entry.project_name}`}
                   {entry.shift_number && ` — ${t(SHIFT_OPTIONS.find((s) => s.value === entry.shift_number)?.labelKey ?? "")}`}
                 </div>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NomenclatureListPage } from "./NomenclatureListPage";
-import { NomenclatureEditorPage } from "./NomenclatureEditorPage";
+import { CostingEditorPage } from "../components/CostingEditorPage";
 import { CostingPage } from "./CostingPage";
 import { CostingArchivePage } from "./CostingArchivePage";
 import type { Nomenclature } from "../../../shared/types/database";
@@ -19,10 +19,10 @@ export function NomenclaturePage() {
     { key: "archive",      label: t("etude.tabs.archive") },
   ];
 
-  // Éditeur plein écran (comportement existant conservé, prioritaire sur les onglets)
+  // Éditeur plein écran (nouveau composant CostingEditorPage)
   if (openItem) {
     return (
-      <NomenclatureEditorPage
+      <CostingEditorPage
         nomenclature={openItem}
         onBack={() => setOpenItem(null)}
       />
@@ -31,12 +31,13 @@ export function NomenclaturePage() {
 
   return (
     <div>
-      <div className="mb-4 flex gap-2 border-b border-slate-200">
+      {/* Tabs — scroll horizontal sur mobile */}
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm font-semibold ${
+            className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-semibold ${
               activeTab === tab.key
                 ? "border-b-2 border-blue-600 text-blue-600"
                 : "text-slate-400"

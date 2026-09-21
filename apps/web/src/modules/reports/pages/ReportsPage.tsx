@@ -29,18 +29,20 @@ export function ReportsPage() {
 
   return (
     <div>
-      {/* رأس الصفحة: عنوان + محدد الفترة */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-extrabold tracking-tight text-slate-800">
+      {/* En-tête : titre + sélecteur de période */}
+      <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-extrabold tracking-tight text-slate-800 sm:text-lg">
             {t("reports.title")}
           </h1>
           <p className="mt-0.5 text-xs text-slate-400">{t("reports.subtitle")}</p>
         </div>
-        <PeriodSelector value={dateRange} onChange={setDateRange} />
+        <div className="shrink-0">
+          <PeriodSelector value={dateRange} onChange={setDateRange} />
+        </div>
       </div>
 
-      {/* تبويبات */}
+      {/* Onglets — scroll horizontal sur mobile */}
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -49,7 +51,7 @@ export function ReportsPage() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 px-4 py-2.5 text-sm font-semibold transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-sm font-semibold transition-colors sm:px-4 ${
                 isActive
                   ? "border-b-2 border-indigo-600 text-indigo-600"
                   : "text-slate-400 hover:text-slate-600"
@@ -62,7 +64,7 @@ export function ReportsPage() {
         })}
       </div>
 
-      {/* المحتوى حسب التبويب */}
+      {/* Contenu selon l'onglet */}
       {activeTab === "overview" && <OverviewTab dateRange={dateRange} />}
       {activeTab === "projects" && <ProjectsReportTab dateRange={dateRange} />}
       {activeTab === "workers" && <WorkersReportTab dateRange={dateRange} />}

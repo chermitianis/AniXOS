@@ -22,7 +22,6 @@ interface InvoiceRow {
   due_date: string | null;
   client_id: string;
   project_id: string | null;
-  /** Supabase يُرجع joins كمصفوفة أحياناً */
   clients: { name: string } | { name: string }[] | null;
   invoice_items: { quantity: number; unit_price: number; description: string }[];
 }
@@ -132,7 +131,7 @@ export function FinanceReportTab({ dateRange }: FinanceReportTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3 sm:gap-4">
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
@@ -166,16 +165,16 @@ export function FinanceReportTab({ dateRange }: FinanceReportTabProps) {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <ChartCard title={t("reports.charts.revenueVsCosts")}>
             {monthlyData.length === 0 ? (
               <EmptyState icon={Wallet} message={t("reports.noData")} />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyData}>
-                  <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <BarChart data={monthlyData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="#94a3b8" />
+                  <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" />
                   <Tooltip
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
                     formatter={(v: number) => `${v.toFixed(0)} ${t("reports.currencyTND")}`}
@@ -195,62 +194,117 @@ export function FinanceReportTab({ dateRange }: FinanceReportTabProps) {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={statusPie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={3}>
+                <Pie data={statusPie} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={3}>
                   {statusPie.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                 </Pie>
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
                   formatter={(v: number) => `${v.toFixed(0)} ${t("reports.currencyTND")}`}
                 />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
               </PieChart>
             </ResponsiveContainer>
           )}
         </ChartCard>
       </div>
 
-      {/* جدول الفواتير */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="mb-4 text-sm font-bold text-slate-700">
+      {/* Tableau / Liste des factures */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h3 className="mb-3 text-sm font-bold text-slate-700 sm:mb-4">
           {t("reports.tabs.finance")} ({invoices.length})
         </h3>
 
         {invoices.length === 0 ? (
           <EmptyState icon={Wallet} message={t("reports.noData")} hint={t("reports.financeHint")} />
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b-2 border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2.5 text-start">{t("setup.invoiceNumber")}</th>
-                  <th className="px-3 py-2.5 text-start">{t("setup.client")}</th>
-                  <th className="px-3 py-2.5 text-left">{t("setup.date")}</th>
-                  <th className="px-3 py-2.5 text-left">{t("setup.dueDate")}</th>
-                  <th className="px-3 py-2.5 text-left">{t("setup.totalLabel")}</th>
-                  <th className="px-3 py-2.5 text-start">{t("setup.status")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((inv) => (
-                  <tr key={inv.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5 text-start font-semibold text-slate-700" dir="ltr">{inv.invoice_number}</td>
-                    <td className="px-3 py-2.5 text-start text-slate-600">{clientName(inv.clients)}</td>
-                    <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">{inv.issued_date ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">{inv.due_date ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-left font-bold text-slate-700" dir="ltr">{invoiceTotal(inv).toFixed(0)}</td>
-                    <td className="px-3 py-2.5 text-start">
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
-                        style={{ backgroundColor: STATUS_COLORS[inv.status] ?? "#94a3b8" }}
-                      >
-                        {t(STATUS_LABEL_KEYS[inv.status] ?? inv.status)}
-                      </span>
-                    </td>
+          <>
+            {/* Vue mobile : cartes */}
+            <div className="flex flex-col gap-2 md:hidden">
+              {invoices.map((inv) => (
+                <div key={inv.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-xs text-slate-500" dir="ltr">
+                        {inv.invoice_number}
+                      </div>
+                      <div className="truncate text-sm font-bold text-slate-700">
+                        {clientName(inv.clients)}
+                      </div>
+                    </div>
+                    <span
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                      style={{ backgroundColor: STATUS_COLORS[inv.status] ?? "#94a3b8" }}
+                    >
+                      {t(STATUS_LABEL_KEYS[inv.status] ?? inv.status)}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-[10px] uppercase text-slate-400">
+                        {t("setup.date")}
+                      </div>
+                      <div className="font-semibold text-slate-600" dir="ltr">
+                        {inv.issued_date ?? "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-slate-400">
+                        {t("setup.dueDate")}
+                      </div>
+                      <div className="font-semibold text-slate-600" dir="ltr">
+                        {inv.due_date ?? "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+                    <span className="text-[10px] uppercase text-slate-400">
+                      {t("setup.totalLabel")}
+                    </span>
+                    <span className="text-sm font-extrabold text-slate-800" dir="ltr">
+                      {invoiceTotal(inv).toFixed(0)} {t("reports.currencyTND")}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Vue desktop : tableau */}
+            <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-2.5 text-start">{t("setup.invoiceNumber")}</th>
+                    <th className="px-3 py-2.5 text-start">{t("setup.client")}</th>
+                    <th className="px-3 py-2.5 text-left">{t("setup.date")}</th>
+                    <th className="px-3 py-2.5 text-left">{t("setup.dueDate")}</th>
+                    <th className="px-3 py-2.5 text-left">{t("setup.totalLabel")}</th>
+                    <th className="px-3 py-2.5 text-start">{t("setup.status")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr key={inv.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                      <td className="px-3 py-2.5 text-start font-semibold text-slate-700" dir="ltr">{inv.invoice_number}</td>
+                      <td className="px-3 py-2.5 text-start text-slate-600">{clientName(inv.clients)}</td>
+                      <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">{inv.issued_date ?? "—"}</td>
+                      <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">{inv.due_date ?? "—"}</td>
+                      <td className="px-3 py-2.5 text-left font-bold text-slate-700" dir="ltr">{invoiceTotal(inv).toFixed(0)}</td>
+                      <td className="px-3 py-2.5 text-start">
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+                          style={{ backgroundColor: STATUS_COLORS[inv.status] ?? "#94a3b8" }}
+                        >
+                          {t(STATUS_LABEL_KEYS[inv.status] ?? inv.status)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>

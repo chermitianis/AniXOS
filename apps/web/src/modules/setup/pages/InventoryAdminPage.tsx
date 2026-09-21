@@ -87,9 +87,11 @@ export function InventoryAdminPage() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <form onSubmit={handleCreateItem} className="h-fit rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.addInventoryItem")}</h2>
+    <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      <form onSubmit={handleCreateItem} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.addInventoryItem")}
+        </h2>
 
         <AdminField label={t("setup.itemName")}>
           <input value={name} onChange={(e) => setName(e.target.value)} className={adminInputClass} required />
@@ -123,20 +125,22 @@ export function InventoryAdminPage() {
         </button>
       </form>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.inventoryItems")} ({items.length})</h2>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.inventoryItems")} ({items.length})
+        </h2>
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
             <li key={item.id} className={`rounded-lg p-3 text-sm ${lowStockIds.has(item.id) ? "bg-red-50" : "bg-slate-50"}`}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-semibold text-slate-700">{item.name}</span>
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{item.name}</span>
                 {lowStockIds.has(item.id) && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600">
+                  <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600">
                     {t("setup.lowStock")}
                   </span>
                 )}
               </div>
-              <div className="mb-2 text-xs text-slate-400" dir="ltr">
+              <div className="mb-2 truncate text-xs text-slate-400" dir="ltr">
                 {item.quantity_on_hand} {item.unit} — {t("setup.codeLabel")}: {item.code}
               </div>
               <button
@@ -152,9 +156,11 @@ export function InventoryAdminPage() {
       </div>
 
       {txItemId && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <form onSubmit={handleTransaction} className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
-            <h3 className="mb-4 text-lg font-bold text-slate-800">{t("setup.recordTransactionTitle")}</h3>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <form onSubmit={handleTransaction} className="w-full max-w-sm rounded-xl bg-white p-4 shadow-lg sm:p-5">
+            <h3 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+              {t("setup.recordTransactionTitle")}
+            </h3>
 
             <AdminField label={t("setup.transactionType")}>
               <select value={txType} onChange={(e) => setTxType(e.target.value as InventoryTransactionType)} className={adminInputClass}>

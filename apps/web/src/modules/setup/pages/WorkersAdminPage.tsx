@@ -22,7 +22,6 @@ export function WorkersAdminPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // --- تعديل عامل موجود ---
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFullName, setEditFullName] = useState("");
   const [editUsername, setEditUsername] = useState("");
@@ -30,14 +29,13 @@ export function WorkersAdminPage() {
   const [editSkillLevel, setEditSkillLevel] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  // 1. ربط جلب العمال بـ company_id الخاص بـ staffUser
   const loadWorkers = useCallback(async () => {
     if (!staffUser?.company_id) return;
 
     const { data, error: fetchError } = await supabase
       .from("workers")
       .select("id, company_id, full_name, username, rfid_code, photo_url, hourly_cost, skill_level, is_active, created_at, updated_at")
-      .eq("company_id", staffUser.company_id) // تصفية حسب الشركة الحالية
+      .eq("company_id", staffUser.company_id)
       .order("full_name");
 
     if (!fetchError && data) {
@@ -104,7 +102,6 @@ export function WorkersAdminPage() {
         username: editUsername.trim(),
         skill_level: editSkillLevel.trim() || null,
       };
-      // كلمة السر تُحدَّث فقط إذا كُتبت قيمة جديدة — تركها فارغة يُبقي القديمة
       if (editPassword) patch.password_hash = bcrypt.hashSync(editPassword, 10);
 
       const { error: updateError } = await supabase.from("workers").update(patch).eq("id", id);
@@ -130,9 +127,11 @@ export function WorkersAdminPage() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.addWorker")}</h2>
+    <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.addWorker")}
+        </h2>
 
         <AdminField label={t("setup.workerFullName")}>
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={adminInputClass} required />
@@ -174,8 +173,10 @@ export function WorkersAdminPage() {
         </button>
       </form>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.registeredWorkers")} ({workers.length})</h2>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
+          {t("setup.registeredWorkers")} ({workers.length})
+        </h2>
         <ul className="flex flex-col gap-2">
           {workers.map((w) =>
             editingId === w.id ? (
@@ -213,33 +214,41 @@ export function WorkersAdminPage() {
                   <button
                     onClick={() => void saveEdit(w.id)}
                     disabled={isSavingEdit}
-                    className="flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                    className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                   >
                     <Check size={13} /> {isSavingEdit ? t("setup.saving") : t("setup.saveButton")}
                   </button>
-                  <button onClick={() => setEditingId(null)} className="flex items-center gap-1 rounded-lg bg-slate-300 px-3 py-1.5 text-xs font-bold text-white">
+                  <button onClick={() => setEditingId(null)} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-slate-300 px-3 py-1.5 text-xs font-bold text-white">
                     <X size={13} /> {t("common.cancel")}
                   </button>
                 </div>
               </li>
             ) : (
-              <li key={w.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <div>
-                  <span className="font-semibold text-slate-700">{w.full_name}</span>
-                  <span className="mr-2 text-slate-400">@{w.username}</span>
-                  {w.skill_level && <span className="mr-2 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">{w.skill_level}</span>}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => toggleActive(w)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      w.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-500"
-                    }`}
-                  >
-                    {w.is_active ? t("common.active") : t("common.inactive")}
-                  </button>
-                  <button onClick={() => startEdit(w)} className="rounded-lg bg-slate-200 p-1.5 text-slate-600 hover:bg-slate-300"><Pencil size={13} /></button>
-                  <button onClick={() => deleteWorker(w.id)} className="rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200"><Trash2 size={13} /></button>
+              <li key={w.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold text-slate-700">{w.full_name}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span className="truncate text-xs text-slate-400" dir="ltr">@{w.username}</span>
+                      {w.skill_level && (
+                        <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] text-indigo-700">
+                          {w.skill_level}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={() => toggleActive(w)}
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        w.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-500"
+                      }`}
+                    >
+                      {w.is_active ? t("common.active") : t("common.inactive")}
+                    </button>
+                    <button onClick={() => startEdit(w)} className="rounded-lg bg-slate-200 p-1.5 text-slate-600 hover:bg-slate-300"><Pencil size={12} /></button>
+                    <button onClick={() => deleteWorker(w.id)} className="rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200"><Trash2 size={12} /></button>
+                  </div>
                 </div>
               </li>
             )

@@ -1006,6 +1006,46 @@
   "groupAdvanced": "Advanced",
   "integrations": "Integrations"
 },
+
+"costing": {
+  "operationsSection": "Production stages",
+  "materialsSection": "Materials & consumables",
+  "addOperation": "Add a stage",
+  "addMaterial": "+ Add a material",
+  "noOperations": "No stage added yet.",
+  "noMaterials": "No material added yet.",
+  "hours": "Hours",
+  "hourlyRate": "Rate / h",
+  "subtotal": "Subtotal",
+  "quantity": "Quantity",
+  "unit": "Unit",
+  "unitPrice": "Unit price",
+  "materialName": "Material name",
+  "materialCode": "Code",
+  "materialPreset": "Preset",
+  "materialPresetChoose": "Choose a preset",
+  "customLabelPlaceholder": "Custom stage name",
+  "activePiece": "Active piece",
+  "grandTotal": "Piece total",
+  "saveEstimate": "Save",
+  "validateEstimate": "Validate",
+  "lastSavedAt": "Last saved",
+  "pivotBadge": "Pivot",
+  "cncPivotTitle": "Pivot stage — CNC machining",
+  "cncPivotHint": "CNC hours and costs are synced automatically to the piece record (visible in Kiosk, reports and planning).",
+  "stage": {
+    "usinage_cnc": "CNC machining",
+    "tournage_classique": "Conventional turning",
+    "usinage_classique": "Conventional machining",
+    "rectification": "Grinding",
+    "ajustage": "Fitting",
+    "stt": "HT (heat treatment)",
+    "anodisation": "Anodizing",
+    "controle_qualite": "Quality control",
+    "autre": "Other stage"
+  }
+},
+
 "odoo": {
   "title": "Odoo SaaS",
   "subtitle": "Sync AniXOS with your Odoo ERP",

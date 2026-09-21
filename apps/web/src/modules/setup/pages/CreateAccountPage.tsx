@@ -82,11 +82,6 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
       });
 
       if (fnError || !data?.success) {
-        // supabase.functions.invoke encapsule le corps JSON de la réponse
-        // d'erreur dans fnError.context (FunctionsHttpError) lorsqu'il s'agit
-        // d'un statut HTTP non-2xx. Sans cette extraction, l'utilisateur ne
-        // verrait qu'un message générique alors que la vraie raison (ex.
-        // "email_taken") est déjà renvoyée par l'Edge Function.
         let errorCode: string | undefined = data?.error;
         let errorMessage: string | undefined = data?.message;
 
@@ -99,12 +94,10 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
               errorMessage = body?.message ?? errorMessage;
             }
           } catch {
-            // Corps non-JSON (ex. 500 avec page d'erreur interne) : on garde
-            // les valeurs par défaut et on affiche le message générique.
+            /* ignore */
           }
         }
 
-        // Mapping code → clé i18n (la clé i18n existe dans fr/ar/en).
         const KNOWN_CODES: Record<string, string> = {
           email_taken: "createAccount.errEmailTaken",
           invalid_email: "createAccount.errEmail",
@@ -120,7 +113,6 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
         return;
       }
 
-      // تسجيل دخول المالك تلقائيًا
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: form.owner_email.trim().toLowerCase(),
         password: form.owner_password,
@@ -143,10 +135,10 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
 
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50";
-  const iconClass = "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400";
+  const iconClass = "pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-slate-400";
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-3 sm:p-4">
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-blue-500/20 blur-3xl" />
 
@@ -157,19 +149,18 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-white/10 bg-white p-8 shadow-2xl"
+          className="rounded-2xl border border-white/10 bg-white p-5 shadow-2xl sm:p-8"
         >
           <div className="mb-6 text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-300">
               <Building2 size={26} />
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-slate-800">
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
               {t("createAccount.title")}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">{t("createAccount.subtitle")}</p>
+            <p className="mt-1 text-xs text-slate-500 sm:text-sm">{t("createAccount.subtitle")}</p>
           </div>
 
-          {/* === Section 1 : Responsable === */}
           <div className="mb-5">
             <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-indigo-600">
               {t("createAccount.sectionOwner")}
@@ -223,7 +214,6 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
             </div>
           </div>
 
-          {/* === Section 2 : Entreprise === */}
           <div className="mb-5">
             <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-indigo-600">
               {t("createAccount.sectionCompany")}
@@ -274,7 +264,6 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
             </div>
           </div>
 
-          {/* === Section 3 : Base de données === */}
           <div className="mb-5">
             <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-indigo-600">
               {t("createAccount.sectionDatabase")}

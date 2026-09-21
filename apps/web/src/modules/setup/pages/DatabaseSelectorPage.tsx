@@ -109,19 +109,19 @@ export function DatabaseSelectorPage({ onSelected, onLogout }: DatabaseSelectorP
 
   return (
     <>
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-3 sm:p-4">
         <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-blue-500/20 blur-3xl" />
 
-        <div className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-white p-8 shadow-2xl">
+        <div className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-white p-5 shadow-2xl sm:p-8">
           <div className="mb-6 text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-300">
               <Database size={26} />
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-slate-800">
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
               {t("databaseSelector.title")}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">{t("databaseSelector.subtitle")}</p>
+            <p className="mt-1 text-xs text-slate-500 sm:text-sm">{t("databaseSelector.subtitle")}</p>
             {staffUser?.full_name && (
               <p className="mt-1 text-xs text-slate-400">
                 {t("databaseSelector.welcome", { name: staffUser.full_name })}
@@ -131,7 +131,7 @@ export function DatabaseSelectorPage({ onSelected, onLogout }: DatabaseSelectorP
 
           {isLoading ? (
             <div className="flex items-center justify-center py-12 text-slate-400">
-              <Loader2 className="mr-2 animate-spin" size={18} />
+              <Loader2 className="me-2 animate-spin" size={18} />
               {t("common.loading")}
             </div>
           ) : error ? (
@@ -159,17 +159,17 @@ export function DatabaseSelectorPage({ onSelected, onLogout }: DatabaseSelectorP
                         ) : (
                           <ArrowRight
                             size={16}
-                            className="text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-indigo-600"
+                            className="text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-indigo-600 rtl:group-hover:-translate-x-1 rtl:rotate-180"
                           />
                         )}
                       </div>
                       <div className="mb-0.5 truncate text-sm font-bold text-slate-800">
                         {db.company_name}
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                        <span className="font-mono" dir="ltr">{db.database_name}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                        <span className="truncate font-mono" dir="ltr">{db.database_name}</span>
                         {db.is_owner && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
                             <CheckCircle2 size={9} />
                             {t("databaseSelector.ownerBadge")}
                           </span>
@@ -183,7 +183,7 @@ export function DatabaseSelectorPage({ onSelected, onLogout }: DatabaseSelectorP
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(true)}
-                    className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/50 p-4 text-center text-indigo-600 transition-all hover:border-indigo-500 hover:bg-indigo-50"
+                    className="flex min-h-[100px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/50 p-4 text-center text-indigo-600 transition-all hover:border-indigo-500 hover:bg-indigo-50"
                   >
                     <Plus size={22} className="mb-1" />
                     <span className="text-xs font-bold">{t("databaseSelector.addNew")}</span>
@@ -194,7 +194,7 @@ export function DatabaseSelectorPage({ onSelected, onLogout }: DatabaseSelectorP
                 )}
 
                 {isOwner && !canAddMore && (
-                  <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 p-4 text-center text-amber-600">
+                  <div className="flex min-h-[100px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 p-4 text-center text-amber-600">
                     <Plus size={20} className="mb-1 opacity-50" />
                     <span className="text-xs font-bold">
                       {t("databaseSelector.limitReachedShort")}

@@ -32,8 +32,8 @@ create table if not exists supplier_invoices (
   status            text not null default 'brouillon'
                     check (status in ('brouillon', 'recue', 'payee', 'en_retard', 'annulee')),
 
-  category          text,                          -- ex: "Matières premières", "Services"
-  reference         text,                          -- Réf. interne / bon de commande
+  category          text,
+  reference         text,
   notes             text,
 
   created_by        uuid references staff_users(id) on delete set null,
@@ -118,6 +118,7 @@ create policy supplier_invoice_items_delete on supplier_invoice_items
 
 -- ----------------------------------------------------------------------------
 -- 5) Vue v_accounting_summary (KPI agrégés)
+--    Le total d'une facture = Σ(invoice_items.quantity × unit_price)
 -- ----------------------------------------------------------------------------
 create or replace view v_accounting_summary
 with (security_invoker = true)
@@ -127,22 +128,25 @@ select
 
   -- CA encaissé (factures clients payées)
   coalesce((
-    select sum(i.total)
+    select sum(ii.quantity * ii.unit_price)
     from invoices i
+    join invoice_items ii on ii.invoice_id = i.id
     where i.company_id = c.id and i.status = 'paid'
   ), 0) as revenue_paid,
 
-  -- CA total émis (factures clients émises + payées)
+  -- CA total émis (émises + payées)
   coalesce((
-    select sum(i.total)
+    select sum(ii.quantity * ii.unit_price)
     from invoices i
+    join invoice_items ii on ii.invoice_id = i.id
     where i.company_id = c.id and i.status in ('issued', 'paid')
   ), 0) as revenue_total,
 
-  -- Paiements en attente (factures émises non payées)
+  -- Paiements en attente
   coalesce((
-    select sum(i.total)
+    select sum(ii.quantity * ii.unit_price)
     from invoices i
+    join invoice_items ii on ii.invoice_id = i.id
     where i.company_id = c.id and i.status = 'issued'
   ), 0) as pending_revenue,
 
@@ -160,7 +164,7 @@ select
     where si.company_id = c.id and si.status in ('recue', 'payee', 'en_retard')
   ), 0) as expenses_total,
 
-  -- Dépenses fournisseurs en attente
+  -- Dépenses en attente
   coalesce((
     select sum(si.amount_ttc)
     from supplier_invoices si

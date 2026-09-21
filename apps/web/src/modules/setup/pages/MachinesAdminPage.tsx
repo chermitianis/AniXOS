@@ -9,8 +9,6 @@ import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
 import type { Machine } from "../../../shared/types/database";
 
-/** يبني أسطر جدول أدوات آلة فارغة (بانتظار أن يُسنِد العامل نوع الأداة لاحقاً
- * من الكشك) — هذه الدالة هي ما يضمن أن العامل يجد الجدول جاهزاً فوراً. */
 function buildEmptyToolRows(companyId: string, machineId: string, count: number, startFrom = 1) {
   return Array.from({ length: count }, (_, index) => ({
     id: crypto.randomUUID(),
@@ -25,7 +23,6 @@ function buildEmptyToolRows(companyId: string, machineId: string, count: number,
   }));
 }
 
-/** يحفظ أسطر أدوات جديدة أونلاين إن أمكن، وإلا محلياً + طابور المزامنة */
 async function persistToolRows(rows: ReturnType<typeof buildEmptyToolRows>) {
   await localDb.machineTools.bulkPut(rows);
 
@@ -108,8 +105,6 @@ export function MachinesAdminPage() {
     }
   }
 
-  /** إنشاء آلة جديدة — تُحفَظ مباشرة سحابياً، أو محلياً عند انعدام الاتصال،
-   * وتُنشَأ أسطر جدول الأدوات فوراً بعدد المغازة المُدخَل (البند المطلوب) */
   async function saveNewMachine(companyId: string, requestedToolCount: number) {
     const machineId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -121,7 +116,7 @@ export function MachinesAdminPage() {
       machine_type: machineType || null,
       location: null,
       tool_count: requestedToolCount,
-      tools_count: null,          // ← أُضيف: حقل محسوب/منفصل في قاعدة البيانات
+      tools_count: null,
       current_status: "idle",
       is_active: true,
       created_at: now,
@@ -139,7 +134,6 @@ export function MachinesAdminPage() {
           await localDb.machines.delete(machineId);
           return;
         }
-        // خطأ غير متوقع أونلاين: نتابع بالحفظ محلياً + طابور المزامنة أدناه
       } else {
         savedOnline = true;
       }
@@ -155,9 +149,6 @@ export function MachinesAdminPage() {
     }
   }
 
-  /** تعديل آلة موجودة — يسمح بتصحيح أي معلومة بعد الإضافة. عند زيادة عدد
-   * الأدوات تُضاف الأسطر الناقصة فقط؛ لا تُحذف أدوات موجودة أبداً تجنباً
-   * لفقدان تخصيصات سابقة قام بها العامل من الكشك. */
   async function saveEdit(companyId: string, machineId: string, requestedToolCount: number) {
     const existing = machines.find((m) => m.id === machineId);
     const patch = {
@@ -208,14 +199,19 @@ export function MachinesAdminPage() {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-800">
+    <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      {/* Formulaire */}
+      <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 className="min-w-0 flex-1 truncate text-base font-bold text-slate-800 sm:text-lg">
             {editingId ? t("setup.editMachine") : t("setup.addMachine")}
           </h2>
           {editingId && (
-            <button type="button" onClick={resetForm} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+            <button
+              type="button"
+              onClick={resetForm}
+              className="shrink-0 text-xs font-bold text-slate-400 hover:text-slate-600"
+            >
               {t("common.cancel")}
             </button>
           )}
@@ -248,24 +244,46 @@ export function MachinesAdminPage() {
         </button>
       </form>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold text-slate-800">{t("setup.registeredMachines")} ({machines.length})</h2>
+      {/* Liste des machines */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="mb-3 text-base font-bold text-slate-800 sm:mb-4 sm:text-lg">
+          {t("setup.registeredMachines")} ({machines.length})
+        </h2>
         <ul className="flex flex-col gap-2">
           {machines.map((m) => (
-            <li key={m.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-              <button type="button" onClick={() => startEditing(m)} className="flex-1 text-start">
-                <span className="font-semibold text-slate-700 hover:text-blue-600">{m.name}</span>
-                <span className="mr-2 text-slate-400">{m.code}</span>
-              </button>
-              <span className="rounded-full bg-slate-200 px-3 py-1 text-xs text-slate-600">
-                {statusLabels[m.current_status]}
-              </span>
-              <button onClick={() => void deleteMachine(m.id)} className="ms-1.5 rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200">
-                <Trash2 size={13} />
-              </button>
+            <li
+              key={m.id}
+              className="rounded-lg bg-slate-50 px-3 py-2 text-sm"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => startEditing(m)}
+                  className="min-w-0 flex-1 text-start"
+                >
+                  <div className="truncate font-semibold text-slate-700 hover:text-blue-600">
+                    {m.name}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs text-slate-400" dir="ltr">{m.code}</span>
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-600">
+                      {statusLabels[m.current_status]}
+                    </span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => void deleteMachine(m.id)}
+                  className="shrink-0 rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200"
+                  aria-label={t("common.delete")}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </li>
           ))}
-          {machines.length === 0 && <li className="text-sm text-slate-400">{t("setup.noDataYet")}</li>}
+          {machines.length === 0 && (
+            <li className="text-sm text-slate-400">{t("setup.noDataYet")}</li>
+          )}
         </ul>
       </div>
     </div>

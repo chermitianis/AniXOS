@@ -1,19 +1,3 @@
-// ============================================================================
-// DatabasesManagerPage — إدارة قواعد بيانات المالك (multi-database)
-//
-// الوظائف:
-//   - عرض كل قواعد المالك الحالي
-//   - تمييز القاعدة النشطة (ACTUELLE)
-//   - Ouvrir: تبديل active_company + إعادة تحميل
-//   - Supprimer: Modal تأكيد بكتابة اسم القاعدة
-//   - Ajouter: عبر CreateDatabaseModal الموجود
-//
-// الحماية:
-//   - owner-only (الموظف لا يرى الصفحة أساسًا)
-//   - لا حذف القاعدة النشطة (يُتحقق في Modal + Edge Function)
-//   - لا حذف آخر قاعدة (يُتحقق في Modal + Edge Function)
-// ============================================================================
-
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -62,9 +46,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
 
   const isOwner = staffUser?.is_owner === true;
 
-  // -------------------------------------------------------------------------
-  // تحميل القواعد + الحد الأقصى + حالة المطور
-  // -------------------------------------------------------------------------
   async function reload() {
     setIsLoading(true);
     setError(null);
@@ -96,9 +77,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Ouvrir: تبديل القاعدة النشطة + إعادة تحميل
-  // -------------------------------------------------------------------------
   async function handleOpen(row: DatabaseRow) {
     setSwitchingId(row.company_id);
     setError(null);
@@ -110,21 +88,14 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
       return;
     }
 
-    // إعادة تحميل لضمان نظافة كل الـ contexts
     window.location.reload();
   }
 
-  // -------------------------------------------------------------------------
-  // Ajouter: بعد النجاح، نُحدّث القائمة (لا نُبدّل تلقائيًا — المستخدم يقرّر)
-  // -------------------------------------------------------------------------
   function handleDatabaseCreated(_newCompanyId: string) {
     setShowCreateModal(false);
     void reload();
   }
 
-  // -------------------------------------------------------------------------
-  // Supprimer: بعد النجاح، نُحدّث القائمة
-  // -------------------------------------------------------------------------
   function handleDeleted() {
     setDeleteTarget(null);
     void reload();
@@ -133,52 +104,45 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
   const count = databases.length;
   const canAddMore = isOwner && count < maxDatabases;
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-3 py-3 sm:px-4">
           <button
             onClick={onBack}
             className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"
           >
-            <ArrowLeft size={16} />
-            {t("databasesManager.backToApp")}
+            <ArrowLeft size={16} className="rtl:rotate-180" />
+            <span className="truncate">{t("databasesManager.backToApp")}</span>
           </button>
           <div className="flex-1" />
           {isDeveloper && (
-            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+            <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">
               👑 {t("databasesManager.developerBadge")}
             </span>
           )}
         </div>
       </header>
 
-      {/* Main */}
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        {/* Title */}
+      <main className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
         <div className="mb-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-md">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-md">
               <Database size={22} />
             </div>
-            <div>
-              <h1 className="text-xl font-extrabold tracking-tight text-slate-800">
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
                 {t("databasesManager.title")}
               </h1>
-              <p className="text-sm text-slate-500">
+              <p className="text-xs text-slate-500 sm:text-sm">
                 {t("databasesManager.subtitle")}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Compteur */}
         {!isLoading && !error && (
-          <div className="mb-5 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5">
+          <div className="mb-5 flex flex-col gap-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-slate-600">
               {t("databasesManager.countLabel", {
                 current: count,
@@ -193,10 +157,9 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
           </div>
         )}
 
-        {/* Content */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20 text-slate-400">
-            <Loader2 className="mr-2 animate-spin" size={20} />
+            <Loader2 className="me-2 animate-spin" size={20} />
             {t("common.loading")}
           </div>
         ) : error ? (
@@ -204,8 +167,7 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
             {error}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* بطاقات القواعد */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
             {databases.map((db) => {
               const isCurrent = db.company_id === activeCompanyId;
               const isSwitching = switchingId === db.company_id;
@@ -218,7 +180,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
                       : "border-slate-200 hover:border-indigo-300 hover:shadow-sm"
                   }`}
                 >
-                  {/* شارة ACTUELLE */}
                   {isCurrent && (
                     <span className="absolute end-3 top-3 inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
                       <CheckCircle2 size={10} />
@@ -261,7 +222,7 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
                     <button
                       onClick={() => setDeleteTarget(db)}
                       disabled={!db.is_owner}
-                      className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
                       title={t("databasesManager.deleteButton")}
                     >
                       <Trash2 size={14} />
@@ -271,7 +232,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
               );
             })}
 
-            {/* بطاقة الإضافة */}
             {canAddMore && (
               <button
                 type="button"
@@ -288,7 +248,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
               </button>
             )}
 
-            {/* حالة الحد الأقصى */}
             {isOwner && !canAddMore && (
               <div className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 p-4 text-center text-amber-600">
                 <AlertTriangle size={22} className="mb-2 opacity-60" />
@@ -307,7 +266,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
         )}
       </main>
 
-      {/* Modal: إنشاء قاعدة جديدة */}
       {showCreateModal && (
         <CreateDatabaseModal
           onClose={() => setShowCreateModal(false)}
@@ -317,7 +275,6 @@ export function DatabasesManagerPage({ onBack }: DatabasesManagerPageProps) {
         />
       )}
 
-      {/* Modal: حذف قاعدة */}
       {deleteTarget && (
         <DeleteDatabaseModal
           databaseId={deleteTarget.database_id}

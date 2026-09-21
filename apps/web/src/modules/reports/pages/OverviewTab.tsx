@@ -49,7 +49,6 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
       const toISOStr = toISO(dateRange.to);
 
       const [sessionsRes, projectsRes, invoicesRes] = await Promise.all([
-        // جلسات الفترة
         supabase
           .from("work_sessions")
           .select(
@@ -60,10 +59,8 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
           .not("ended_at", "is", null)
           .is("voided_at", null),
 
-        // عدد المشاريع الكلي + المكتملة
         supabase.from("projects").select("id, status, is_archived").eq("is_archived", false),
 
-        // الفواتير المدفوعة/الصادرة في الفترة (للعائدات)
         supabase
           .from("invoices")
           .select("id, status, issued_date, invoice_items(quantity, unit_price)")
@@ -80,7 +77,6 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
       setProjectsCount(projects.length);
       setCompletedCount(projects.filter((p) => p.status === "completed").length);
 
-      // العائدات = مجموع (quantity × unit_price) من invoice_items
       const inv = (invoicesRes.data as { invoice_items: { quantity: number; unit_price: number }[] }[] | null) ?? [];
       let total = 0;
       for (const i of inv) {
@@ -99,7 +95,6 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
     };
   }, [dateRange.from, dateRange.to]);
 
-  // ============== KPIs ==============
   const totalProduction = useMemo(
     () => sessions.filter((s) => s.session_type === "production").reduce((s, x) => s + (x.duration_seconds ?? 0), 0),
     [sessions]
@@ -113,7 +108,6 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
     return (completedCount / projectsCount) * 100;
   }, [projectsCount, completedCount]);
 
-  // ============== Charts ==============
   const pieData = useMemo(() => {
     return [
       { name: t("reports.production"), value: Math.round(totalProduction / 60), color: "#3b82f6" },
@@ -121,7 +115,6 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
     ].filter((d) => d.value > 0);
   }, [totalProduction, totalDowntime, t]);
 
-  // آخر 30 يوماً: تجميع إنتاجية اليوم
   const dailyBars = useMemo(() => {
     const map = new Map<string, { date: string; production: number; downtime: number }>();
     for (const s of sessions) {
@@ -145,8 +138,8 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* KPI Cards */}
+    <div className="flex flex-col gap-3 sm:gap-4">
+      {/* KPI Cards — 2 cols mobile, 4 desktop */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           icon={Clock}
@@ -179,16 +172,16 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <ChartCard title={t("reports.charts.productionOverTime")}>
             {dailyBars.length === 0 ? (
               <EmptyState icon={Package} message={t("reports.noData")} />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyBars}>
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <BarChart data={dailyBars} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
+                  <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" />
                   <Tooltip
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
                     formatter={(value: number) => `${value} ${t("setup.hoursShort")}`}
@@ -208,7 +201,7 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={3}>
+                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={3}>
                   {pieData.map((entry, i) => (
                     <Cell key={i} fill={entry.color} />
                   ))}

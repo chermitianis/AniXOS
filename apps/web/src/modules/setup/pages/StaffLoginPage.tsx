@@ -25,7 +25,7 @@ export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps)
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-3 sm:p-4">
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-blue-500/20 blur-3xl" />
 
@@ -34,17 +34,19 @@ export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps)
           <LanguageSwitcher variant="full" />
         </div>
 
-        <form onSubmit={handleSubmit} className="rounded-2xl border border-white/10 bg-white p-8 shadow-2xl">
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-white/10 bg-white p-5 shadow-2xl sm:p-8">
           <div className="mb-7 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-2xl font-extrabold text-white shadow-lg shadow-indigo-300">
               AX
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-slate-800">{t("setup.staffLoginTitle")}</h1>
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
+              {t("setup.staffLoginTitle")}
+            </h1>
           </div>
 
           <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.email")}</label>
           <div className="relative mb-4">
-            <Mail className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={19} />
+            <Mail className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-slate-400" size={19} />
             <input
               type="email"
               value={email}
@@ -58,7 +60,7 @@ export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps)
 
           <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.password")}</label>
           <div className="relative mb-5">
-            <Lock className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={19} />
+            <Lock className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-slate-400" size={19} />
             <input
               type="password"
               value={password}

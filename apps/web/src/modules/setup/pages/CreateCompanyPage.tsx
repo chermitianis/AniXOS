@@ -40,7 +40,6 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
         return;
       }
 
-      // تسجيل دخول المالك مباشرة بحسابه الذي أُنشئ للتو
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: ownerEmail,
         password: ownerPassword,
@@ -58,8 +57,11 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
     }
   }
 
+  const inputClass =
+    "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50";
+
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-3 sm:p-4">
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-blue-500/20 blur-3xl" />
 
@@ -68,60 +70,63 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
           <LanguageSwitcher variant="full" />
         </div>
 
-        <form onSubmit={handleSubmit} className="rounded-2xl border border-white/10 bg-white p-8 shadow-2xl">
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-white/10 bg-white p-5 shadow-2xl sm:p-8">
           <div className="mb-6 text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-300">
               <Building2 size={26} />
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-slate-800">{t("setup.createCompanyTitle")}</h1>
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
+              {t("setup.createCompanyTitle")}
+            </h1>
           </div>
 
-        <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.companyName")}</label>
-        <input
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
-          required
-        />
+          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.companyName")}</label>
+          <input
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            className={`mb-3 ${inputClass}`}
+            required
+          />
 
-        <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.industry")}</label>
-        <input
-          value={industry}
-          onChange={(e) => setIndustry(e.target.value)}
-          placeholder={t("setup.industryPlaceholder")}
-          className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
-        />
+          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.industry")}</label>
+          <input
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            placeholder={t("setup.industryPlaceholder")}
+            className={`mb-3 ${inputClass}`}
+          />
 
-        <hr className="my-4 border-slate-200" />
+          <hr className="my-4 border-slate-200" />
 
-        <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.ownerFullName")}</label>
-        <input
-          value={ownerFullName}
-          onChange={(e) => setOwnerFullName(e.target.value)}
-          className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
-          required
-        />
+          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.ownerFullName")}</label>
+          <input
+            value={ownerFullName}
+            onChange={(e) => setOwnerFullName(e.target.value)}
+            className={`mb-3 ${inputClass}`}
+            required
+          />
 
-        <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.email")}</label>
-        <input
-          type="email"
-          value={ownerEmail}
-          onChange={(e) => setOwnerEmail(e.target.value)}
-          className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
-          required
-        />
+          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.email")}</label>
+          <input
+            type="email"
+            value={ownerEmail}
+            onChange={(e) => setOwnerEmail(e.target.value)}
+            className={`mb-3 ${inputClass}`}
+            dir="ltr"
+            required
+          />
 
-        <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.password")}</label>
-        <input
-          type="password"
-          value={ownerPassword}
-          onChange={(e) => setOwnerPassword(e.target.value)}
-          minLength={8}
-          className="mb-4 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
-          required
-        />
+          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.password")}</label>
+          <input
+            type="password"
+            value={ownerPassword}
+            onChange={(e) => setOwnerPassword(e.target.value)}
+            minLength={8}
+            className={`mb-4 ${inputClass}`}
+            required
+          />
 
-        {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600">{error}</div>}
+          {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600">{error}</div>}
 
           <button
             type="submit"

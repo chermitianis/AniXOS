@@ -4,13 +4,10 @@ type Trend = "up" | "down" | "neutral";
 
 interface KpiCardProps {
   icon: LucideIcon;
-  /** لون الأيقونة (Tailwind classes) — مثال: "bg-indigo-100 text-indigo-600" */
   iconBg: string;
   label: string;
   value: string | number;
-  /** نسبة التغيير (اختياري) — مثال: 12.5 لـ +12.5% */
   changePercent?: number | null;
-  /** نص صغير تحت القيمة — مثال: "vs mois dernier" */
   subtitle?: string;
 }
 
@@ -33,26 +30,26 @@ export function KpiCard({
   const trendSymbol = trend === "up" ? "▲" : trend === "down" ? "▼" : "";
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${iconBg}`}>
-          <Icon size={18} />
+    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+      <div className="mb-2 flex items-start justify-between sm:mb-3">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg sm:h-9 sm:w-9 ${iconBg}`}>
+          <Icon size={16} />
         </div>
       </div>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+      <div className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-400 sm:text-[11px]">
         {label}
       </div>
-      <div className="mt-1 text-2xl font-extrabold text-slate-800" dir="ltr">
+      <div className="mt-1 truncate text-xl font-extrabold text-slate-800 sm:text-2xl" dir="ltr">
         {value}
       </div>
       {(typeof changePercent === "number" || subtitle) && (
-        <div className="mt-1.5 flex items-center gap-1 text-xs">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
           {typeof changePercent === "number" && !isNaN(changePercent) && (
             <span className={`font-bold ${trendColor}`} dir="ltr">
               {trendSymbol} {Math.abs(changePercent).toFixed(1)}%
             </span>
           )}
-          {subtitle && <span className="text-slate-400">{subtitle}</span>}
+          {subtitle && <span className="truncate text-slate-400">{subtitle}</span>}
         </div>
       )}
     </div>

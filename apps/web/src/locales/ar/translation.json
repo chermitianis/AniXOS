@@ -1009,6 +1009,46 @@
   "groupAdvanced": "متقدم",
   "integrations": "التكاملات"
 },
+
+"costing": {
+  "operationsSection": "مراحل الإنتاج",
+  "materialsSection": "المواد والمستهلكات",
+  "addOperation": "إضافة مرحلة",
+  "addMaterial": "+ إضافة مادة",
+  "noOperations": "لا توجد مراحل مضافة بعد.",
+  "noMaterials": "لا توجد مواد مضافة بعد.",
+  "hours": "الساعات",
+  "hourlyRate": "سعر / ساعة",
+  "subtotal": "المجموع الفرعي",
+  "quantity": "الكمية",
+  "unit": "الوحدة",
+  "unitPrice": "سعر الوحدة",
+  "materialName": "اسم المادة",
+  "materialCode": "الرمز",
+  "materialPreset": "قالب",
+  "materialPresetChoose": "اختر قالبًا",
+  "customLabelPlaceholder": "اسم مخصص للمرحلة",
+  "activePiece": "القطعة النشطة",
+  "grandTotal": "إجمالي القطعة",
+  "saveEstimate": "حفظ",
+  "validateEstimate": "اعتماد",
+  "lastSavedAt": "آخر حفظ",
+  "pivotBadge": "محورية",
+  "cncPivotTitle": "المرحلة المحورية — تشغيل CNC",
+  "cncPivotHint": "يتم مزامنة ساعات وتكلفة CNC تلقائيًا مع بطاقة القطعة (تظهر في الكشك والتقارير والتخطيط).",
+  "stage": {
+    "usinage_cnc": "تشغيل CNC",
+    "tournage_classique": "خراطة عادية",
+    "usinage_classique": "تشغيل عادي",
+    "rectification": "تجليخ",
+    "ajustage": "تسوية / ضبط",
+    "stt": "معالجة حرارية",
+    "anodisation": "أنودة",
+    "controle_qualite": "مراقبة الجودة",
+    "autre": "مرحلة أخرى"
+  }
+},
+
 "odoo": {
   "title": "Odoo SaaS",
   "subtitle": "زامن AniXOS مع نظام Odoo ERP",
