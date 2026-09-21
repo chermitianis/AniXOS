@@ -6,7 +6,13 @@ import {
   clearActiveCompany,
 } from "../lib/activeCompany";
 import { clearCompanyIdCache } from "../lib/companyContext";
-import type { StaffUser, Role } from "../shared/types/database";
+import type { StaffUser as StaffUserBase, Role } from "../shared/types/database";
+
+// Extension locale (voir règle d'or : ne jamais éditer shared/types/database.ts
+// directement, il est régénéré et encodé en UTF-16LE) — ajoute le champ du
+// verrou optionnel des Paramètres pour le propriétaire (Étape 8 de la refonte
+// admin). `select("*")` ramène déjà la colonne côté DB, seul le typage manquait.
+export type StaffUser = StaffUserBase & { owner_settings_lock_enabled?: boolean };
 
 interface StaffAuthState {
   session: Session | null;
@@ -16,6 +22,9 @@ interface StaffAuthState {
   error: string | null;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  /** Recharge staffUser/role depuis le serveur (ex : après activation du
+   * verrou des Paramètres) sans passer par un rechargement de page. */
+  refreshStaffUser: () => Promise<void>;
 }
 
 const StaffAuthContext = createContext<StaffAuthState | undefined>(undefined);
@@ -114,8 +123,14 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     setRole(null);
   }
 
+  async function refreshStaffUser() {
+    if (session?.user) {
+      await loadStaffProfile(session.user.id);
+    }
+  }
+
   return (
-    <StaffAuthContext.Provider value={{ session, staffUser, role, isLoading, error, signIn, signOut }}>
+    <StaffAuthContext.Provider value={{ session, staffUser, role, isLoading, error, signIn, signOut, refreshStaffUser }}>
       {children}
     </StaffAuthContext.Provider>
   );

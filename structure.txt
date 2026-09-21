@@ -60,8 +60,23 @@ AniXOS
 │       │   │       └── translation.json
 │       │   ├── modules
 │       │   │   ├── accounting
+│       │   │   │   ├── api
+│       │   │   │   │   └── accountingApi.ts
+│       │   │   │   ├── components
+│       │   │   │   │   └── SupplierInvoiceModal.tsx
+│       │   │   │   └── pages
+│       │   │   │       ├── AccountingAdminPage.tsx
+│       │   │   │       └── AccountingPage.tsx
 │       │   │   ├── admin
 │       │   │   ├── crm
+│       │   │   │   ├── api
+│       │   │   │   │   └── crmApi.ts
+│       │   │   │   ├── components
+│       │   │   │   │   ├── InteractionModal.tsx
+│       │   │   │   │   └── ProspectModal.tsx
+│       │   │   │   └── pages
+│       │   │   │       ├── CRMAdminPage.tsx
+│       │   │   │       └── CrmPage.tsx
 │       │   │   ├── developer
 │       │   │   │   ├── components
 │       │   │   │   │   ├── AccountDetailsModal.tsx
@@ -112,10 +127,17 @@ AniXOS
 │       │   │   │       └── WorkerLoginPage.tsx
 │       │   │   ├── manager
 │       │   │   ├── nomenclature
+│       │   │   │   ├── api
+│       │   │   │   │   └── costingApi.ts
 │       │   │   │   ├── components
-│       │   │   │   │   └── CostingModal.tsx
+│       │   │   │   │   ├── CostingEditorPage.tsx
+│       │   │   │   │   ├── CostingModal.tsx
+│       │   │   │   │   ├── MaterialCard.tsx
+│       │   │   │   │   └── OperationCard.tsx
 │       │   │   │   ├── defaults
 │       │   │   │   │   └── defaultTemplate.ts
+│       │   │   │   ├── lib
+│       │   │   │   │   └── costingConstants.ts
 │       │   │   │   └── pages
 │       │   │   │       ├── CostingArchivePage.tsx
 │       │   │   │       ├── CostingPage.tsx
@@ -150,6 +172,7 @@ AniXOS
 │       │   │   │   ├── pages
 │       │   │   │   │   ├── DatabasePage.tsx
 │       │   │   │   │   ├── DeviceSettingsPage.tsx
+│       │   │   │   │   ├── MyProfilePage.tsx
 │       │   │   │   │   ├── RolesAdminPage.tsx
 │       │   │   │   │   ├── SettingsPage.tsx
 │       │   │   │   │   └── StaffAdminPage.tsx
@@ -345,7 +368,12 @@ AniXOS
 │   │   ├── 0064_odoo_config_extend.sql
 │   │   ├── 0065_odoo_sync_tracking.sql
 │   │   ├── 0066_odoo_sync_modules_extend.sql
-│   │   └── 0067_worker_planning_qr.sql
+│   │   ├── 0067_worker_planning_qr.sql
+│   │   ├── 0068_crm_prospects.sql
+│   │   ├── 0069_accounting_module.sql
+│   │   ├── 0070_costing_redesign.sql
+│   │   ├── 0071_production_planning_execution_context.sql
+│   │   └── 0072_worker_single_device_session.sql
 │   ├── config.toml
 │   ├── seed.sql
 │   └── supabase.zip

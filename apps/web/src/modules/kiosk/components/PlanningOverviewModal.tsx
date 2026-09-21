@@ -124,7 +124,9 @@ export function PlanningOverviewModal({ onClose }: Props) {
                       <th className="px-3 py-2.5 text-start">{t("setup.workerCol")}</th>
                       <th className="px-3 py-2.5 text-start">{t("setup.projectCol")}</th>
                       <th className="px-3 py-2.5 text-start">{t("kiosk.pieceRefCol")}</th>
+                      <th className="px-3 py-2.5 text-start">{t("setup.manufacturingOrder")}</th>
                       <th className="px-3 py-2.5 text-left">{t("kiosk.quantityCol")}</th>
+                      <th className="px-3 py-2.5 text-left">{t("kiosk.estimation")}</th>
                       <th className="px-3 py-2.5 text-start">{t("setup.client")}</th>
                       <th className="px-3 py-2.5 text-start">{t("kiosk.materialCol")}</th>
                     </tr>
@@ -135,14 +137,18 @@ export function PlanningOverviewModal({ onClose }: Props) {
                         <td className="px-3 py-2.5 text-start font-semibold text-indigo-700">{r.worker_name}</td>
                         <td className="px-3 py-2.5 text-start font-semibold text-slate-700">{r.project_name ?? "—"}</td>
                         <td className="px-3 py-2.5 text-start text-slate-500">{r.piece_ref ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-start text-slate-500" dir="ltr">{r.order_number ?? "—"}</td>
                         <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">{r.quantity ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
+                          {r.estimated_time_minutes ? `${r.estimated_time_minutes} ${t("kiosk.minutesShort")}` : "—"}
+                        </td>
                         <td className="px-3 py-2.5 text-start text-slate-500">{r.client_name ?? "—"}</td>
                         <td className="px-3 py-2.5 text-start text-slate-500">{r.material ?? "—"}</td>
                       </tr>
                     ))}
                     {selectedRows.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-6 text-center text-slate-400">
+                        <td colSpan={8} className="py-6 text-center text-slate-400">
                           {t("kiosk.noPlanningForMachine")}
                         </td>
                       </tr>

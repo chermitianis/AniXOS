@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Users2, Shield, Smartphone, Link2, Database as DatabaseIcon, UserCircle2,
+  Users2, Shield, Smartphone, Link2, Database as DatabaseIcon, UserCircle2, ShieldCheck,
 } from "lucide-react";
 import { SettingsGate } from "../components/SettingsGate";
 import { DeviceSettingsPage } from "./DeviceSettingsPage";
@@ -10,6 +10,7 @@ import { StaffAdminPage } from "./StaffAdminPage";
 import { DatabasePage } from "./DatabasePage";
 import { OdooIntegrationPanel } from "../components/OdooIntegrationPanel";
 import { MyProfilePage } from "./MyProfilePage";
+import { PlanningQrSecurityCard } from "../components/PlanningQrSecurityCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +19,7 @@ type SettingsTab =
   | "profile"
   | "staff"
   | "roles"
+  | "security"
   | "device"
   | "integrations"
   | "database";
@@ -45,6 +47,7 @@ const TABS: TabDef[] = [
   // Organisation
   { key: "staff", labelKey: "nav.staff", icon: Users2, group: "organization" },
   { key: "roles", labelKey: "nav.roles", icon: Shield, group: "organization" },
+  { key: "security", labelKey: "nav.security", icon: ShieldCheck, group: "organization" },
   { key: "device", labelKey: "nav.device", icon: Smartphone, group: "organization" },
   // Intégrations
   { key: "integrations", labelKey: "settings.integrations", icon: Link2, group: "integrations" },
@@ -162,6 +165,7 @@ export function SettingsPage({
           )}
           {activeTab === "staff" && <StaffAdminPage />}
           {activeTab === "roles" && <RolesAdminPage />}
+          {activeTab === "security" && <PlanningQrSecurityCard />}
           {activeTab === "device" && <DeviceSettingsPage />}
           {activeTab === "integrations" && <OdooIntegrationPanel />}
           {activeTab === "database" && <DatabasePage />}

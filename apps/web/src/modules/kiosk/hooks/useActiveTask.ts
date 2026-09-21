@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   fetchTodayPlanningForWorker,
+  fetchPlanningById,
   fetchMachineById,
   fetchProjectById,
   fetchPieceTaskById,
@@ -80,10 +81,16 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
       const openPieceId = openSessions.find((s) => s.piece_task_id)?.piece_task_id ?? null;
 
       if (openPieceId && isMounted) {
+        const openSession = openSessions.find((s) => s.piece_task_id === openPieceId) ?? null;
         const piece = await fetchPieceTaskById(openPieceId);
         if (isMounted && piece) {
+          setPlanningId(openSession?.planning_id ?? null);
+          const planning = openSession?.planning_id ? await fetchPlanningById(openSession.planning_id) : null;
+          const machineId = openSession?.machine_id ?? planning?.machine_id ?? null;
+          const projectId = openSession?.project_id ?? planning?.project_id ?? piece.project_id;
+          setMachine(machineId ? await fetchMachineById(machineId) : null);
           setPieceTask(piece);
-          setProject(await fetchProjectById(piece.project_id));
+          setProject(await fetchProjectById(projectId));
           await openShiftPieceWork(shiftId, workerId, piece.id, piece.project_id);
         }
       } else if (planning && isMounted) {
@@ -125,6 +132,8 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
       if (matchingEntry?.machine_id) {
         setMachine(await fetchMachineById(matchingEntry.machine_id));
+      } else {
+        setMachine(null);
       }
 
       if (piece) {

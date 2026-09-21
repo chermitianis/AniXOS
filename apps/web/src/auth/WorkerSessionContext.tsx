@@ -9,7 +9,8 @@
 //
 // تدعم مسارين للتحقق من كلمة السر:
 //   1) أونلاين: عبر worker-login Edge Function (تحقق آمن + قفل مركزي)
-//   2) أوفلاين: عبر كاش bcrypt محلي (localDb.workerCredentials) + قفل محلي
+//   2) بعد الدخول: تستمر الجلسة المفتوحة أوفلاين، لكن لا يبدأ دخول جديد
+//      أوفلاين لأن قفل الجهاز الواحد يحتاج تحققاً مركزياً.
 //
 // الفصل بين الحصة والحدث: تسجيل الدخول الحقيقي (وليس كل إعادة تحميل صفحة)
 // يبدأ "حصة" (work_shifts) عبر startWorkerShift، وتسجيل الخروج الصريح فقط
@@ -22,17 +23,11 @@
 // ============================================================================
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import bcrypt from "bcryptjs";
 import { supabase } from "../lib/supabaseClient";
-import { localDb } from "../lib/localDb";
 import { connectivityMonitor } from "../lib/connectivity";
-import { enqueueSync } from "../lib/syncQueue";
-import { getCachedCompanyIdSync } from "../lib/companyContext";
-import { startWorkerShift, endWorkerShift, fetchOpenSessionsForWorker } from "../modules/kiosk/api/kioskApi";
+import { startWorkerShift, endWorkerShift, fetchOpenSessionsForWorker, WorkerAlreadyConnectedError } from "../modules/kiosk/api/kioskApi";
 
 const WORKER_SESSION_STORAGE_KEY = "anixos_worker_session";
-const LOCAL_MAX_ATTEMPTS = 5;
-const LOCAL_LOCK_MINUTES = 15;
 
 export interface ActiveWorkerProfile {
   id: string;
@@ -100,63 +95,6 @@ async function loginOnline(username: string, password: string): Promise<WorkerLo
   };
 }
 
-async function loginOffline(username: string, password: string): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> }> {
-  const cached = await localDb.workerCredentials.where("username").equals(username).first();
-
-  if (!cached || !cached.is_active) {
-    return { success: false, messageKey: "kioskLogin.invalidCredentialsOffline" };
-  }
-
-  if (cached.local_locked_until && new Date(cached.local_locked_until) > new Date()) {
-    const minutesLeft = Math.ceil((new Date(cached.local_locked_until).getTime() - Date.now()) / 60000);
-    return { success: false, messageKey: "kioskLogin.accountLockedLocal", messageParams: { minutes: minutesLeft } };
-  }
-
-  const matches = bcrypt.compareSync(password, cached.password_hash);
-
-  if (!matches) {
-    const newAttempts = cached.local_failed_attempts + 1;
-    const shouldLock = newAttempts >= LOCAL_MAX_ATTEMPTS;
-    await localDb.workerCredentials.update(cached.id, {
-      local_failed_attempts: shouldLock ? 0 : newAttempts,
-      local_locked_until: shouldLock
-        ? new Date(Date.now() + LOCAL_LOCK_MINUTES * 60000).toISOString()
-        : null,
-    });
-    return shouldLock
-      ? { success: false, messageKey: "kioskLogin.accountLockedLocalNew", messageParams: { minutes: LOCAL_LOCK_MINUTES } }
-      : { success: false, messageKey: "kioskLogin.invalidCredentialsOffline" };
-  }
-
-  await localDb.workerCredentials.update(cached.id, {
-    local_failed_attempts: 0,
-    local_locked_until: null,
-  });
-
-  const sessionStartedAt = new Date().toISOString();
-
-  // نُسجِّل حدث الدخول في سجل الأحداث المحلي (سيُزامَن لاحقاً)، لأن
-  // activity_log نفسه لا يُكتب مباشرة أوفلاين بل عبر الطابور فقط
-  await enqueueSync("activity_log", "insert", {
-    id: crypto.randomUUID(),
-    company_id: getCachedCompanyIdSync(),
-    worker_id: cached.id,
-    event_type: "login",
-    event_label: `${cached.full_name} — connexion hors ligne`,
-    event_time: sessionStartedAt,
-  });
-
-  return {
-    success: true,
-    profile: {
-      id: cached.id,
-      full_name: cached.full_name,
-      photo_url: cached.photo_url,
-      session_started_at: sessionStartedAt,
-    },
-  };
-}
-
 export function WorkerSessionProvider({ children }: { children: ReactNode }) {
   const [activeWorker, setActiveWorker] = useState<ActiveWorkerProfile | null>(loadPersistedSession);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -175,22 +113,30 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     try {
       let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> };
 
-      if (connectivityMonitor.getStatus()) {
-        result = await loginOnline(username, password);
-        // فشل الاتصال تحديداً (وليس خطأ بيانات) → نجرّب أوفلاين تلقائياً
-        // (يُحدَّد عبر علم isConnectionError الصريح، وليس مطابقة نص هشة)
-        if (!result.success && result.isConnectionError) {
-          result = await loginOffline(username, password);
-        }
-      } else {
-        result = await loginOffline(username, password);
+      // لا يمكن ضمان قفل جهاز واحد أثناء غياب الخادم؛ لذلك لا نسمح
+      // بتسجيل دخول جديد للعامل أوفلاين. الجلسة المفتوحة تستمر بالعمل
+      // أوفلاين، لكن إنشاء جلسة جديدة يتطلب تحققاً مركزياً.
+      if (!connectivityMonitor.getStatus()) {
+        return { success: false, messageKey: "kioskLogin.connectionRequired" };
+      }
+
+      result = await loginOnline(username, password);
+      if (!result.success && result.isConnectionError) {
+        return { success: false, messageKey: "kioskLogin.connectionRequired" };
       }
 
       if (result.success && result.profile) {
         // تبدأ الحصة هنا فقط — عند دخول حقيقي، وليس عند كل إعادة تحميل صفحة
-        const shift = await startWorkerShift(result.profile.id, null);
-        setActiveWorker({ ...result.profile, shift_id: shift.id });
-        return { success: true };
+        try {
+          const shift = await startWorkerShift(result.profile.id, null);
+          setActiveWorker({ ...result.profile, shift_id: shift.id });
+          return { success: true };
+        } catch (error) {
+          if (error instanceof WorkerAlreadyConnectedError || (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED")) {
+            return { success: false, messageKey: "kioskLogin.alreadyConnected" };
+          }
+          throw error;
+        }
       }
 
       return { success: false, messageKey: result.messageKey, messageParams: result.messageParams };

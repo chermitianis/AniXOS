@@ -92,6 +92,19 @@ export function PlanningAdminPage() {
         return;
       }
 
+      const duplicate = entries.some(
+        (entry) =>
+          entry.worker_id === workerId &&
+          entry.machine_id === selectedMachineId &&
+          entry.planned_date === plannedDate &&
+          entry.shift_number === shiftNumber &&
+          entry.status !== "cancelled"
+      );
+      if (duplicate) {
+        setError(t("setup.assignmentAlreadyExists", "Cette affectation existe déjà pour ce poste."));
+        return;
+      }
+
       const { data: linkedPiece } = await supabase
         .from("pieces_tasks")
         .select("id")

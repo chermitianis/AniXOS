@@ -108,7 +108,8 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
       .eq("worker_id", workerId)
       .lte("planned_date", today)
       .in("status", ["scheduled", "in_progress"])
-      .order("planned_date")
+      // اليوم أولاً، ثم التخصيصات المتأخرة؛ لا نبدأ بمهمة قديمة إذا وُجدت مهمة اليوم.
+      .order("planned_date", { ascending: false })
       .order("shift_number");
 
     if (!error && data) {
@@ -122,12 +123,30 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
     .where("worker_id")
     .equals(workerId)
     .filter((p) => p.planned_date <= today && (p.status === "scheduled" || p.status === "in_progress"))
-    .sortBy("planned_date");
+    .toArray()
+    .then((rows) => rows.sort((a, b) => {
+      const dateOrder = b.planned_date.localeCompare(a.planned_date);
+      if (dateOrder !== 0) return dateOrder;
+      return String(a.shift_number ?? "").localeCompare(String(b.shift_number ?? ""));
+    }));
 }
 
 export async function fetchTodayPlanningForWorker(workerId: string): Promise<PlanningEntry | null> {
   const queue = await fetchWorkerPlanningQueue(workerId);
   return queue[0] ?? null;
+}
+
+/** يعيد سطر التخطيط عند الحاجة لاستعادة سياق جلسة إنتاج مفتوحة. */
+export async function fetchPlanningById(id: string): Promise<PlanningEntry | null> {
+  if (connectivityMonitor.getStatus()) {
+    const { data, error } = await supabase.from("planning").select("*").eq("id", id).maybeSingle();
+    if (!error) {
+      const row = data as PlanningEntry | null;
+      if (row) await localDb.planning.put(row);
+      return row;
+    }
+  }
+  return (await localDb.planning.get(id)) ?? null;
 }
 
 // ------------------------------------------------------------------
@@ -209,6 +228,14 @@ export async function fetchActiveMachinesList(): Promise<Machine[]> {
 // الحصة (WorkShift) — دوام العامل الكامل، منفصل عن الأحداث
 // ============================================================================
 
+/** يُعاد إلى طبقة العرض عندما يملك العامل حصة مفتوحة على جهاز آخر. */
+export class WorkerAlreadyConnectedError extends Error {
+  constructor() {
+    super("WORKER_ALREADY_CONNECTED");
+    this.name = "WorkerAlreadyConnectedError";
+  }
+}
+
 /** تبدأ عند تسجيل دخول العامل فقط. تُستدعى مرة واحدة لكل دخول حقيقي؛ إعادة
  * تحميل الصفحة لا تُنشئ حصة جديدة لأن WorkerSessionContext يستعيد shift_id
  * المحفوظ محلياً بدل استدعاء هذه الدالة مجدداً. */
@@ -216,19 +243,29 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
   const companyId = await resolveCompanyId();
   if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
 
+  // فحص محلي مكمل: يمنع إنشاء حصة ثانية حتى عندما يكون الجهاز مؤقتاً بلا
+  // اتصال. القفل المركزي أدناه هو المرجع النهائي عند الاتصال.
+  const localExisting = await localDb.workShifts
+    .where("worker_id")
+    .equals(workerId)
+    .filter((shift) => shift.ended_at === null)
+    .first();
+  if (localExisting) throw new WorkerAlreadyConnectedError();
+
   // فحص أول: هل توجد أصلاً حصة مفتوحة لهذا العامل؟ (يمنع الإدراج المكرر عند
   // نقرة مزدوجة على زر الدخول أو استدعاء مزدوج في وضع React StrictMode)
   if (connectivityMonitor.getStatus()) {
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("work_shifts")
       .select("*")
       .eq("worker_id", workerId)
       .is("ended_at", null)
       .maybeSingle();
+    if (existingError) throw existingError;
     if (existing) {
-      const existingShift = existing as WorkShift;
-      await localDb.workShifts.put(existingShift);
-      return existingShift;
+      // لا نعيد استخدام الحصة: وجودها يعني أن العامل ما زال متصلاً من
+      // جهاز آخر. تسجيل الخروج الصريح فقط يحرر القفل المركزي.
+      throw new WorkerAlreadyConnectedError();
     }
   }
 
@@ -260,10 +297,8 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
         .is("ended_at", null)
         .maybeSingle();
       if (winner) {
-        const winnerShift = winner as WorkShift;
         await localDb.workShifts.delete(shift.id);
-        await localDb.workShifts.put(winnerShift);
-        return winnerShift;
+        throw new WorkerAlreadyConnectedError();
       }
     }
   }
@@ -907,6 +942,12 @@ export interface MachinePlanningRow {
   worker_id: string;
   worker_name: string;
   shift_number: string | null;
+  manufacturing_order_id: string | null;
+  order_number: string | null;
+  product_name: string | null;
+  estimated_time_minutes: number | null;
+  drawing_url: string | null;
+  notes: string | null;
 }
 
 /** يجلب مخطط كل الآلات ليوم واحد محدد (افتراضياً اليوم) — يحتاج اتصالاً

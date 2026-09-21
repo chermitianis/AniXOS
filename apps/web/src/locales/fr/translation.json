@@ -44,7 +44,9 @@
     "invalidCredentials": "Nom d'utilisateur ou mot de passe incorrect",
     "invalidCredentialsOffline": "Nom d'utilisateur ou mot de passe incorrect (mode hors ligne)",
     "accountLockedLocal": "Compte temporairement verrouillé, réessayez dans {{minutes}} min",
-    "accountLockedLocalNew": "Compte verrouillé {{minutes}} min après plusieurs tentatives échouées"
+    "accountLockedLocalNew": "Compte verrouillé {{minutes}} min après plusieurs tentatives échouées",
+    "alreadyConnected": "Vous êtes déjà connecté depuis un autre appareil. Veuillez vous déconnecter du premier appareil, puis réessayer.",
+    "connectionRequired": "Une connexion au serveur est nécessaire pour vérifier qu'aucun autre appareil n'est connecté."
   },
   "kiosk": {
     "appLabel": "Interface Opérateur",
@@ -223,7 +225,8 @@
     "quotes": "Devis",
     "invoices": "Factures",
     "purchases": "Achats",
-    "myProfile": "Mon Profil"
+    "myProfile": "Mon Profil",
+    "security": "Sécurité"
   },
   "setup": {
     "fullName": "Nom complet",
@@ -509,10 +512,8 @@
     "editRoleTitle": "Modifier le rôle",
     "cannotDeleteSystemRole": "Un rôle système ne peut pas être supprimé",
     "sessionDetails": "Détails des sessions de travail",
-    "worker": "Opérateur",
     "activity": "Activité",
     "startedAt": "Début",
-    "duration": "Durée",
     "note": "Note",
     "noSessionDetails": "Aucune session enregistrée pour ce projet",
     "staffWord": "employé",
@@ -1200,7 +1201,6 @@
       "autre": "Autre étape"
     }
   },
-
   "odoo": {
     "title": "Odoo SaaS",
     "subtitle": "Synchronisez AniXOS avec votre ERP Odoo",
@@ -1302,5 +1302,38 @@
     "needCredentialsFirst": "Veuillez d'abord remplir les identifiants Odoo ci-dessous",
     "saveAndEnable": "Enregistrer & activer",
     "saveAndActivateSuccess": "Intégration Odoo enregistrée et activée"
+  },
+  "workerPlanning": {
+    "appTitle": "Planning opérateur",
+    "scanTitle": "Scanner le code QR",
+    "scanHint": "Dirigez la caméra vers le code QR fourni par votre entreprise",
+    "scanButton": "Scanner mon code QR",
+    "cameraError": "Impossible d'accéder à la caméra. Vérifiez les autorisations de votre navigateur.",
+    "verifying": "Vérification en cours…",
+    "invalidQr": "Code QR invalide ou expiré. Demandez le nouveau code à votre responsable.",
+    "subscriptionRequired": "Accès temporairement indisponible. Contactez votre entreprise.",
+    "networkError": "Connexion impossible. Vérifiez votre réseau et réessayez.",
+    "sessionRevoked": "Ce code QR n'est plus valide. Demandez le nouveau code à votre responsable.",
+    "refreshButton": "Actualiser",
+    "lastUpdated": "Dernière mise à jour : {{time}}",
+    "neverUpdated": "Pas encore synchronisé",
+    "offlineNotice": "Hors ligne — dernières données enregistrées",
+    "logoutButton": "Se déconnecter",
+    "logoutConfirm": "Se déconnecter de cette entreprise ? Vous devrez rescanner le code QR la prochaine fois."
+  },
+  "workerPlanningSettings": {
+    "title": "Planning opérateur — Code QR",
+    "description": "Ce code QR donne accès, en lecture seule, au planning des machines depuis le téléphone personnel des opérateurs — pratique de communication uniquement, sans lien avec les rapports ou statistiques de l'entreprise.",
+    "noQrYet": "Aucun code QR généré pour le moment",
+    "generatedAt": "Généré le {{date}}",
+    "regenerateCount": "Régénéré {{count}} fois",
+    "regenerateWarning": "Régénérer ce code déconnectera immédiatement tous les téléphones déjà connectés. Ils devront scanner le nouveau code.",
+    "generateButton": "Générer le code QR",
+    "regenerateButton": "Recréer le code QR",
+    "confirmPrompt": "Confirmer la régénération du code QR ?",
+    "confirmRegenerate": "Oui, recréer",
+    "regenerating": "Génération…",
+    "regenerateError": "Échec de la génération du code QR",
+    "ownerOnlyNote": "Visible uniquement par le propriétaire du compte"
   }
 }
