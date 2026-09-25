@@ -341,6 +341,49 @@ export async function endWorkerShift(shiftId: string, workerId: string): Promise
   await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion (hors ligne)");
 }
 
+/** يبحث في السيرفر مباشرة (وليس الكاش المحلي) عن حصة مفتوحة لهذا العامل.
+ * يُستخدم عند إعادة الدخول بعد فقدان بيانات الجهاز (متصفح مُفرَّغ، جهاز آخر)
+ * حين لا توجد جلسة محفوظة محلياً على هذا الجهاز رغم وجود حصة حقيقية مفتوحة
+ * في القاعدة — بدل رفض الدخول بحجة "متصل من جهاز آخر" رغم أن كلمة السر
+ * الصحيحة أُدخلت للتو، نستأنف نفس الحصة بمعطياتها الأصلية دون أي فقد. */
+export async function fetchOpenShiftForWorker(workerId: string): Promise<WorkShift | null> {
+  if (!connectivityMonitor.getStatus()) return null;
+  const { data } = await supabase
+    .from("work_shifts")
+    .select("*")
+    .eq("worker_id", workerId)
+    .is("ended_at", null)
+    .maybeSingle();
+  return (data as WorkShift | null) ?? null;
+}
+
+/** يُعبّئ الكاش المحلي (Dexie) بالحالة الحقيقية من السيرفر لهذا العامل بعد
+ * استئناف حصة كانت مفتوحة على جهاز/متصفح آخر أو بعد فقدان بيانات الجهاز.
+ * بدون هذا، useActiveTask/fetchOpenSessionsForWorker يقرآن من كاش فارغ
+ * محلياً فيظهر للعامل أنه بلا مهمة رغم استمرار حصته وأحداثه فعلياً. */
+export async function hydrateWorkerStateFromServer(workerId: string, shift: WorkShift): Promise<void> {
+  await localDb.workShifts.put(shift);
+
+  const { data: sessions } = await supabase
+    .from("work_sessions")
+    .select("*")
+    .eq("worker_id", workerId)
+    .is("ended_at", null)
+    .is("voided_at", null);
+  for (const s of (sessions as WorkSession[] | null) ?? []) {
+    await localDb.workSessions.put(s);
+  }
+
+  const { data: pieceWork } = await supabase
+    .from("shift_piece_work")
+    .select("*")
+    .eq("shift_id", shift.id)
+    .is("ended_at", null);
+  for (const row of (pieceWork as ShiftPieceWork[] | null) ?? []) {
+    await localDb.shiftPieceWork.put(row);
+  }
+}
+
 /** كل الأحداث المفتوحة حالياً لهذا العامل (حتى 3) — أساس عرض الأزرار النشطة */
 export async function fetchOpenSessionsForWorker(workerId: string): Promise<WorkSession[]> {
   return localDb.workSessions

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarDays, Search, X } from "lucide-react";
+import { CalendarDays, Search, X, FileText } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
-import type { Project, Client } from "../../../shared/types/database";
+import type { Project, Client, Nomenclature } from "../../../shared/types/database";
 
 interface ArchiveRow {
   id: string;
@@ -18,13 +18,18 @@ interface ArchiveRow {
   updated_at: string;
 }
 
-export function CostingArchivePage() {
+interface CostingArchivePageProps {
+  onOpenPiece: (nomenclature: Nomenclature, pieceTaskId: string) => void;
+}
+
+export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
   const [rows, setRows] = useState<ArchiveRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState("");
   const [clientFilter, setClientFilter] = useState("");
   const [pieceQuery, setPieceQuery] = useState("");
@@ -32,38 +37,37 @@ export function CostingArchivePage() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
 
+    // On N'utilise PAS .eq('company_id', ...) — RLS s'en charge côté serveur
     const [
-      { data: nomData },
+      { data: nomData, error: nomErr },
       { data: projData },
       { data: clientData },
-      { data: rowsData },
-      { data: summaryData },
+      { data: opsData },
     ] = await Promise.all([
       supabase
-        .from("nomenclatures")
-        .select("id, name, project_id, status, total_estimated_cost, updated_at, projects(name, code)")
-        .order("updated_at", { ascending: false }),
+      .from("nomenclatures")
+      .select("id, name, project_id, status, total_estimated_cost, updated_at, projects!project_id(name, code)")
+      .eq("status", "valide")
+      .order("updated_at", { ascending: false }),
       supabase.from("projects").select("*").eq("is_archived", false).order("name"),
       supabase.from("clients").select("*").order("name"),
       supabase
         .from("piece_costing_operations")
         .select("nomenclature_id, piece_task_id, pieces_tasks(name)")
         .not("piece_task_id", "is", null),
-      supabase
-        .from("v_piece_costing_summary")
-        .select("nomenclature_id, live_total"),
     ]);
 
-    // Map nomenclature_id → live_total (calculé depuis v_piece_costing_summary)
-    const liveTotalMap = new Map<string, number>();
-    for (const s of (summaryData ?? []) as { nomenclature_id: string; live_total: number }[]) {
-      liveTotalMap.set(s.nomenclature_id, Number(s.live_total ?? 0));
+    if (nomErr) {
+      console.error("[CostingArchive] Erreur nomenclatures:", nomErr);
+      setLoadError(nomErr.message);
+      setIsLoading(false);
+      return;
     }
 
-    // Map nomenclature_id → liste des pièces (via piece_costing_operations)
     const piecesByStudy = new Map<string, Set<string>>();
-    for (const r of (rowsData ?? []) as {
+    for (const r of (opsData ?? []) as {
       nomenclature_id: string;
       piece_task_id: string | null;
       pieces_tasks: { name?: string } | null;
@@ -78,9 +82,6 @@ export function CostingArchivePage() {
     const parsed: ArchiveRow[] = ((nomData ?? []) as Record<string, unknown>[]).map((n) => {
       const proj = n.projects as { name?: string; code?: string } | null;
       const id = n.id as string;
-      // Priorité au live_total (source de vérité) ; sinon total_estimated_cost sauvegardé
-      const liveTotal = liveTotalMap.get(id);
-      const savedTotal = (n.total_estimated_cost as number | null) ?? null;
       return {
         id,
         study_name: n.name as string,
@@ -89,7 +90,7 @@ export function CostingArchivePage() {
         project_code: proj?.code ?? null,
         piece_names: Array.from(piecesByStudy.get(id) ?? []),
         status: n.status as "en_attente" | "valide",
-        total_estimated_cost: liveTotal !== undefined ? liveTotal : savedTotal,
+        total_estimated_cost: (n.total_estimated_cost as number | null) ?? null,
         updated_at: n.updated_at as string,
       };
     });
@@ -107,9 +108,11 @@ export function CostingArchivePage() {
   useEffect(() => {
     if (!staffUser?.company_id) return;
     const channel = createSafeChannel(`costing-archive-${staffUser.company_id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "nomenclatures", filter: `company_id=eq.${staffUser.company_id}` }, () => void load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "piece_costing_operations", filter: `company_id=eq.${staffUser.company_id}` }, () => void load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "piece_costing_materials", filter: `company_id=eq.${staffUser.company_id}` }, () => void load())
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "nomenclatures", filter: `company_id=eq.${staffUser.company_id}` },
+        () => void load()
+      )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
@@ -121,7 +124,8 @@ export function CostingArchivePage() {
     const projectClientMap = new Map(projects.map((p) => [p.id, p.client_id]));
     return rows.filter((r) => {
       if (projectFilter && r.project_id !== projectFilter) return false;
-      if (clientFilter && r.project_id && projectClientMap.get(r.project_id) !== clientFilter) return false;
+      if (clientFilter && r.project_id && projectClientMap.get(r.project_id) !== clientFilter)
+        return false;
       if (q) {
         const matchesStudy = r.study_name.toLowerCase().includes(q);
         const matchesPiece = r.piece_names.some((n) => n.toLowerCase().includes(q));
@@ -139,9 +143,40 @@ export function CostingArchivePage() {
     setDateFilter("");
   }
 
+  async function handleOpen(row: ArchiveRow) {
+    const { data, error } = await supabase
+      .from("nomenclatures")
+      .select("*")
+      .eq("id", row.id)
+      .single();
+    if (error || !data) return;
+    const nom = data as Nomenclature;
+    // Ouvrir la première pièce du projet
+    if (nom.project_id) {
+      const { data: pieces } = await supabase
+        .from("pieces_tasks")
+        .select("id")
+        .eq("project_id", nom.project_id)
+        .order("sequence_order")
+        .limit(1);
+      const firstPiece = (pieces ?? [])[0] as { id: string } | undefined;
+      if (firstPiece) {
+        onOpenPiece(nom, firstPiece.id);
+        return;
+      }
+    }
+    // Fallback : ouvrir sans pièce
+    onOpenPiece(nom, "");
+  }
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-      {/* Filtres */}
+      {loadError && (
+        <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          Erreur de chargement : {loadError}
+        </div>
+      )}
+
       <div className="mb-5 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 sm:p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -218,14 +253,22 @@ export function CostingArchivePage() {
 
       {isLoading ? (
         <div className="p-6 text-center text-sm text-slate-400">{t("common.loading")}</div>
+      ) : rows.length === 0 ? (
+        <div className="p-6 text-center text-sm text-slate-400">
+          Aucun chiffrage validé pour le moment.
+        </div>
       ) : filtered.length === 0 ? (
         <div className="p-6 text-center text-sm text-slate-400">{t("etude.archive.empty")}</div>
       ) : (
         <>
-          {/* Vue mobile : cartes */}
           <div className="flex flex-col gap-2 md:hidden">
             {filtered.map((r) => (
-              <div key={r.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => void handleOpen(r)}
+                className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 text-start transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-bold text-slate-700">
@@ -237,19 +280,10 @@ export function CostingArchivePage() {
                       </div>
                     )}
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      r.status === "valide"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-amber-100 text-amber-700"
-                    }`}
-                  >
-                    {r.status === "valide"
-                      ? t("setup.nomenclatureValide")
-                      : t("setup.nomenclatureEnAttente")}
+                  <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                    {t("setup.nomenclatureValide")}
                   </span>
                 </div>
-
                 {r.piece_names.length > 0 && (
                   <div className="mt-2 text-xs text-slate-500">
                     <span className="text-[10px] uppercase text-slate-400">
@@ -258,7 +292,6 @@ export function CostingArchivePage() {
                     {r.piece_names.join(" · ")}
                   </div>
                 )}
-
                 <div className="mt-2 flex items-end justify-between border-t border-slate-100 pt-2">
                   <div className="text-[10px] text-slate-400" dir="ltr">
                     {new Date(r.updated_at).toLocaleDateString("fr-FR")}
@@ -270,11 +303,10 @@ export function CostingArchivePage() {
                     <span className="ms-1 text-[10px] font-semibold text-indigo-400">TND</span>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
-          {/* Vue desktop : tableau */}
           <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
             <table className="w-full text-sm">
               <thead className="bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
@@ -282,8 +314,13 @@ export function CostingArchivePage() {
                   <th className="px-3 py-2.5 text-start">{t("etude.archive.colProject")}</th>
                   <th className="px-3 py-2.5 text-start">{t("etude.archive.colPieces")}</th>
                   <th className="px-3 py-2.5 text-start">{t("etude.archive.colStatus")}</th>
-                  <th className="px-3 py-2.5 text-left" dir="ltr">{t("etude.archive.colCost")}</th>
-                  <th className="px-3 py-2.5 text-left" dir="ltr">{t("etude.archive.colUpdated")}</th>
+                  <th className="px-3 py-2.5 text-left" dir="ltr">
+                    {t("etude.archive.colCost")}
+                  </th>
+                  <th className="px-3 py-2.5 text-left" dir="ltr">
+                    {t("etude.archive.colUpdated")}
+                  </th>
+                  <th className="px-3 py-2.5 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -303,20 +340,14 @@ export function CostingArchivePage() {
                       {r.piece_names.length > 0 ? r.piece_names.join(" · ") : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-start">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          r.status === "valide"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-amber-100 text-amber-700"
-                        }`}
-                      >
-                        {r.status === "valide"
-                          ? t("setup.nomenclatureValide")
-                          : t("setup.nomenclatureEnAttente")}
+                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">
+                        {t("setup.nomenclatureValide")}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-left font-bold text-slate-700" dir="ltr">
-                      {r.total_estimated_cost !== null ? r.total_estimated_cost.toFixed(2) : "—"}
+                      {r.total_estimated_cost !== null
+                        ? r.total_estimated_cost.toFixed(2)
+                        : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-left text-xs text-slate-400" dir="ltr">
                       {new Date(r.updated_at).toLocaleString("fr-FR", {
@@ -326,6 +357,16 @@ export function CostingArchivePage() {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => void handleOpen(r)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                      >
+                        <FileText size={12} />
+                        {t("setup.viewReport")}
+                      </button>
                     </td>
                   </tr>
                 ))}

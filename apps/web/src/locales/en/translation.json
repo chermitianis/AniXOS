@@ -22,7 +22,10 @@
     "print": "Print",
     "language": "Language",
     "expandMenu": "Expand menu",
-    "collapseMenu": "Collapse menu"
+    "collapseMenu": "Collapse menu",
+    "comingSoon": "Coming soon",
+    "comingSoonBody": "This section will be available soon. Continue using the other modules."
+  
   },
   "auth": {
     "fullName": "Full name",
@@ -198,7 +201,6 @@
     "paddleNotConfiguredBody": "The secure payment system (Paddle) will be enabled very soon. In the meantime, contact us to subscribe manually.",
     "checkoutError": "Unable to start payment. Please try again."
   },
-
   "nav": {
     "dashboard": "Dashboard",
     "reports": "Statistics",
@@ -227,7 +229,10 @@
     "invoices": "Invoices",
     "purchases": "Purchases",
     "myProfile": "My Profile",
-    "security": "Security"
+    "security": "Security",
+    "ingenierie_dossiers": "Technical files",
+    "ingenierie_gammes": "Routings & times",
+    "ingenierie_validation": "Technical validation"
   },
   "navGroup": {
     "overview": "Overview",
@@ -235,7 +240,11 @@
     "production": "Production",
     "commerce": "Commerce",
     "resources": "Resources",
-    "admin": "Administration"
+    "admin": "Administration",
+    "commercial": "Commercial",
+    "ingenierie": "Engineering",
+    "finance": "Finance",
+    "archives": "Archives"
   },
   "setup": {
     "fullName": "Full name",
@@ -663,15 +672,62 @@
     "lockSettingsTitle": "Lock settings",
     "lockSettingsHint": "Ask for your password every time settings are opened.",
     "lockEnabled": "Lock enabled",
-    "lockDisabled": "Lock disabled"
+    "lockDisabled": "Lock disabled",
+    "openShiftsTitle": "Stuck sessions",
+    "suspiciousShift": "Suspicious (+12h)",
+    "forceCloseButton": "Close session",
+    "forceCloseTitle": "Administrative closure",
+    "forceCloseWarning": "Use only when the operator no longer has access to their device (lost, reset) and cannot log out themselves. This action is logged and visible in reports.",
+    "forceCloseStartedAt": "Logged in since {{date}}",
+    "forceCloseEndedAt": "Actual end time (estimate)",
+    "forceCloseReason": "Reason for closing",
+    "forceCloseReasonPlaceholder": "E.g.: lost device, operator unreachable, forgotten session…",
+    "forceCloseReasonRequired": "A reason is required",
+    "forceCloseConfirm": "Close permanently",
+    "forceCloseError": "Failed to close",
+    "browseFiles": "Browse…",
+    "browseHint": "Select several files (drawings, CAD/CAM…) to import their names as pieces at once — no file is uploaded, only the names are used.",
+    "piecesToImport": "{{count}} piece(s) to import",
+    "importPiecesButton": "Import {{count}} piece(s)",
+    "fromValidatedChiffrage": "Create from a validated costing study (optional)",
+    "chooseChiffrage": "— Choose a validated costing study —",
+    "tabAll": "All",
+"tabDraft": "Drafts",
+"tabStudying": "In study",
+"tabApproved": "Approved",
+"tabInProduction": "In production",
+"tabCompleted": "Completed",
+"statusDraft": "Draft",
+"statusStudying": "In study",
+"statusApproved": "Approved",
+"statusInProduction": "In production",
+"statusOnHold": "On hold",
+"statusCompleted": "Completed",
+"statusCancelled": "Cancelled",
+"startStudy": "Take charge",
+"approveStudy": "Approve study",
+"codeAutoNotice": "The project code will be generated automatically (PRJ-YYYY-NNNN) after creation.",
+"tabStudying": "In study",
+"tabInProduction": "In production",
+"tabCompleted": "Completed",
+"statusStudied": "Studied",
+"statusReadyForProduction": "Ready for production",
+"studyProject": "Study",
+"continueStudy": "Continue study",
+"sendToProduction": "Send to production",
+"sendToProductionConfirm": "Send this project to production? It will become available in Manufacturing Orders.",
+"duplicateWarningTitle": "Similar project detected",
+"duplicateWarningBody": "{{count}} project(s) with the same name already exist. Are you sure you want to continue?",
+"duplicateConfirm": "Confirm add",
+"approveStudy": "Approve study"
   },
   "staffAuth": {
     "notLinked": "This account is not linked to any employee in the system"
   },
   "etude": {
     "tabs": {
-      "nomenclature": "Nomenclature",
-      "costing": "Costing",
+      "nomenclature": "Cost studies",
+      "costing": "New costing",
       "archive": "History"
     },
     "costing": {
@@ -700,6 +756,55 @@
       "colCost": "Estimated cost",
       "colUpdated": "Last update"
     }
+  },
+  "production": {
+    "kpi": {
+      "waiting": "Waiting",
+      "ready": "Ready",
+      "inProgress": "In progress",
+      "late": "Late"
+    },
+    "sections": {
+      "waiting": "Waiting pieces",
+      "inProgress": "In progress pieces",
+      "orders": "Manufacturing orders"
+    },
+    "actions": {
+      "preparer": "Prepare",
+      "viewAll": "View all"
+    },
+    "empty": {
+      "waiting": "No waiting pieces",
+      "inProgress": "No in-progress pieces",
+      "orders": "No manufacturing orders"
+    },
+    "piecesDone": "done",
+    "of": {
+  "statusDraft": "Draft",
+  "statusPrepared": "Prepared",
+  "statusScheduled": "Scheduled",
+  "statusInProgress": "In progress",
+  "statusCompleted": "Completed",
+  "statusCancelled": "Cancelled",
+  "statusConfirmed": "Confirmed",
+  "filterAll": "All",
+  "emptyAll": "No manufacturing orders. Create one from « Préparation des dossiers ».",
+  "emptyFilter": "No MO for this filter.",
+  "preparedAt": "Prepared at",
+  "scheduledAt": "Scheduled at",
+  "startedAt": "Started at",
+  "completedAt": "Completed at",
+  "operations": "Operations",
+  "noOps": "No operation defined.",
+  "noMachine": "Machine not assigned",
+  "documents": "Technical documents",
+  "actionSchedule": "Schedule",
+  "actionStart": "Start",
+  "actionComplete": "Complete",
+  "actionCancel": "Cancel",
+  "allDone": "Completed",
+  "gotoPlanning": "Go to planning ({{count}} MO)"
+}
   },
   "crm": {
     "title": "CRM — Prospects & Opportunities",
@@ -750,7 +855,21 @@
     "interactionDate": "Date",
     "interactionSummary": "Summary",
     "interactionSummaryPlaceholder": "Briefly describe this interaction…",
-    "noInteractions": "No interactions for this prospect"
+    "noInteractions": "No interactions for this prospect",
+    "stageQualification": "Qualification",
+    "stageEtude": "Study",
+    "stageChiffrage": "Costing",
+    "stageOffre": "Offer",
+    "priority": "Priority",
+    "priorityBasse": "Low",
+    "priorityNormale": "Normal",
+    "priorityHaute": "High",
+    "priorityUrgente": "Urgent",
+    "contactPerson": "Contact person",
+    "requestedDate": "Date requested by client",
+    "createProjectButton": "Create production project",
+    "confirmCreateProject": "Create the production project from this won opportunity? The client and project will be created automatically without re-entering data.",
+    "projectCreatedSuccess": "Project {{code}} created successfully — find it under Projects."
   },
   "accounting": {
     "title": "Accounting",
@@ -760,6 +879,8 @@
       "invoices": "Client invoices",
       "suppliers": "Supplier invoices",
       "reports": "Reports"
+
+
     },
     "kpi": {
       "revenue": "Revenue",
@@ -831,37 +952,91 @@
     "subscriptionHint": "View and manage your current plan",
     "databasesHint": "Create, open or delete your databases",
     "ownerOnlyActions": "These actions are reserved for the account owner.",
-    "securityNote": "Your personal information is protected. Language and lock are stored locally on this device."
+    "securityNote": "Your personal information is protected. Language and lock are stored locally on this device.",
+    "changePasswordTitle": "Change password",
+"changePasswordButton": "Change password",
+"newPassword": "New password",
+"confirmPassword": "Confirm password",
+"passwordTooShort": "Password must be at least 8 characters",
+"passwordMismatch": "Passwords do not match",
+"passwordChanged": "Password changed successfully"
   },
 
-  "database": {
-    "tab": "Database",
-    "exportTitle": "Export all data",
-    "exportHint": "Downloads a JSON file containing all your company data.",
-    "exportButton": "Export (JSON)",
-    "exporting": "Exporting…",
-    "exportError": "Export failed.",
-    "importTitle": "Import a backup file",
-    "importHint": "Restores data from a previously exported JSON file.",
-    "importButton": "Import (JSON)",
-    "importConfirmButton": "Confirm and restore",
-    "importCancelButton": "Cancel",
-    "importPreviewTitle": "{{count}} record(s) detected in the file — review before confirming",
-    "importExportedAt": "Backup exported on",
-    "importCompanyMismatch": "This file comes from a different company (different ID). Importing will still force-attach it to your current company — double-check this is the right file before continuing.",
-    "importing": "Importing…",
-    "importError": "Import failed.",
-    "importPartial": "{{count}} records imported (some tables skipped).",
-    "importWarningsTitle": "Tables skipped during import:",
-    "importWarningsHint": "Some tables are protected by RLS or depend on existing relations. Import base tables (clients, projects, pieces) first, then retry.",
-    "importSuccess": "{{count}} records imported successfully.",
-    "resetTitle": "Reset database",
-    "resetHint": "Select the categories to erase, then confirm.",
-    "resetButton": "Reset now",
-    "resetting": "Resetting…",
-    "resetSuccess": "Reset completed.",
-    "resetError": "Reset failed."
-  },
+  "generalSettings": {
+  "title": "General settings",
+  "language": "Language",
+  "languageHint": "Interface display language",
+  "theme": "Theme",
+  "themeHint": "Light or dark appearance",
+  "light": "Light",
+  "dark": "Dark",
+  "notifications": "Notifications",
+  "notificationsHint": "Enable in-app notifications"
+},
+
+"database": {
+  "tab": "Database",
+  "exportTitle": "Export all data",
+  "exportHint": "Downloads a JSON file containing all your company data.",
+  "exportButton": "Export (JSON)",
+  "exporting": "Exporting…",
+  "exportError": "Export failed.",
+  "importTitle": "Import a backup file",
+  "importHint": "Restores data from a previously exported JSON file.",
+  "importButton": "Import (JSON)",
+  "importConfirmButton": "Confirm and restore",
+  "importCancelButton": "Cancel",
+  "importPreviewTitle": "{{count}} record(s) detected in file — review before confirming",
+  "importExportedAt": "Backup exported on",
+  "importCompanyMismatch": "This file comes from another company (different identifier). The import will still attach it to your current company — verify this is the correct file before continuing.",
+  "importing": "Importing…",
+  "importError": "Import failed.",
+  "importPartial": "{{count}} records imported (some tables skipped).",
+  "importWarningsTitle": "Tables skipped during import:",
+  "importWarningsHint": "Some tables are protected by RLS or depend on existing relations. Import the base tables first (clients, projects, pieces), then try again.",
+  "importSuccess": "{{count}} records imported successfully.",
+  "resetTitle": "Reset the database",
+  "resetHint": "Select the categories to erase, then confirm.",
+  "resetButton": "Reset now",
+  "resetting": "Resetting…",
+  "resetSuccess": "Reset completed.",
+  "resetError": "Reset failed.",
+  "resetSelectAll": "Select all",
+  "resetDeselectAll": "Deselect all",
+  "resetSelectedCount": "{{count}} categor{{count, plural, one {y} other {ies}}} selected",
+  "tables": {
+    "roles": "Roles",
+    "staff_users": "Staff users",
+    "workers": "Operators",
+    "machines": "CNC machines",
+    "machine_tools": "Machine tools",
+    "clients": "Clients",
+    "projects": "Projects",
+    "quotes": "Quotes",
+    "quote_items": "Quote lines",
+    "manufacturing_orders": "Manufacturing orders",
+    "pieces_tasks": "Pieces / tasks",
+    "planning": "Planning",
+    "work_shifts": "Work shifts",
+    "shift_piece_work": "Shift piece work",
+    "work_sessions": "Operator sessions",
+    "work_session_corrections": "Session corrections",
+    "activity_log": "Activity log",
+    "piece_handoffs": "Piece handoffs",
+    "workshop_reclamations": "Workshop reclamations",
+    "task_types": "Task types",
+    "stop_reasons": "Stop reasons",
+    "inventory_items": "Inventory items",
+    "inventory_transactions": "Inventory movements",
+    "invoices": "Customer invoices",
+    "invoice_items": "Invoice lines",
+    "nomenclatures": "Nomenclatures",
+    "nomenclature_columns": "Nomenclature columns",
+    "nomenclature_rows": "Nomenclature rows",
+    "nomenclature_cells": "Nomenclature cells",
+    "odoo_config": "Odoo configuration"
+  }
+},
   "createAccount": {
     "title": "Create your ANIXOS account",
     "subtitle": "60 days free trial — no card required",

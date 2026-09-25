@@ -1,37 +1,51 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NomenclatureListPage } from "./NomenclatureListPage";
 import { CostingEditorPage } from "../components/CostingEditorPage";
-import { CostingPage } from "./CostingPage";
 import { CostingArchivePage } from "./CostingArchivePage";
+import { useNav } from "../../../app/NavContext";
 import type { Nomenclature } from "../../../shared/types/database";
 
-type EtudeTab = "nomenclature" | "costing" | "archive";
+type EtudeTab = "en_cours" | "historiques";
+
+export interface EditorTarget {
+  nomenclature: Nomenclature;
+  pieceTaskId: string;
+}
 
 export function NomenclaturePage() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<EtudeTab>("nomenclature");
-  const [openItem, setOpenItem] = useState<Nomenclature | null>(null);
+  const nav = useNav();
+  const [activeTab, setActiveTab] = useState<EtudeTab>("en_cours");
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
 
-  const tabs: { key: EtudeTab; label: string }[] = [
-    { key: "nomenclature", label: t("etude.tabs.nomenclature") },
-    { key: "costing",      label: t("etude.tabs.costing") },
-    { key: "archive",      label: t("etude.tabs.archive") },
-  ];
+  useEffect(() => {
+    const params = nav.consumeParams();
+    if (params?.projectId) {
+      setPendingProjectId(params.projectId);
+      setActiveTab("en_cours");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Éditeur plein écran (nouveau composant CostingEditorPage)
-  if (openItem) {
+  if (editorTarget) {
     return (
       <CostingEditorPage
-        nomenclature={openItem}
-        onBack={() => setOpenItem(null)}
+        nomenclature={editorTarget.nomenclature}
+        initialPieceTaskId={editorTarget.pieceTaskId}
+        onBack={() => setEditorTarget(null)}
       />
     );
   }
 
+  const tabs: { key: EtudeTab; label: string; count?: number }[] = [
+    { key: "en_cours", label: t("etude.tabs.nomenclature") },
+    { key: "historiques", label: t("etude.tabs.archive") },
+  ];
+
   return (
     <div>
-      {/* Tabs — scroll horizontal sur mobile */}
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((tab) => (
           <button
@@ -48,11 +62,22 @@ export function NomenclaturePage() {
         ))}
       </div>
 
-      {activeTab === "nomenclature" && (
-        <NomenclatureListPage onOpen={setOpenItem} />
+      {activeTab === "en_cours" && (
+        <NomenclatureListPage
+          onOpenPiece={(nomenclature, pieceTaskId) =>
+            setEditorTarget({ nomenclature, pieceTaskId })
+          }
+          pendingProjectId={pendingProjectId}
+          onPendingProjectHandled={() => setPendingProjectId(null)}
+        />
       )}
-      {activeTab === "costing" && <CostingPage />}
-      {activeTab === "archive" && <CostingArchivePage />}
+      {activeTab === "historiques" && (
+        <CostingArchivePage
+          onOpenPiece={(nomenclature, pieceTaskId) =>
+            setEditorTarget({ nomenclature, pieceTaskId })
+          }
+        />
+      )}
     </div>
   );
 }

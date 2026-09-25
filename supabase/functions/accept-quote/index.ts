@@ -1,12 +1,9 @@
 // ============================================================================
 // accept-quote Edge Function
 //
-// نقطة الانطلاق الفعلية لدورة العمل الكاملة: "قبول الصفقة" (عرض السعر) →
-// إنشاء المشروع تلقائياً → إنشاء أمر تصنيع أولي جاهز لتفصيله لاحقاً إلى
-// قطع (pieces_tasks) عبر شاشة المشاريع، ثم جدولته في المخطط.
-//
-// كل هذا يحدث كخطوة واحدة ذرّية (Atomic): إن فشلت أي خطوة لاحقة، تُلغى كل
-// الخطوات السابقة يدوياً (Manual Rollback)، تماماً كما في tenant-provisioning.
+// Accepter un devis → créer un Project en 'draft' + un Manufacturing Order
+// initial. Le projet entre automatiquement dans le workflow Ingénierie.
+// Le code (PRJ-YYYY-NNNN) est généré par le trigger DB.
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -38,10 +35,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "unauthorized", message: "يجب تسجيل الدخول أولاً" }, 401);
     }
 
-    const { quote_id, project_name, project_code } = await req.json();
+    const { quote_id, project_name } = await req.json();
 
-    if (!quote_id || !project_name || !project_code) {
-      return jsonResponse({ error: "invalid_input", message: "بيانات المشروع الجديد مطلوبة بالكامل" }, 400);
+    if (!quote_id || !project_name) {
+      return jsonResponse(
+        { error: "invalid_input", message: "quote_id et project_name requis" },
+        400,
+      );
     }
 
     const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -50,14 +50,15 @@ Deno.serve(async (req) => {
 
     const { data: companyId, error: companyError } = await callerClient.rpc("get_my_company_id");
     if (companyError || !companyId) {
-      return jsonResponse({ error: "unauthorized", message: "تعذر تحديد شركة المستخدم" }, 403);
+      return jsonResponse(
+        { error: "unauthorized", message: "تعذر تحديد شركة المستخدم" },
+        403,
+      );
     }
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // ------------------------------------------------------------------
-    // 1) جلب عرض السعر وبنوده، والتحقق أنه يخص نفس الشركة وأنه غير مقبول مسبقاً
-    // ------------------------------------------------------------------
+    // 1) Récupérer le devis + items
     const { data: quote, error: quoteError } = await adminClient
       .from("quotes")
       .select("*, quote_items(*)")
@@ -70,40 +71,49 @@ Deno.serve(async (req) => {
     }
 
     if (quote.status === "accepted") {
-      return jsonResponse({ error: "already_accepted", message: "هذا العرض مقبول بالفعل" }, 409);
+      return jsonResponse(
+        { error: "already_accepted", message: "هذا العرض مقبول بالفعل" },
+        409,
+      );
     }
 
-    const quoteItems = (quote.quote_items ?? []) as { quantity: number; unit_price: number; description: string }[];
+    const quoteItems = (quote.quote_items ?? []) as {
+      quantity: number;
+      unit_price: number;
+      description: string;
+    }[];
     const totalAmount = quoteItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
 
     let createdProjectId: string | null = null;
     let createdOrderId: string | null = null;
 
     try {
-      // ------------------------------------------------------------------
-      // 2) إنشاء المشروع، بسعر متفق عليه = إجمالي عرض السعر بالضبط
-      // ------------------------------------------------------------------
+      // 2) Créer le projet — démarre en 'draft', entre dans Ingénierie
       const { data: project, error: projectError } = await adminClient
         .from("projects")
         .insert({
           company_id: companyId,
           client_id: quote.client_id,
           name: project_name,
-          code: project_code,
-          status: "planned",
-          quoted_price: totalAmount,
+          code: null,                                 // ← trigger 0077 le génère
+          status: "draft",                            // ← entre dans Ingénierie
+          quoted_price: totalAmount,                  // ← prix convenu
+          estimated_cost: null,                       // ← sera calculé en Ingénierie
+          opportunity_id: quote.prospect_id ?? null,
         })
         .select()
         .single();
 
       if (projectError || !project) {
-        throw new Error(projectError?.message.includes("duplicate") ? "كود المشروع مستخدم بالفعل" : "تعذر إنشاء المشروع");
+        throw new Error(
+          projectError?.message.includes("duplicate")
+            ? "كود المشروع مستخدم بالفعل"
+            : "تعذر إنشاء المشروع",
+        );
       }
       createdProjectId = project.id;
 
-      // ------------------------------------------------------------------
-      // 3) إنشاء أمر تصنيع أولي مرتبط بالمشروع وبعرض السعر الأصلي
-      // ------------------------------------------------------------------
+      // 3) Créer un ordre de fabrication initial
       const firstItemDescription = quoteItems[0]?.description ?? project_name;
 
       const { data: order, error: orderError } = await adminClient
@@ -125,9 +135,7 @@ Deno.serve(async (req) => {
       }
       createdOrderId = order.id;
 
-      // ------------------------------------------------------------------
-      // 4) تحديث عرض السعر: مقبول، ومرتبط بالمشروع الجديد
-      // ------------------------------------------------------------------
+      // 4) Marquer le devis comme accepté
       const { error: updateQuoteError } = await adminClient
         .from("quotes")
         .update({ status: "accepted", project_id: project.id })
@@ -143,12 +151,20 @@ Deno.serve(async (req) => {
         manufacturing_order: { id: order.id, order_number: order.order_number },
       });
     } catch (innerErr) {
-      // تراجع يدوي كامل بالترتيب العكسي
+      // Rollback manuel
       if (createdOrderId) {
-        await adminClient.from("manufacturing_orders").delete().eq("id", createdOrderId).catch(() => {});
+        await adminClient
+          .from("manufacturing_orders")
+          .delete()
+          .eq("id", createdOrderId)
+          .catch(() => {});
       }
       if (createdProjectId) {
-        await adminClient.from("projects").delete().eq("id", createdProjectId).catch(() => {});
+        await adminClient
+          .from("projects")
+          .delete()
+          .eq("id", createdProjectId)
+          .catch(() => {});
       }
       throw innerErr;
     }

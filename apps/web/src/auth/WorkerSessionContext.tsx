@@ -25,7 +25,14 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { connectivityMonitor } from "../lib/connectivity";
-import { startWorkerShift, endWorkerShift, fetchOpenSessionsForWorker, WorkerAlreadyConnectedError } from "../modules/kiosk/api/kioskApi";
+import {
+  startWorkerShift,
+  endWorkerShift,
+  fetchOpenSessionsForWorker,
+  fetchOpenShiftForWorker,
+  hydrateWorkerStateFromServer,
+  WorkerAlreadyConnectedError,
+} from "../modules/kiosk/api/kioskApi";
 
 const WORKER_SESSION_STORAGE_KEY = "anixos_worker_session";
 
@@ -132,10 +139,29 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
           setActiveWorker({ ...result.profile, shift_id: shift.id });
           return { success: true };
         } catch (error) {
-          if (error instanceof WorkerAlreadyConnectedError || (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED")) {
+          const isAlreadyConnected =
+            error instanceof WorkerAlreadyConnectedError || (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED");
+          if (!isAlreadyConnected) throw error;
+
+          // كلمة السر صحيحة، لكن توجد حصة مفتوحة أصلاً لهذا العامل نفسه —
+          // الأرجح أن بيانات الجهاز الذي بدأ بها الحصة فُقدت (متصفح مُفرَّغ،
+          // جهاز آخر) وليس أن العامل يعمل فعلياً على جهازين في آن واحد.
+          // نستأنف نفس الحصة بمعطياتها الحقيقية من السيرفر بدل رفض الدخول.
+          const existingShift = await fetchOpenShiftForWorker(result.profile.id);
+          if (!existingShift) {
+            // حالة سباق نادرة: الحصة أُغلقت للتو بين الفحصين — أعد المحاولة
             return { success: false, messageKey: "kioskLogin.alreadyConnected" };
           }
-          throw error;
+
+          await hydrateWorkerStateFromServer(result.profile.id, existingShift);
+          setActiveWorker({
+            ...result.profile,
+            // وقت البدء الحقيقي للحصة الأصلية، وليس لحظة إعادة الاتصال هذه —
+            // حتى لا يُعاد احتساب التايمر من الصفر ويُفقَد الوقت الفعلي المنقضي
+            session_started_at: existingShift.started_at,
+            shift_id: existingShift.id,
+          });
+          return { success: true };
         }
       }
 

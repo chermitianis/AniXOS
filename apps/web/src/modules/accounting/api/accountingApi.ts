@@ -43,7 +43,7 @@ export interface ClientInvoice {
   invoice_number: string;
   client_id: string | null;
   project_id: string | null;
-  issue_date: string;
+  issued_date: string;          // ← corrigé (était : issue_date)
   due_date: string | null;
   total: number;
   status: string;              // draft | issued | paid | overdue | cancelled
@@ -84,7 +84,7 @@ export async function listClientInvoices(): Promise<ClientInvoice[]> {
   const { data, error } = await supabase
     .from("invoices")
     .select("*")
-    .order("issue_date", { ascending: false });
+    .order("issued_date", { ascending: false });   // ← corrigé (était : issue_date)
 
   if (error) throw error;
   return (data as ClientInvoice[]) ?? [];

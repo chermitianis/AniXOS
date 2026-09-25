@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Cpu, Wrench, Layers } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { localDb } from "../../../lib/localDb";
 import { connectivityMonitor } from "../../../lib/connectivity";
@@ -8,6 +8,14 @@ import { enqueueSync } from "../../../lib/syncQueue";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
 import type { Machine } from "../../../shared/types/database";
+
+type InterfaceType = "cnc" | "manual" | "both";
+
+const INTERFACE_OPTIONS: { value: InterfaceType; labelKey: string; icon: typeof Cpu; color: string }[] = [
+  { value: "cnc",    labelKey: "setup.interfaceCnc",    icon: Cpu,     color: "text-amber-700 bg-amber-100" },
+  { value: "manual", labelKey: "setup.interfaceManual", icon: Wrench,  color: "text-blue-700 bg-blue-100" },
+  { value: "both",   labelKey: "setup.interfaceBoth",   icon: Layers,  color: "text-slate-700 bg-slate-100" },
+];
 
 function buildEmptyToolRows(companyId: string, machineId: string, count: number, startFrom = 1) {
   return Array.from({ length: count }, (_, index) => ({
@@ -43,6 +51,7 @@ export function MachinesAdminPage() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [machineType, setMachineType] = useState("");
+  const [interfaceType, setInterfaceType] = useState<InterfaceType>("manual");
   const [toolCount, setToolCount] = useState("0");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +81,7 @@ export function MachinesAdminPage() {
     setName("");
     setCode("");
     setMachineType("");
+    setInterfaceType("manual");
     setToolCount("0");
   }
 
@@ -80,6 +90,9 @@ export function MachinesAdminPage() {
     setName(machine.name);
     setCode(machine.code);
     setMachineType(machine.machine_type ?? "");
+    setInterfaceType(
+      ((machine as unknown as { interface_type?: InterfaceType }).interface_type) ?? "manual",
+    );
     setToolCount(String(machine.tool_count ?? 0));
     setError(null);
   }
@@ -108,7 +121,7 @@ export function MachinesAdminPage() {
   async function saveNewMachine(companyId: string, requestedToolCount: number) {
     const machineId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const newMachine: Machine = {
+    const newMachine = {
       id: machineId,
       company_id: companyId,
       name,
@@ -119,15 +132,16 @@ export function MachinesAdminPage() {
       tools_count: null,
       current_status: "idle",
       is_active: true,
+      interface_type: interfaceType,
       created_at: now,
       updated_at: now,
     };
 
-    await localDb.machines.put(newMachine);
+    await localDb.machines.put(newMachine as unknown as Machine);
 
     let savedOnline = false;
     if (connectivityMonitor.getStatus()) {
-      const { error: insertError } = await supabase.from("machines").insert(newMachine);
+      const { error: insertError } = await supabase.from("machines").insert(newMachine as never);
       if (insertError) {
         if (insertError.message.includes("duplicate")) {
           setError(t("setup.codeTaken"));
@@ -155,6 +169,7 @@ export function MachinesAdminPage() {
       name,
       code,
       machine_type: machineType || null,
+      interface_type: interfaceType,
       tool_count: requestedToolCount,
       updated_at: new Date().toISOString(),
     };
@@ -164,7 +179,10 @@ export function MachinesAdminPage() {
 
     let savedOnline = false;
     if (connectivityMonitor.getStatus()) {
-      const { error: updateError } = await supabase.from("machines").update(patch).eq("id", machineId);
+      const { error: updateError } = await supabase
+        .from("machines")
+        .update(patch as never)
+        .eq("id", machineId);
       if (!updateError) savedOnline = true;
       else setError(t("setup.genericError"));
     }
@@ -175,7 +193,12 @@ export function MachinesAdminPage() {
 
     const previousCount = existing?.tool_count ?? 0;
     if (requestedToolCount > previousCount) {
-      const rows = buildEmptyToolRows(companyId, machineId, requestedToolCount - previousCount, previousCount + 1);
+      const rows = buildEmptyToolRows(
+        companyId,
+        machineId,
+        requestedToolCount - previousCount,
+        previousCount + 1,
+      );
       await persistToolRows(rows);
     }
   }
@@ -191,7 +214,11 @@ export function MachinesAdminPage() {
     if (!window.confirm(t("setup.confirmDelete"))) return;
     const { error: deleteError } = await supabase.from("machines").delete().eq("id", id);
     if (deleteError) {
-      setError(deleteError.message.includes("foreign key") || deleteError.message.includes("violates") ? t("setup.cannotDeleteInUse") : t("setup.genericError"));
+      setError(
+        deleteError.message.includes("foreign key") || deleteError.message.includes("violates")
+          ? t("setup.cannotDeleteInUse")
+          : t("setup.genericError"),
+      );
       return;
     }
     if (editingId === id) resetForm();
@@ -229,8 +256,40 @@ export function MachinesAdminPage() {
           <input value={machineType} onChange={(e) => setMachineType(e.target.value)} className={adminInputClass} />
         </AdminField>
 
+        {/* Interface */}
+        <AdminField label={t("setup.machineInterface")}>
+          <div className="grid grid-cols-3 gap-2">
+            {INTERFACE_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const active = interfaceType === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setInterfaceType(opt.value)}
+                  className={`flex flex-col items-center gap-1 rounded-lg border-2 px-2 py-2 text-xs font-semibold transition-colors ${
+                    active
+                      ? `border-indigo-500 ${opt.color}`
+                      : "border-slate-200 text-slate-500 hover:border-slate-300"
+                  }`}
+                >
+                  <Icon size={14} />
+                  {t(opt.labelKey)}
+                </button>
+              );
+            })}
+          </div>
+        </AdminField>
+
         <AdminField label={t("setup.toolCount")}>
-          <input type="number" min="0" step="1" value={toolCount} onChange={(e) => setToolCount(e.target.value)} className={adminInputClass} />
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={toolCount}
+            onChange={(e) => setToolCount(e.target.value)}
+            className={adminInputClass}
+          />
         </AdminField>
 
         {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
@@ -250,37 +309,44 @@ export function MachinesAdminPage() {
           {t("setup.registeredMachines")} ({machines.length})
         </h2>
         <ul className="flex flex-col gap-2">
-          {machines.map((m) => (
-            <li
-              key={m.id}
-              className="rounded-lg bg-slate-50 px-3 py-2 text-sm"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => startEditing(m)}
-                  className="min-w-0 flex-1 text-start"
-                >
-                  <div className="truncate font-semibold text-slate-700 hover:text-blue-600">
-                    {m.name}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-slate-400" dir="ltr">{m.code}</span>
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-600">
-                      {statusLabels[m.current_status]}
-                    </span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => void deleteMachine(m.id)}
-                  className="shrink-0 rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200"
-                  aria-label={t("common.delete")}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </li>
-          ))}
+          {machines.map((m) => {
+            const mInterface =
+              ((m as unknown as { interface_type?: InterfaceType }).interface_type) ?? "manual";
+            const interfaceMeta = INTERFACE_OPTIONS.find((o) => o.value === mInterface) ?? INTERFACE_OPTIONS[1];
+            const InterfaceIcon = interfaceMeta.icon;
+            return (
+              <li key={m.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => startEditing(m)}
+                    className="min-w-0 flex-1 text-start"
+                  >
+                    <div className="truncate font-semibold text-slate-700 hover:text-blue-600">
+                      {m.name}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-slate-400" dir="ltr">{m.code}</span>
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-600">
+                        {statusLabels[m.current_status]}
+                      </span>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${interfaceMeta.color}`}>
+                        <InterfaceIcon size={9} />
+                        {t(interfaceMeta.labelKey)}
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => void deleteMachine(m.id)}
+                    className="shrink-0 rounded-lg bg-red-100 p-1.5 text-red-600 hover:bg-red-200"
+                    aria-label={t("common.delete")}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
           {machines.length === 0 && (
             <li className="text-sm text-slate-400">{t("setup.noDataYet")}</li>
           )}

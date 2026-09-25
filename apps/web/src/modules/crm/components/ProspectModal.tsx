@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Loader2, Save } from "lucide-react";
-import type { Prospect, ProspectStage } from "../api/crmApi";
+import type { Prospect, ProspectStage, ProspectPriority } from "../api/crmApi";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 
 interface ProspectModalProps {
@@ -10,7 +10,20 @@ interface ProspectModalProps {
   onSave: (data: Partial<Prospect>) => Promise<void>;
 }
 
-const STAGES: ProspectStage[] = ["nouveau", "contacte", "negociation", "gagne", "perdu"];
+const STAGES: ProspectStage[] = [
+  "nouveau", "qualification", "etude", "chiffrage", "offre", "negociation", "gagne", "perdu",
+];
+const STAGE_LABEL_KEY: Record<ProspectStage, string> = {
+  nouveau: "crm.stageNouveau",
+  qualification: "crm.stageQualification",
+  etude: "crm.stageEtude",
+  chiffrage: "crm.stageChiffrage",
+  offre: "crm.stageOffre",
+  negociation: "crm.stageNegociation",
+  gagne: "crm.stageGagne",
+  perdu: "crm.stagePerdu",
+};
+const PRIORITIES: ProspectPriority[] = ["basse", "normale", "haute", "urgente"];
 
 export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps) {
   const { t } = useTranslation();
@@ -18,14 +31,17 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
 
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [contactPerson, setContactPerson] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [source, setSource] = useState("");
   const [notes, setNotes] = useState("");
   const [stage, setStage] = useState<ProspectStage>("nouveau");
+  const [priority, setPriority] = useState<ProspectPriority>("normale");
   const [estimatedValue, setEstimatedValue] = useState("");
   const [probability, setProbability] = useState("");
   const [expectedCloseAt, setExpectedCloseAt] = useState("");
+  const [requestedDate, setRequestedDate] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,14 +51,17 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
     if (!prospect) return;
     setFullName(prospect.full_name);
     setCompanyName(prospect.company_name ?? "");
+    setContactPerson(prospect.contact_person ?? "");
     setEmail(prospect.email ?? "");
     setPhone(prospect.phone ?? "");
     setSource(prospect.source ?? "");
     setNotes(prospect.notes ?? "");
     setStage(prospect.stage);
+    setPriority(prospect.priority ?? "normale");
     setEstimatedValue(prospect.estimated_value?.toString() ?? "");
     setProbability(prospect.probability?.toString() ?? "");
     setExpectedCloseAt(prospect.expected_close_at ?? "");
+    setRequestedDate(prospect.requested_date ?? "");
   }, [prospect]);
 
   async function handleSubmit(e: FormEvent) {
@@ -53,14 +72,17 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
       await onSave({
         full_name: fullName.trim(),
         company_name: companyName.trim() || null,
+        contact_person: contactPerson.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
         source: source.trim() || null,
         notes: notes.trim() || null,
         stage,
+        priority,
         estimated_value: estimatedValue ? Number(estimatedValue) : null,
         probability: probability ? Number(probability) : null,
         expected_close_at: expectedCloseAt || null,
+        requested_date: requestedDate || null,
         owner_staff_id: prospect?.owner_staff_id ?? staffUser?.id ?? null,
       });
       onClose();
@@ -116,6 +138,17 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600">
+                {t("crm.contactPerson")}
+              </label>
+              <input
+                value={contactPerson}
+                onChange={(e) => setContactPerson(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">
                 {t("crm.interactionType")} / Source
               </label>
               <input
@@ -163,7 +196,24 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
               >
                 {STAGES.map((s) => (
                   <option key={s} value={s}>
-                    {t(`crm.stage${s.charAt(0).toUpperCase() + s.slice(1)}`)}
+                    {t(STAGE_LABEL_KEY[s])}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                {t("crm.priority")}
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as ProspectPriority)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              >
+                {PRIORITIES.map((p) => (
+                  <option key={p} value={p}>
+                    {t(`crm.priority${p.charAt(0).toUpperCase() + p.slice(1)}`)}
                   </option>
                 ))}
               </select>
@@ -207,6 +257,18 @@ export function ProspectModal({ prospect, onClose, onSave }: ProspectModalProps)
                 type="date"
                 value={expectedCloseAt}
                 onChange={(e) => setExpectedCloseAt(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                {t("crm.requestedDate")}
+              </label>
+              <input
+                type="date"
+                value={requestedDate}
+                onChange={(e) => setRequestedDate(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
               />
             </div>

@@ -1,20 +1,66 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Factory } from "lucide-react";
+import {
+  Loader2, Factory, Calendar, User, Clock, Play, CheckCircle2,
+  AlertTriangle, Cpu, Wrench, ChevronRight, XCircle, Filter,
+} from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { AdminField, adminInputClass } from "../components/AdminField";
-import type { PlanningEntry, Worker, Machine, ManufacturingOrder } from "../../../shared/types/database";
+import { getStageDef, getStageInterface, type OperationInterface } from "../../nomenclature/lib/costingConstants";
 
-interface PlanningRow extends PlanningEntry {
-  worker_name?: string;
-  machine_name?: string;
-  project_name?: string;
-  manufacturing_order_id?: string | null;
-  shift_number?: string | null;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface OfToSchedule {
+  id: string;
+  order_number: string;
+  product_name: string;
+  quantity: number;
+  status: string;
+  piece_task_id: string | null;
+  project_id: string;
+  project_name: string;
+  project_code: string;
+  client_name: string | null;
+  primary_operation_type: string | null;
+  piece_code: string | null;
+  piece_name: string | null;
 }
 
-type RecentOrder = ManufacturingOrder & { project_name?: string };
+interface MachineRow {
+  id: string;
+  name: string;
+  code: string | null;
+  interface_type: OperationInterface | "both";
+  is_active: boolean;
+}
+
+interface WorkerRow {
+  id: string;
+  full_name: string;
+  interface_type: OperationInterface | "both";
+  is_active: boolean;
+}
+
+interface PlanningRow {
+  id: string;
+  manufacturing_order_id: string | null;
+  piece_task_id: string | null;
+  machine_id: string | null;
+  worker_id: string;
+  planned_date: string;
+  shift_number: string | null;
+  status: string;
+  // Enriched
+  machine_name: string | null;
+  worker_name: string | null;
+  project_name: string | null;
+  order_number: string | null;
+  piece_name: string | null;
+}
+
+type Step = 1 | 2 | 3;
 
 const SHIFT_OPTIONS = [
   { value: "poste_1", labelKey: "setup.poste1" },
@@ -22,226 +68,709 @@ const SHIFT_OPTIONS = [
   { value: "poste_3", labelKey: "setup.poste3" },
 ];
 
+// ---------------------------------------------------------------------------
+// Composant
+// ---------------------------------------------------------------------------
+
 export function PlanningAdminPage() {
-  const { staffUser } = useStaffAuth();
   const { t } = useTranslation();
+  const { staffUser } = useStaffAuth();
 
+  const [ofs, setOfs] = useState<OfToSchedule[]>([]);
+  const [machines, setMachines] = useState<MachineRow[]>([]);
+  const [workers, setWorkers] = useState<WorkerRow[]>([]);
   const [entries, setEntries] = useState<PlanningRow[]>([]);
-  const [workers, setWorkers] = useState<Worker[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
-  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
 
-  const [manufacturingOrderId, setManufacturingOrderId] = useState("");
-  const [workerId, setWorkerId] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  // Sélection courante
+  const [selectedOf, setSelectedOf] = useState<OfToSchedule | null>(null);
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [plannedDate, setPlannedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [shiftNumber, setShiftNumber] = useState("poste_1");
+
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function loadReferenceData() {
-    const [{ data: w }, { data: m }, { data: mo }] = await Promise.all([
-      supabase.from("workers").select("id, company_id, full_name, username, rfid_code, photo_url, hourly_cost, skill_level, is_active, created_at, updated_at").eq("is_active", true),
-      supabase.from("machines").select("*").eq("is_active", true).order("name"),
-      supabase.from("manufacturing_orders").select("*, projects(name)").order("created_at", { ascending: false }).limit(20),
-    ]);
-    const machinesList = (m as Machine[]) ?? [];
-    setWorkers((w as Worker[]) ?? []);
-    setMachines(machinesList);
-    setSelectedMachineId((current) => current ?? machinesList[0]?.id ?? null);
+  // Filtres vue planning
+  const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
+  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 10));
 
-    const orders = ((mo ?? []) as Record<string, unknown>[]).map((row) => ({
-      ...(row as unknown as ManufacturingOrder),
-      project_name: (row.projects as { name?: string } | null)?.name,
-    }));
-    setRecentOrders(orders);
-  }
+  // ---------------------------------------------------------------------
+  // Chargement
+  // ---------------------------------------------------------------------
+  const loadAll = useCallback(async () => {
+    if (!staffUser?.company_id) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      // 1) OFs préparés (à planifier)
+      const { data: ofsData, error: ofsErr } = await supabase
+        .from("manufacturing_orders")
+        .select("*, projects(name, code, clients(name))")
+        .eq("status", "prepared")
+        .order("prepared_at", { ascending: false });
 
-  async function loadPlanning() {
-    const { data } = await supabase
+      if (ofsErr) throw ofsErr;
+
+      // 2) Pièces liées
+      const pieceIds = ((ofsData ?? []) as { piece_task_id: string | null }[])
+        .map((o) => o.piece_task_id)
+        .filter((id): id is string => !!id);
+
+      const piecesMap = new Map<string, { code: string | null; name: string; primary_operation_type: string | null }>();
+      if (pieceIds.length > 0) {
+        const { data: piecesData } = await supabase
+          .from("pieces_tasks")
+          .select("id, code, name, primary_operation_type")
+          .in("id", pieceIds);
+        for (const p of (piecesData ?? []) as { id: string; code: string | null; name: string; primary_operation_type: string | null }[]) {
+          piecesMap.set(p.id, { code: p.code, name: p.name, primary_operation_type: p.primary_operation_type });
+        }
+      }
+
+      const ofRows: OfToSchedule[] = ((ofsData ?? []) as Record<string, unknown>[]).map((row) => {
+        const proj = row.projects as { name?: string; code?: string; clients?: { name?: string } | null } | null;
+        const pieceId = row.piece_task_id as string | null;
+        const piece = pieceId ? piecesMap.get(pieceId) : undefined;
+        return {
+          id: row.id as string,
+          order_number: row.order_number as string,
+          product_name: row.product_name as string,
+          quantity: row.quantity as number,
+          status: row.status as string,
+          piece_task_id: pieceId,
+          project_id: row.project_id as string,
+          project_name: proj?.name ?? "—",
+          project_code: proj?.code ?? "—",
+          client_name: proj?.clients?.name ?? null,
+          primary_operation_type: piece?.primary_operation_type ?? null,
+          piece_code: piece?.code ?? null,
+          piece_name: piece?.name ?? null,
+        };
+      });
+      setOfs(ofRows);
+
+      // 3) Machines actives
+      const { data: machData } = await supabase
+        .from("machines")
+        .select("id, name, code, interface_type, is_active")
+        .eq("is_active", true)
+        .order("name");
+      setMachines((machData as MachineRow[]) ?? []);
+
+      // 4) Workers actifs
+      const { data: workersData } = await supabase
+        .from("workers")
+        .select("id, full_name, interface_type, is_active")
+        .eq("is_active", true)
+        .order("full_name");
+      setWorkers((workersData as WorkerRow[]) ?? []);
+
+      // 5) Planning existant
+      await loadPlanning();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [staffUser?.company_id]);
+
+  const loadPlanning = useCallback(async () => {
+    const { data, error: planErr } = await supabase
       .from("planning")
-      .select("*, workers(full_name), machines(name), projects(name)")
+      .select("*, workers(full_name), machines(name), manufacturing_orders(order_number, product_name)")
       .order("planned_date", { ascending: false })
-      .limit(100);
+      .limit(200);
 
-    const rows = (data ?? []).map((row: Record<string, unknown>) => ({
-      ...(row as unknown as PlanningEntry),
-      worker_name: (row.workers as { full_name?: string } | null)?.full_name,
-      machine_name: (row.machines as { name?: string } | null)?.name,
-      project_name: (row.projects as { name?: string } | null)?.name,
-    }));
+    if (planErr) {
+      console.error("[Planning] load error:", planErr);
+      return;
+    }
 
-    setEntries(rows as PlanningRow[]);
-  }
-
-  useEffect(() => {
-    void loadReferenceData();
-    void loadPlanning();
+    const rows: PlanningRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => {
+      const mo = row.manufacturing_orders as { order_number?: string; product_name?: string } | null;
+      return {
+        id: row.id as string,
+        manufacturing_order_id: row.manufacturing_order_id as string | null,
+        piece_task_id: row.piece_task_id as string | null,
+        machine_id: row.machine_id as string | null,
+        worker_id: row.worker_id as string,
+        planned_date: row.planned_date as string,
+        shift_number: row.shift_number as string | null,
+        status: row.status as string,
+        machine_name: (row.machines as { name?: string } | null)?.name ?? null,
+        worker_name: (row.workers as { full_name?: string } | null)?.full_name ?? null,
+        project_name: null,
+        order_number: mo?.order_number ?? null,
+        piece_name: mo?.product_name ?? null,
+      };
+    });
+    setEntries(rows);
   }, []);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!staffUser || !workerId || !selectedMachineId || !manufacturingOrderId) return;
-    setError(null);
-    setIsSaving(true);
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
 
-    try {
-      const order = recentOrders.find((o) => o.id === manufacturingOrderId);
-      if (!order) {
-        setError(t("setup.chooseOrderFirst"));
+  // ---------------------------------------------------------------------
+  // Filtres des machines/workers selon le type d'opération
+  // ---------------------------------------------------------------------
+  const requiredInterface: OperationInterface | null = useMemo(() => {
+    if (!selectedOf?.primary_operation_type) return null;
+    return getStageInterface(selectedOf.primary_operation_type);
+  }, [selectedOf]);
+
+  const compatibleMachines = useMemo(() => {
+    if (!requiredInterface) return machines;
+    return machines.filter(
+      (m) => m.interface_type === requiredInterface || m.interface_type === "both",
+    );
+  }, [machines, requiredInterface]);
+
+  const compatibleWorkers = useMemo(() => {
+    if (!requiredInterface) return workers;
+    return workers.filter(
+      (w) => w.interface_type === requiredInterface || w.interface_type === "both",
+    );
+  }, [workers, requiredInterface]);
+
+  // ---------------------------------------------------------------------
+  // Étapes
+  // ---------------------------------------------------------------------
+  const currentStep: Step = !selectedOf ? 1 : !selectedMachineId ? 2 : !selectedWorkerId ? 3 : 3;
+
+  // ---------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------
+  function handleSelectOf(of: OfToSchedule) {
+    // Vérifier que l'OF a des opérations
+    void (async () => {
+      if (!of.piece_task_id) {
+        setError(t("production.planning.noOperationsBlocked"));
         return;
       }
+      const { count } = await supabase
+        .from("piece_costing_operations")
+        .select("id", { count: "exact", head: true })
+        .eq("piece_task_id", of.piece_task_id);
+      if (!count || count === 0) {
+        setError(t("production.planning.noOperationsBlocked"));
+        return;
+      }
+      setSelectedOf(of);
+      setSelectedMachineId(null);
+      setSelectedWorkerId(null);
+      setError(null);
+    })();
+  }
 
+  async function handleSave() {
+    if (!staffUser || !selectedOf || !selectedMachineId || !selectedWorkerId) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      // Vérifier doublon
       const duplicate = entries.some(
-        (entry) =>
-          entry.worker_id === workerId &&
-          entry.machine_id === selectedMachineId &&
-          entry.planned_date === plannedDate &&
-          entry.shift_number === shiftNumber &&
-          entry.status !== "cancelled"
+        (e) =>
+          e.worker_id === selectedWorkerId &&
+          e.machine_id === selectedMachineId &&
+          e.planned_date === plannedDate &&
+          e.shift_number === shiftNumber &&
+          e.status !== "cancelled",
       );
       if (duplicate) {
-        setError(t("setup.assignmentAlreadyExists", "Cette affectation existe déjà pour ce poste."));
+        setError(t("production.planning.duplicateAssignment"));
+        setIsSaving(false);
         return;
       }
 
-      const { data: linkedPiece } = await supabase
-        .from("pieces_tasks")
-        .select("id")
-        .eq("manufacturing_order_id", order.id)
-        .limit(1)
-        .maybeSingle();
-
-      const { error: insertError } = await supabase.from("planning").insert({
+      // 1) Insérer dans planning
+      const { error: insertErr } = await supabase.from("planning").insert({
         company_id: staffUser.company_id,
-        worker_id: workerId,
+        worker_id: selectedWorkerId,
         machine_id: selectedMachineId,
-        project_id: order.project_id,
-        piece_task_id: (linkedPiece as { id: string } | null)?.id ?? null,
-        manufacturing_order_id: order.id,
+        project_id: selectedOf.project_id,
+        piece_task_id: selectedOf.piece_task_id,
+        manufacturing_order_id: selectedOf.id,
         planned_date: plannedDate,
         shift_number: shiftNumber,
         status: "scheduled",
         created_by: staffUser.id,
-      });
+      } as never);
 
-      if (insertError) {
-        setError("Erreur lors de la création");
+      if (insertErr) {
+        setError(insertErr.message);
+        setIsSaving(false);
         return;
       }
 
-      setManufacturingOrderId("");
-      setWorkerId("");
-      await loadPlanning();
+      // 2) Mettre à jour l'OF
+      await supabase
+        .from("manufacturing_orders")
+        .update({
+          status: "scheduled",
+          scheduled_at: new Date().toISOString(),
+        } as never)
+        .eq("id", selectedOf.id);
+
+      // 3) Mettre à jour la pièce
+      if (selectedOf.piece_task_id) {
+        await supabase
+          .from("pieces_tasks")
+          .update({
+            production_status: "scheduled",
+            scheduled_at: new Date().toISOString(),
+          } as never)
+          .eq("id", selectedOf.piece_task_id);
+      }
+
+      setInfoMessage(t("production.planning.savedSuccess"));
+      setSelectedOf(null);
+      setSelectedMachineId(null);
+      setSelectedWorkerId(null);
+      await loadAll();
+
+      setTimeout(() => setInfoMessage(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
     } finally {
       setIsSaving(false);
     }
   }
 
-  const machineEntries = useMemo(
-    () => entries.filter((e) => e.machine_id === selectedMachineId).sort((a, b) => b.planned_date.localeCompare(a.planned_date)),
-    [entries, selectedMachineId]
-  );
+  async function handleCancelPlanning(entryId: string) {
+    if (!window.confirm(t("production.planning.confirmCancel"))) return;
+    await supabase.from("planning").update({ status: "cancelled" } as never).eq("id", entryId);
+    await loadPlanning();
+  }
 
-  const selectedMachine = machines.find((m) => m.id === selectedMachineId);
+  // ---------------------------------------------------------------------
+  // Filtres vue
+  // ---------------------------------------------------------------------
+  const filteredEntries = useMemo(() => {
+    return entries
+      .filter((e) => e.status !== "cancelled")
+      .filter((e) => (filterMachineId ? e.machine_id === filterMachineId : true))
+      .filter((e) => (filterDate ? e.planned_date === filterDate : true));
+  }, [entries, filterMachineId, filterDate]);
+
+  // ---------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-slate-400">
+        <Loader2 className="me-2 animate-spin" size={18} />
+        {t("common.loading")}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* Onglets machines — scroll horizontal sur mobile */}
-      <div className="mb-4 flex gap-2 overflow-x-auto border-b border-slate-200 sm:mb-5">
-        {machines.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setSelectedMachineId(m.id)}
-            className={`shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold sm:px-4 ${
-              selectedMachineId === m.id ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-400"
-            }`}
-          >
-            {m.name}
+    <div className="space-y-4">
+      {/* Messages */}
+      {error && (
+        <div className="flex items-start justify-between gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600">
+            <XCircle size={16} />
           </button>
-        ))}
-        {machines.length === 0 && <p className="p-2 text-sm text-slate-400">{t("setup.noDataYet")}</p>}
-      </div>
+        </div>
+      )}
+      {infoMessage && (
+        <div className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
+          <CheckCircle2 size={16} />
+          {infoMessage}
+        </div>
+      )}
 
-      <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
-        <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-          <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-slate-800 sm:text-lg">
-            <Factory size={17} className="shrink-0 text-indigo-500" />
-            <span className="truncate">{selectedMachine?.name ?? t("setup.newAssignment")}</span>
-          </h2>
-          <p className="mb-4 text-xs text-slate-400 sm:text-sm">{t("setup.assignmentDesc")}</p>
-
-          <AdminField label={t("setup.manufacturingOrder")}>
-            <select value={manufacturingOrderId} onChange={(e) => setManufacturingOrderId(e.target.value)} className={adminInputClass} required>
-              <option value="">{t("setup.chooseOrder")}</option>
-              {recentOrders.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.order_number} — {o.product_name} ({o.project_name})
-                </option>
-              ))}
-            </select>
-          </AdminField>
-
-          <AdminField label={t("setup.worker")}>
-            <select value={workerId} onChange={(e) => setWorkerId(e.target.value)} className={adminInputClass} required>
-              <option value="">{t("setup.selectWorker")}</option>
-              {workers.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.full_name}
-                </option>
-              ))}
-            </select>
-          </AdminField>
-
-          <AdminField label={t("setup.date")}>
-            <input type="date" value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} className={adminInputClass} required />
-          </AdminField>
-
-          <AdminField label={t("setup.shiftNumber")}>
-            <select value={shiftNumber} onChange={(e) => setShiftNumber(e.target.value)} className={adminInputClass} required>
-              {SHIFT_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {t(s.labelKey)}
-                </option>
-              ))}
-            </select>
-          </AdminField>
-
-          {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-
-          <button
-            type="submit"
-            disabled={isSaving || !workerId || !manufacturingOrderId || !selectedMachineId}
-            className="w-full rounded-lg bg-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* ─── Colonne gauche : sélection OF + 3 étapes ─── */}
+        <div className="space-y-3">
+          {/* Étape 1 : choisir OF */}
+          <StepCard
+            step={1}
+            title={t("production.planning.step1Title")}
+            active={currentStep === 1}
+            done={!!selectedOf}
           >
-            {isSaving ? t("setup.saving") : t("setup.saveAssignment")}
-          </button>
-        </form>
+            {!selectedOf ? (
+              ofs.length === 0 ? (
+                <div className="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
+                  {t("production.planning.noOfToSchedule")}
+                </div>
+              ) : (
+                <ul className="max-h-72 space-y-1.5 overflow-y-auto">
+                  {ofs.map((of) => {
+                    const iface = of.primary_operation_type
+                      ? getStageInterface(of.primary_operation_type)
+                      : null;
+                    return (
+                      <li key={of.id}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectOf(of)}
+                          className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-start text-xs transition-colors hover:border-indigo-300 hover:bg-indigo-50"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono font-bold text-slate-500" dir="ltr">
+                                OF-{of.order_number}
+                              </span>
+                              <span className="truncate font-semibold text-slate-800">
+                                {of.piece_name || of.product_name || "—"}
+                              </span>
+                              {of.piece_code && (
+                                <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                                  {of.piece_code}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+                              <span>{of.project_name}</span>
+                              {of.client_name && <span>· {of.client_name}</span>}
+                              {iface && (
+                                <span
+                                  className={`rounded-full px-1.5 py-0.5 font-bold ${
+                                    iface === "cnc"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-blue-100 text-blue-700"
+                                  }`}
+                                >
+                                  {iface.toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <ChevronRight size={14} className="shrink-0 text-slate-300" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs">
+                <Factory size={14} className="shrink-0 text-indigo-600" />
+                <span className="min-w-0 flex-1 truncate font-semibold text-indigo-700">
+                  OF-{selectedOf.order_number} — {selectedOf.piece_name || selectedOf.product_name}
+                </span>
+                <button
+                  onClick={() => {
+                    setSelectedOf(null);
+                    setSelectedMachineId(null);
+                    setSelectedWorkerId(null);
+                  }}
+                  className="shrink-0 text-indigo-500 hover:text-indigo-700"
+                >
+                  <XCircle size={14} />
+                </button>
+              </div>
+            )}
+          </StepCard>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-          <h2 className="mb-4 truncate text-base font-bold text-slate-800 sm:text-lg">
-            {selectedMachine?.name} — {t("setup.recentAssignments")} ({machineEntries.length})
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {machineEntries.map((entry) => (
-              <li key={entry.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{entry.worker_name}</span>
-                  <span className="shrink-0 text-xs text-slate-400" dir="ltr">
-                    {entry.planned_date}
+          {/* Étape 2 : choisir machine */}
+          {selectedOf && (
+            <StepCard
+              step={2}
+              title={t("production.planning.step2Title")}
+              active={currentStep === 2}
+              done={!!selectedMachineId}
+            >
+              {!selectedMachineId ? (
+                compatibleMachines.length === 0 ? (
+                  <div className="rounded-lg bg-amber-50 px-3 py-4 text-center text-xs text-amber-700">
+                    {t("production.planning.noMachineForInterface")}
+                  </div>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {compatibleMachines.map((m) => {
+                      const Icon = m.interface_type === "cnc" ? Cpu : m.interface_type === "manual" ? Wrench : Filter;
+                      return (
+                        <li key={m.id}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMachineId(m.id)}
+                            className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-start text-xs transition-colors hover:border-indigo-300 hover:bg-indigo-50"
+                          >
+                            <Icon
+                              size={14}
+                              className={
+                                m.interface_type === "cnc" ? "text-amber-600" : "text-blue-600"
+                              }
+                            />
+                            <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">
+                              {m.code ? `${m.code} — ` : ""}
+                              {m.name}
+                            </span>
+                            <span
+                              className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                                m.interface_type === "cnc"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : m.interface_type === "manual"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {m.interface_type.toUpperCase()}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )
+              ) : (
+                <div className="flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs">
+                  <Cpu size={14} className="shrink-0 text-indigo-600" />
+                  <span className="min-w-0 flex-1 truncate font-semibold text-indigo-700">
+                    {compatibleMachines.find((m) => m.id === selectedMachineId)?.name}
                   </span>
+                  <button
+                    onClick={() => {
+                      setSelectedMachineId(null);
+                      setSelectedWorkerId(null);
+                    }}
+                    className="shrink-0 text-indigo-500 hover:text-indigo-700"
+                  >
+                    <XCircle size={14} />
+                  </button>
                 </div>
-                <div className="mt-1 truncate text-xs text-slate-500">
-                  {entry.project_name && `${t("setup.projectLabel")}: ${entry.project_name}`}
-                  {entry.shift_number && ` — ${t(SHIFT_OPTIONS.find((s) => s.value === entry.shift_number)?.labelKey ?? "")}`}
+              )}
+            </StepCard>
+          )}
+
+          {/* Étape 3 : choisir worker + date + shift */}
+          {selectedOf && selectedMachineId && (
+            <StepCard
+              step={3}
+              title={t("production.planning.step3Title")}
+              active={currentStep === 3}
+              done={false}
+            >
+              <div className="space-y-3">
+                {/* Workers compatibles */}
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {t("setup.worker")}
+                  </label>
+                  {compatibleWorkers.length === 0 ? (
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      {t("production.planning.noWorkerForInterface")}
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedWorkerId ?? ""}
+                      onChange={(e) => setSelectedWorkerId(e.target.value || null)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">{t("setup.selectWorker")}</option>
+                      {compatibleWorkers.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.full_name}
+                          {w.interface_type !== "both"
+                            ? ` (${w.interface_type.toUpperCase()})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
-              </li>
-            ))}
-            {machineEntries.length === 0 && <li className="text-sm text-slate-400">{t("setup.noDataYet")}</li>}
-          </ul>
+
+                {/* Date */}
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {t("setup.date")}
+                  </label>
+                  <input
+                    type="date"
+                    value={plannedDate}
+                    onChange={(e) => setPlannedDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+
+                {/* Shift */}
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {t("setup.shiftNumber")}
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {SHIFT_OPTIONS.map((s) => {
+                      const active = shiftNumber === s.value;
+                      return (
+                        <button
+                          key={s.value}
+                          type="button"
+                          onClick={() => setShiftNumber(s.value)}
+                          className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition-colors ${
+                            active
+                              ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                              : "border-slate-200 text-slate-600 hover:border-slate-300"
+                          }`}
+                        >
+                          {t(s.labelKey)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Bouton planifier */}
+                <button
+                  onClick={() => void handleSave()}
+                  disabled={isSaving || !selectedWorkerId}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Calendar size={14} />
+                  )}
+                  {t("production.planning.confirmSchedule")}
+                </button>
+              </div>
+            </StepCard>
+          )}
+        </div>
+
+        {/* ─── Colonne droite : planning existant ─── */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-700">
+              {t("production.planning.existingPlanning")} ({filteredEntries.length})
+            </h2>
+          </div>
+
+          {/* Filtres */}
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <input
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+            />
+            <select
+              value={filterMachineId ?? ""}
+              onChange={(e) => setFilterMachineId(e.target.value || null)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+            >
+              <option value="">{t("production.planning.allMachines")}</option>
+              {machines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {filteredEntries.length === 0 ? (
+            <p className="py-6 text-center text-xs text-slate-400">
+              {t("production.planning.noPlanningEntries")}
+            </p>
+          ) : (
+            <ul className="max-h-[70vh] space-y-1.5 overflow-y-auto">
+              {filteredEntries.map((e) => (
+                <li
+                  key={e.id}
+                  className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs"
+                >
+                  <Calendar size={12} className="mt-0.5 shrink-0 text-indigo-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono font-bold text-slate-500" dir="ltr">
+                        {e.planned_date}
+                      </span>
+                      {e.shift_number && (
+                        <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
+                          {t(SHIFT_OPTIONS.find((s) => s.value === e.shift_number)?.labelKey ?? "")}
+                        </span>
+                      )}
+                      {e.order_number && (
+                        <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                          OF-{e.order_number}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                      {e.worker_name && (
+                        <span className="inline-flex items-center gap-1">
+                          <User size={9} />
+                          {e.worker_name}
+                        </span>
+                      )}
+                      {e.machine_name && (
+                        <span className="inline-flex items-center gap-1">
+                          <Factory size={9} />
+                          {e.machine_name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => void handleCancelPlanning(e.id)}
+                    className="shrink-0 text-slate-300 hover:text-red-500"
+                    title={t("production.planning.cancelEntry")}
+                  >
+                    <XCircle size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StepCard
+// ---------------------------------------------------------------------------
+
+function StepCard({
+  step,
+  title,
+  active,
+  done,
+  children,
+}: {
+  step: number;
+  title: string;
+  active: boolean;
+  done: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-xl border-2 bg-white p-4 transition-colors ${
+        active ? "border-indigo-300 shadow-sm" : done ? "border-green-200" : "border-slate-200"
+      }`}
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <span
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+            done
+              ? "bg-green-100 text-green-700"
+              : active
+                ? "bg-indigo-100 text-indigo-700"
+                : "bg-slate-100 text-slate-400"
+          }`}
+        >
+          {done ? <CheckCircle2 size={12} /> : step}
+        </span>
+        <h3
+          className={`text-sm font-bold ${
+            active ? "text-slate-800" : done ? "text-green-700" : "text-slate-400"
+          }`}
+        >
+          {title}
+        </h3>
+      </div>
+      {children}
     </div>
   );
 }

@@ -1,0 +1,17 @@
+# ============================================================================
+# Tauri — Artefacts de build (ignorés par git)
+# ============================================================================
+
+# Dossier de compilation Rust
+/target/
+
+# Dossier généré par Tauri (schemas, permissions)
+/gen/
+
+# Build artefacts locaux
+*.pdb
+*.dSYM/
+
+# OS
+.DS_Store
+Thumbs.db

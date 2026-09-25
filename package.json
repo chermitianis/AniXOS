@@ -1,0 +1,53 @@
+{
+    "name": "anixos",
+    "private": true,
+    "version": "1.0.0",
+    "description": "AniXOS — Industrial Shop Floor Execution & Workshop MES Platform",
+    "type": "module",
+    "scripts": {
+        "setup": "node setup.mjs",
+        "build:all": "node setup.mjs --all",
+        "build:web": "node setup.mjs --only=web",
+        "build:android": "node setup.mjs --only=android",
+        "build:desktop": "node setup.mjs --only=desktop",
+        "deploy": "node setup.mjs --only=deploy",
+        "deploy:full": "npm run deploy && supabase db execute --sql \"NOTIFY pgrst, 'reload schema'",
+        "fresh": "node setup.mjs --fresh --all",
+        "update": "node setup.mjs --update --all",
+        "dry-run": "node setup.mjs --all --dry-run",
+        "prereqs": "node setup.mjs --only=prereqs"
+    },
+    "engines": {
+        "node": ">=20.0.0",
+        "npm": ">=10.0.0"
+    },
+    "workspaces": [
+        "apps/web"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/YOUR_USERNAME/anixos.git"
+    },
+    "keywords": [
+        "mes",
+        "manufacturing",
+        "workshop",
+        "industrial",
+        "shopfloor",
+        "pwa",
+        "supabase",
+        "react",
+        "vite"
+    ],
+    "author": "AniXOS",
+    "license": "UNLICENSED",
+    "devDependencies": {
+        "@capacitor/cli": "^8.5.2",
+        "@tauri-apps/cli": "^2.11.5",
+        "typescript": "^7.0.2"
+    },
+    "dependencies": {
+        "@capacitor/android": "^8.5.2",
+        "@capacitor/core": "^8.5.2"
+    }
+}

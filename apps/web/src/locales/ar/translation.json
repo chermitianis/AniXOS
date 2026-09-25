@@ -22,7 +22,9 @@
     "print": "طباعة",
     "language": "اللغة",
     "expandMenu": "توسيع القائمة",
-    "collapseMenu": "طيّ القائمة"
+    "collapseMenu": "طيّ القائمة",
+    "comingSoon": "قيد الإنشاء",
+    "comingSoonBody": "سيكون هذا القسم متاحا قريبا. تابع استخدام باقي الوحدات."
   },
   "auth": {
     "fullName": "الاسم الكامل",
@@ -198,7 +200,6 @@
     "paddleNotConfiguredBody": "سيتم تفعيل نظام الدفع الآمن (Paddle) قريبًا جدًا. في انتظار ذلك، تواصل معنا للاشتراك يدويًا.",
     "checkoutError": "تعذّر بدء الدفع. حاول مرة أخرى."
   },
-
   "nav": {
     "dashboard": "لوحة المدير",
     "reports": "إحصاءات",
@@ -227,7 +228,10 @@
     "invoices": "الفواتير",
     "purchases": "المشتريات",
     "myProfile": "ملفي الشخصي",
-    "security": "الأمان"
+    "security": "الأمان",
+    "ingenierie_dossiers": "الملفات التقنية",
+    "ingenierie_gammes": "مسارات التصنيع والأوقات",
+    "ingenierie_validation": "الاعتماد التقني"
   },
   "navGroup": {
     "overview": "النظرة العامة",
@@ -235,7 +239,11 @@
     "production": "الإنتاج",
     "commerce": "التجارة",
     "resources": "الموارد",
-    "admin": "الإدارة"
+    "admin": "الإدارة",
+    "commercial": "التجاري",
+    "ingenierie": "الهندسة",
+    "finance": "المالية",
+    "archives": "الأرشيف"
   },
   "setup": {
     "fullName": "الاسم الكامل",
@@ -663,15 +671,55 @@
     "lockSettingsTitle": "قفل الإعدادات",
     "lockSettingsHint": "طلب كلمة السر في كل مرة تُفتح فيها الإعدادات.",
     "lockEnabled": "القفل مفعّل",
-    "lockDisabled": "القفل معطّل"
+    "lockDisabled": "القفل معطّل",
+    "openShiftsTitle": "جلسات عالقة",
+    "suspiciousShift": "مشبوهة (+12 س)",
+    "forceCloseButton": "إغلاق الجلسة",
+    "forceCloseTitle": "إغلاق إداري",
+    "forceCloseWarning": "استخدمه فقط عندما يفقد العامل الوصول إلى جهازه (ضائع أو أُعيد ضبطه) ولا يستطيع تسجيل الخروج بنفسه. هذا الإجراء موثَّق ومرئي في التقارير.",
+    "forceCloseStartedAt": "متصل منذ {{date}}",
+    "forceCloseEndedAt": "وقت الانتهاء الفعلي (تقديري)",
+    "forceCloseReason": "سبب الإغلاق",
+    "forceCloseReasonPlaceholder": "مثال: جهاز مفقود، تعذّر الوصول للعامل، جلسة منسية…",
+    "forceCloseReasonRequired": "السبب إلزامي",
+    "forceCloseConfirm": "إغلاق نهائي",
+    "forceCloseError": "فشل الإغلاق",
+    "browseFiles": "تصفّح…",
+    "browseHint": "اختر عدة ملفات (رسومات، CAD/CAM...) لاستيراد أسمائها كقطع دفعة واحدة — لا يتم رفع أي ملف، تُستخدم الأسماء فقط.",
+    "piecesToImport": "{{count}} قطعة جاهزة للاستيراد",
+    "importPiecesButton": "استيراد {{count}} قطعة",
+    "fromValidatedChiffrage": "إنشاء من دراسة تكلفة معتمدة (اختياري)",
+    "chooseChiffrage": "— اختر دراسة تكلفة معتمدة —",
+    "tabAll": "الكل",
+    "tabDraft": "مسودات",
+    "tabStudying": "قيد الدراسة",
+    "tabApproved": "معتمدة",
+    "tabInProduction": "قيد التصنيع",
+    "tabCompleted": "منتهية",
+    "statusDraft": "مسودة",
+    "statusStudying": "قيد الدراسة",
+    "statusApproved": "معتمد",
+    "statusInProduction": "قيد التصنيع",
+    "statusOnHold": "متوقف",
+    "statusCompleted": "منتهي",
+    "statusCancelled": "ملغى",
+    "startStudy": "بدء الدراسة",
+    "approveStudy": "اعتماد الدراسة",
+    "codeAutoNotice": "سيتم توليد كود المشروع تلقائيا (PRJ-YYYY-NNNN) بعد الإنشاء.",
+    "statusStudied": "مدروسة",
+    "statusReadyForProduction": "جاهزة للتصنيع",
+    "studyProject": "دراسة",
+    "continueStudy": "متابعة الدراسة",
+    "sendToProduction": "إرسال إلى التصنيع",
+    "sendToProductionConfirm": "إرسال هذا المشروع إلى التصنيع؟ سيصبح متاحا في أوامر التصنيع.",
+    "duplicateWarningTitle": "مشروع مشابه موجود",
+    "duplicateWarningBody": "يوجد {{count}} مشروع بنفس الاسم. هل تريد المتابعة حقا؟",
+    "duplicateConfirm": "تأكيد الإضافة"
   },
-  "staffAuth": {
-    "notLinked": "هذا الحساب غير مرتبط بأي موظف في النظام"
-  },
-  "etude": {
+    "etude": {
     "tabs": {
-      "nomenclature": "قوالب التسعير",
-      "costing": "التسعير",
+      "nomenclature": "دراسات التكلفة",
+      "costing": "تسعير جديد",
       "archive": "الأرشيف"
     },
     "costing": {
@@ -700,6 +748,57 @@
       "colCost": "التكلفة المقدَّرة",
       "colUpdated": "آخر تحديث"
     }
+  },
+
+  "production": {
+    "kpi": {
+      "waiting": "في الانتظار",
+      "ready": "جاهزة",
+      "inProgress": "قيد التنفيذ",
+      "late": "متأخرة"
+    },
+    "sections": {
+      "waiting": "قطع في الانتظار",
+      "inProgress": "قطع قيد التنفيذ",
+      "orders": "أوامر التصنيع"
+    },
+    "actions": {
+      "preparer": "تحضير",
+      "viewAll": "عرض الكل"
+    },
+    "empty": {
+      "waiting": "لا توجد قطع في الانتظار",
+      "inProgress": "لا توجد قطع قيد التنفيذ",
+      "orders": "لا توجد أوامر تصنيع"
+    },
+    "piecesDone": "منتهية",
+
+    "of": {
+  "statusDraft": "مسودة",
+  "statusPrepared": "محضَّر",
+  "statusScheduled": "مُجدول",
+  "statusInProgress": "قيد التنفيذ",
+  "statusCompleted": "مكتمل",
+  "statusCancelled": "ملغى",
+  "statusConfirmed": "مؤكَّد",
+  "filterAll": "الكل",
+  "emptyAll": "لا توجد أوامر تصنيع. أنشئ من «تحضير الملفات».",
+  "emptyFilter": "لا يوجد أمر لهذا الفلتر.",
+  "preparedAt": "حُضِّر في",
+  "scheduledAt": "جُدول في",
+  "startedAt": "بدأ في",
+  "completedAt": "انتهى في",
+  "operations": "العمليات",
+  "noOps": "لا توجد عمليات مُعرَّفة.",
+  "noMachine": "لم تُسند آلة",
+  "documents": "المستندات التقنية",
+  "actionSchedule": "جدولة",
+  "actionStart": "بدء",
+  "actionComplete": "إنهاء",
+  "actionCancel": "إلغاء",
+  "allDone": "مكتمل",
+  "gotoPlanning": "الانتقال إلى التخطيط ({{count}} OF)"
+}
   },
   "crm": {
     "title": "إدارة العلاقات — الفرص والعملاء المحتملون",
@@ -750,7 +849,21 @@
     "interactionDate": "التاريخ",
     "interactionSummary": "الملخص",
     "interactionSummaryPlaceholder": "صف هذا التفاعل باختصار…",
-    "noInteractions": "لا توجد تفاعلات لهذا العميل المحتمل"
+    "noInteractions": "لا توجد تفاعلات لهذا العميل المحتمل",
+    "stageQualification": "التأهيل",
+    "stageEtude": "الدراسة",
+    "stageChiffrage": "التسعير",
+    "stageOffre": "العرض",
+    "priority": "الأولوية",
+    "priorityBasse": "منخفضة",
+    "priorityNormale": "عادية",
+    "priorityHaute": "عالية",
+    "priorityUrgente": "عاجلة",
+    "contactPerson": "جهة الاتصال",
+    "requestedDate": "الموعد المطلوب من العميل",
+    "createProjectButton": "إنشاء مشروع التصنيع",
+    "confirmCreateProject": "إنشاء مشروع التصنيع من هذه الصفقة الرابحة؟ سيتم إنشاء العميل والمشروع تلقائيًا دون إعادة إدخال البيانات.",
+    "projectCreatedSuccess": "تم إنشاء المشروع {{code}} بنجاح — تجده ضمن المشاريع."
   },
   "accounting": {
     "title": "المحاسبة",
@@ -760,6 +873,8 @@
       "invoices": "فواتير العملاء",
       "suppliers": "فواتير الموردين",
       "reports": "التقارير"
+
+
     },
     "kpi": {
       "revenue": "الإيرادات",
@@ -831,37 +946,91 @@
     "subscriptionHint": "عرض وإدارة خطتك الحالية",
     "databasesHint": "إنشاء وفتح وحذف قواعد بياناتك",
     "ownerOnlyActions": "هذه الإجراءات مخصّصة لمالك الحساب فقط.",
-    "securityNote": "معلوماتك الشخصية محمية. اللغة والقفل يُخزَّنان محلياً على هذا الجهاز."
+    "securityNote": "معلوماتك الشخصية محمية. اللغة والقفل يُخزَّنان محلياً على هذا الجهاز.",
+    "changePasswordTitle": "تغيير كلمة السر",
+"changePasswordButton": "تغيير كلمة السر",
+"newPassword": "كلمة السر الجديدة",
+"confirmPassword": "تأكيد كلمة السر",
+"passwordTooShort": "كلمة السر يجب ألا تقل عن 8 محارف",
+"passwordMismatch": "كلمتا السر غير متطابقتين",
+"passwordChanged": "تم تغيير كلمة السر بنجاح"
   },
 
+"generalSettings": {
+  "title": "الإعدادات العامة",
+  "language": "اللغة",
+  "languageHint": "لغة عرض الواجهة",
+  "theme": "المظهر",
+  "themeHint": "المظهر الفاتح أو الداكن",
+  "light": "فاتح",
+  "dark": "داكن",
+  "notifications": "الإشعارات",
+  "notificationsHint": "تفعيل الإشعارات داخل التطبيق"
+},
+
   "database": {
-    "tab": "قاعدة البيانات",
-    "exportTitle": "تصدير كل البيانات",
-    "exportHint": "يُنزِّل ملف JSON يحتوي على كامل بيانات شركتك.",
-    "exportButton": "تصدير (JSON)",
-    "exporting": "جاري التصدير…",
-    "exportError": "فشل التصدير.",
-    "importTitle": "استيراد ملف نسخة احتياطية",
-    "importHint": "يستعيد البيانات من ملف JSON سبق تصديره.",
-    "importButton": "استيراد (JSON)",
-    "importConfirmButton": "تأكيد الاستعادة",
-    "importCancelButton": "إلغاء",
-    "importPreviewTitle": "تم رصد {{count}} سجل(ات) في الملف — تحقق منها قبل التأكيد",
-    "importExportedAt": "تاريخ تصدير النسخة الاحتياطية",
-    "importCompanyMismatch": "هذا الملف صادر من شركة أخرى (معرّف مختلف). سيتم رغم ذلك ربط بياناته بشركتك الحالية عند المتابعة — تأكد أنه الملف الصحيح قبل الاستمرار.",
-    "importing": "جاري الاستيراد…",
-    "importError": "فشل الاستيراد.",
-    "importPartial": "تم استيراد {{count}} سجلًا (تم تجاهل بعض الجداول).",
-    "importWarningsTitle": "الجداول التي تم تجاهلها أثناء الاستيراد:",
-    "importWarningsHint": "بعض الجداول محمية بـ RLS أو تعتمد على علاقات موجودة. استورد أولًا الجداول الأساسية (العملاء، المشاريع، القطع) ثم أعد المحاولة.",
-    "importSuccess": "تم استيراد {{count}} سجلًا بنجاح.",
-    "resetTitle": "إعادة تهيئة قاعدة البيانات",
-    "resetHint": "اختر الفئات التي تريد محوها ثم أكِّد.",
-    "resetButton": "إعادة التهيئة الآن",
-    "resetting": "جاري إعادة التهيئة…",
-    "resetSuccess": "تمت إعادة التهيئة.",
-    "resetError": "فشلت إعادة التهيئة."
-  },
+  "tab": "قاعدة البيانات",
+  "exportTitle": "تصدير كل البيانات",
+  "exportHint": "يُنزّل ملف JSON يحتوي على كامل بيانات شركتك.",
+  "exportButton": "تصدير (JSON)",
+  "exporting": "جارٍ التصدير…",
+  "exportError": "فشل التصدير.",
+  "importTitle": "استيراد ملف نسخة احتياطية",
+  "importHint": "يستعيد البيانات من ملف JSON سبق تصديره.",
+  "importButton": "استيراد (JSON)",
+  "importConfirmButton": "تأكيد والاستعادة",
+  "importCancelButton": "إلغاء",
+  "importPreviewTitle": "تم العثور على {{count}} سجل في الملف — راجع قبل التأكيد",
+  "importExportedAt": "تم تصدير النسخة في",
+  "importCompanyMismatch": "هذا الملف من شركة أخرى (مُعرّف مختلف). سيُرفق الاستيراد بالشركة الحالية — تحقّق من أنه الملف الصحيح قبل المتابعة.",
+  "importing": "جارٍ الاستيراد…",
+  "importError": "فشل الاستيراد.",
+  "importPartial": "تم استيراد {{count}} سجل (تم تجاهل بعض الجداول).",
+  "importWarningsTitle": "الجداول المتجاهَلة أثناء الاستيراد:",
+  "importWarningsHint": "بعض الجداول محمية بسياسات RLS أو تعتمد على علاقات موجودة. استورد الجداول الأساسية أولًا (العملاء، المشاريع، القطع) ثم أعد المحاولة.",
+  "importSuccess": "تم استيراد {{count}} سجل بنجاح.",
+  "resetTitle": "إعادة تعيين قاعدة البيانات",
+  "resetHint": "حدّد الفئات المراد حذفها، ثم أكّد.",
+  "resetButton": "إعادة التعيين الآن",
+  "resetting": "جارٍ إعادة التعيين…",
+  "resetSuccess": "تمت إعادة التعيين.",
+  "resetError": "فشلت إعادة التعيين.",
+  "resetSelectAll": "تحديد الكل",
+  "resetDeselectAll": "إلغاء تحديد الكل",
+  "resetSelectedCount": "{{count}} فئة محدَّدة",
+  "tables": {
+    "roles": "الأدوار",
+    "staff_users": "مستخدمو الموظفين",
+    "workers": "العمال",
+    "machines": "آلات CNC",
+    "machine_tools": "أدوات الآلات",
+    "clients": "العملاء",
+    "projects": "المشاريع",
+    "quotes": "عروض الأسعار",
+    "quote_items": "بنود عروض الأسعار",
+    "manufacturing_orders": "أوامر التصنيع",
+    "pieces_tasks": "القطع / المهام",
+    "planning": "التخطيط",
+    "work_shifts": "ورديات العمل",
+    "shift_piece_work": "عمل القطع بالوردية",
+    "work_sessions": "جلسات المشغّل",
+    "work_session_corrections": "تصحيحات الجلسات",
+    "activity_log": "سجل النشاط",
+    "piece_handoffs": "تسليم القطع",
+    "workshop_reclamations": "شكاوى الورشة",
+    "task_types": "أنواع المهام",
+    "stop_reasons": "أسباب التوقف",
+    "inventory_items": "أصناف المخزون",
+    "inventory_transactions": "حركات المخزون",
+    "invoices": "فواتير العملاء",
+    "invoice_items": "بنود الفواتير",
+    "nomenclatures": "قوائم التسمية",
+    "nomenclature_columns": "أعمدة التسمية",
+    "nomenclature_rows": "صفوف التسمية",
+    "nomenclature_cells": "خلايا التسمية",
+    "odoo_config": "إعدادات Odoo"
+  }
+},
   "createAccount": {
     "title": "أنشئ حسابك على ANIXOS",
     "subtitle": "60 يومًا من التجربة المجانية — بدون بطاقة بنكية",

@@ -188,6 +188,12 @@ export function DatabasePage() {
   /** Toutes les catégories proposées à la réinitialisation, triées par ordre de suppression. */
   const resetCategories = useMemo(() => DELETE_ORDER, []);
 
+  /** Nombre de catégories actuellement cochées — alimente le compteur de l'UI. */
+  const selectedCount = useMemo(
+    () => resetCategories.filter((table) => resetSelections[table]).length,
+    [resetCategories, resetSelections],
+  );
+
   async function handleExport() {
     if (!companyId) return;
     setIsExporting(true);
@@ -431,7 +437,7 @@ export function DatabasePage() {
             <div className="font-semibold">{t("database.importWarningsTitle")}</div>
             <ul className="mt-1 list-disc ps-5">
               {importWarnings.map((table) => (
-                <li key={table} className="font-mono">{table}</li>
+                <li key={table}>{t(`database.tables.${table}`, table)}</li>
               ))}
             </ul>
             <p className="mt-1 text-[11px] text-amber-600">
@@ -468,8 +474,8 @@ export function DatabasePage() {
             )}
             <ul className="mb-3 max-h-40 overflow-y-auto text-xs text-slate-600">
               {pendingImport.rowCounts.map((r) => (
-                <li key={r.table} className="flex justify-between border-b border-blue-100/70 py-0.5 font-mono">
-                  <span>{r.table}</span>
+                <li key={r.table} className="flex justify-between border-b border-blue-100/70 py-0.5">
+                  <span>{t(`database.tables.${r.table}`, r.table)}</span>
                   <span className="font-bold">{r.count}</span>
                 </li>
               ))}
@@ -514,6 +520,35 @@ export function DatabasePage() {
         </div>
         <p className="mb-4 text-sm text-red-600">{t("database.resetHint")}</p>
 
+        {/* Barre d'actions : tout sélectionner / tout désélectionner + compteur */}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const all: Record<string, boolean> = {};
+                for (const table of resetCategories) all[table] = true;
+                setResetSelections(all);
+              }}
+              disabled={isResetting}
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {t("database.resetSelectAll")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setResetSelections({})}
+              disabled={isResetting || selectedCount === 0}
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {t("database.resetDeselectAll")}
+            </button>
+          </div>
+          <span className="text-xs font-semibold text-slate-500">
+            {t("database.resetSelectedCount", { count: selectedCount })}
+          </span>
+        </div>
+
         <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {resetCategories.map((table) => (
             <label
@@ -528,7 +563,7 @@ export function DatabasePage() {
                 }
                 className="h-3.5 w-3.5 rounded border-slate-300"
               />
-              <span className="font-mono text-slate-600">{table}</span>
+              <span className="text-slate-700">{t(`database.tables.${table}`, table)}</span>
             </label>
           ))}
         </div>
@@ -543,7 +578,7 @@ export function DatabasePage() {
           type="button"
           onClick={() => void handleReset()}
           disabled={
-            isResetting || resetCategories.every((table) => !resetSelections[table])
+            isResetting || selectedCount === 0
           }
           className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
         >

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Users, Plus, Search, Target, TrendingUp, DollarSign,
-  Phone, Mail, Calendar, FileText, CheckCircle2, XCircle,
-  Loader2, UserCheck, Pencil, Trash2, ChevronRight,
+  Phone, Mail, Calendar, FileText, Loader2, UserCheck,
+  Pencil, Trash2, XCircle,
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { ProspectModal } from "../components/ProspectModal";
@@ -16,31 +16,60 @@ import {
   listInteractions,
   createInteraction,
   convertProspectToClient,
+  createProjectFromProspect,
   type Prospect,
   type Interaction,
   type ProspectStage,
+  type ProspectPriority,
 } from "../api/crmApi";
 
-type TabKey = "pipeline" | "prospects" | "interactions";
+type TabKey = "pipeline" | "prospects";
 
-const STAGES: ProspectStage[] = ["nouveau", "contacte", "negociation", "gagne", "perdu"];
+const STAGES: ProspectStage[] = [
+  "nouveau", "qualification", "etude", "chiffrage", "offre", "negociation", "gagne", "perdu",
+];
 
 const STAGE_COLORS: Record<ProspectStage, { bg: string; text: string; border: string }> = {
-  nouveau:     { bg: "bg-slate-50",   text: "text-slate-700",   border: "border-slate-200" },
-  contacte:    { bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200" },
-  negociation: { bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-200" },
-  gagne:       { bg: "bg-green-50",   text: "text-green-700",   border: "border-green-200" },
-  perdu:       { bg: "bg-red-50",     text: "text-red-700",     border: "border-red-200" },
+  nouveau:       { bg: "bg-slate-50",   text: "text-slate-700",   border: "border-slate-200" },
+  qualification: { bg: "bg-sky-50",     text: "text-sky-700",     border: "border-sky-200" },
+  etude:         { bg: "bg-cyan-50",    text: "text-cyan-700",    border: "border-cyan-200" },
+  chiffrage:     { bg: "bg-violet-50",  text: "text-violet-700",  border: "border-violet-200" },
+  offre:         { bg: "bg-indigo-50",  text: "text-indigo-700",  border: "border-indigo-200" },
+  negociation:   { bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-200" },
+  gagne:         { bg: "bg-green-50",   text: "text-green-700",   border: "border-green-200" },
+  perdu:         { bg: "bg-red-50",     text: "text-red-700",     border: "border-red-200" },
 };
 
-export function CRMAdminPage() {
+const STAGE_LABEL_KEY: Record<ProspectStage, string> = {
+  nouveau:       "crm.stageNouveau",
+  qualification: "crm.stageQualification",
+  etude:         "crm.stageEtude",
+  chiffrage:     "crm.stageChiffrage",
+  offre:         "crm.stageOffre",
+  negociation:   "crm.stageNegociation",
+  gagne:         "crm.stageGagne",
+  perdu:         "crm.stagePerdu",
+};
+
+const PRIORITY_COLORS: Record<ProspectPriority, string> = {
+  basse:   "bg-slate-100 text-slate-500",
+  normale: "bg-blue-100 text-blue-600",
+  haute:   "bg-amber-100 text-amber-700",
+  urgente: "bg-red-100 text-red-700",
+};
+
+interface CRMAdminPageProps {
+  initialTab?: TabKey;
+}
+
+export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}) {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("pipeline");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [search, setSearch] = useState("");
 
   const [showProspectModal, setShowProspectModal] = useState(false);
@@ -50,6 +79,8 @@ export function CRMAdminPage() {
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [showInteractionModal, setShowInteractionModal] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
+  const [creatingProject, setCreatingProject] = useState<string | null>(null);
+  const [createdProjectCode, setCreatedProjectCode] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------
   // Chargement
@@ -71,13 +102,15 @@ export function CRMAdminPage() {
     void load();
   }, []);
 
-  // Chargement des interactions quand on ouvre un prospect
   useEffect(() => {
+    setCreatedProjectCode(null);
     if (!activeProspect) {
       setInteractions([]);
       return;
     }
-    void listInteractions(activeProspect.id).then(setInteractions).catch(() => setInteractions([]));
+    void listInteractions(activeProspect.id)
+      .then(setInteractions)
+      .catch(() => setInteractions([]));
   }, [activeProspect]);
 
   // ---------------------------------------------------------------------
@@ -95,7 +128,6 @@ export function CRMAdminPage() {
     return { total, active, won, pipelineValue, conversionRate };
   }, [prospects]);
 
-  // Filtrage
   const filteredProspects = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return prospects;
@@ -107,10 +139,10 @@ export function CRMAdminPage() {
     );
   }, [prospects, search]);
 
-  // Groupement par stage
   const byStage = useMemo(() => {
     const map: Record<ProspectStage, Prospect[]> = {
-      nouveau: [], contacte: [], negociation: [], gagne: [], perdu: [],
+      nouveau: [], qualification: [], etude: [], chiffrage: [], offre: [],
+      negociation: [], gagne: [], perdu: [],
     };
     for (const p of filteredProspects) {
       map[p.stage].push(p);
@@ -130,14 +162,17 @@ export function CRMAdminPage() {
         {
           full_name: data.full_name ?? "",
           company_name: data.company_name ?? null,
+          contact_person: data.contact_person ?? null,
           email: data.email ?? null,
           phone: data.phone ?? null,
           source: data.source ?? null,
           notes: data.notes ?? null,
           stage: data.stage ?? "nouveau",
+          priority: data.priority ?? "normale",
           estimated_value: data.estimated_value ?? null,
           probability: data.probability ?? null,
           expected_close_at: data.expected_close_at ?? null,
+          requested_date: data.requested_date ?? null,
           owner_staff_id: data.owner_staff_id ?? staffUser.id,
         },
         staffUser.company_id,
@@ -184,6 +219,21 @@ export function CRMAdminPage() {
       await load();
     } finally {
       setConverting(null);
+    }
+  }
+
+  async function handleCreateProject(prospect: Prospect) {
+    if (!staffUser) return;
+    if (!window.confirm(t("crm.confirmCreateProject"))) return;
+    setCreatingProject(prospect.id);
+    try {
+      const result = await createProjectFromProspect(prospect, staffUser.company_id);
+      setCreatedProjectCode(result.projectCode);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setCreatingProject(null);
     }
   }
 
@@ -237,7 +287,9 @@ export function CRMAdminPage() {
           <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
             <TrendingUp size={13} /> {t("crm.kpiConversion")}
           </div>
-          <div className="mt-2 text-2xl font-extrabold text-green-600">{kpis.conversionRate}%</div>
+          <div className="mt-2 text-2xl font-extrabold text-green-600">
+            {kpis.conversionRate}%
+          </div>
         </div>
       </div>
 
@@ -258,10 +310,13 @@ export function CRMAdminPage() {
         ))}
       </div>
 
-      {/* Search (onglet prospects) */}
+      {/* Search (prospects tab) */}
       {activeTab === "prospects" && (
         <div className="relative max-w-sm">
-          <Search size={15} className="absolute start-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search
+            size={15}
+            className="absolute start-3 top-1/2 -translate-y-1/2 text-slate-400"
+          />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -288,14 +343,16 @@ export function CRMAdminPage() {
         <>
           {/* Vue Pipeline */}
           {activeTab === "pipeline" && (
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
+            <div className="flex gap-3 overflow-x-auto pb-2">
               {STAGES.map((stage) => (
                 <div
                   key={stage}
-                  className={`rounded-xl border ${STAGE_COLORS[stage].border} ${STAGE_COLORS[stage].bg} p-3`}
+                  className={`w-64 shrink-0 rounded-xl border ${STAGE_COLORS[stage].border} ${STAGE_COLORS[stage].bg} p-3`}
                 >
-                  <div className={`mb-3 flex items-center justify-between text-xs font-bold ${STAGE_COLORS[stage].text}`}>
-                    <span>{t(`crm.stage${stage.charAt(0).toUpperCase() + stage.slice(1)}`)}</span>
+                  <div
+                    className={`mb-3 flex items-center justify-between text-xs font-bold ${STAGE_COLORS[stage].text}`}
+                  >
+                    <span>{t(STAGE_LABEL_KEY[stage])}</span>
                     <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px]">
                       {byStage[stage].length}
                     </span>
@@ -307,7 +364,20 @@ export function CRMAdminPage() {
                         onClick={() => setActiveProspect(p)}
                         className="w-full rounded-lg border border-white bg-white p-2.5 text-start shadow-sm transition-all hover:shadow-md"
                       >
-                        <div className="text-sm font-semibold text-slate-800">{p.full_name}</div>
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="text-sm font-semibold text-slate-800">
+                            {p.full_name}
+                          </div>
+                          {p.priority !== "normale" && (
+                            <span
+                              className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_COLORS[p.priority]}`}
+                            >
+                              {t(
+                                `crm.priority${p.priority.charAt(0).toUpperCase() + p.priority.slice(1)}`,
+                              )}
+                            </span>
+                          )}
+                        </div>
                         {p.company_name && (
                           <div className="text-xs text-slate-500">{p.company_name}</div>
                         )}
@@ -351,19 +421,23 @@ export function CRMAdminPage() {
                           {p.full_name}
                         </button>
                         {p.email && (
-                          <div className="text-xs text-slate-400" dir="ltr">{p.email}</div>
+                          <div className="text-xs text-slate-400" dir="ltr">
+                            {p.email}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-600">{p.company_name ?? "—"}</td>
                       <td className="px-3 py-2">
                         <select
                           value={p.stage}
-                          onChange={(e) => void handleStageChange(p, e.target.value as ProspectStage)}
+                          onChange={(e) =>
+                            void handleStageChange(p, e.target.value as ProspectStage)
+                          }
                           className={`rounded border px-2 py-0.5 text-xs font-semibold ${STAGE_COLORS[p.stage].bg} ${STAGE_COLORS[p.stage].text} ${STAGE_COLORS[p.stage].border}`}
                         >
                           {STAGES.map((s) => (
                             <option key={s} value={s}>
-                              {t(`crm.stage${s.charAt(0).toUpperCase() + s.slice(1)}`)}
+                              {t(STAGE_LABEL_KEY[s])}
                             </option>
                           ))}
                         </select>
@@ -403,7 +477,7 @@ export function CRMAdminPage() {
         </>
       )}
 
-      {/* Modal Prospect (création / édition) */}
+      {/* Modal Prospect */}
       {showProspectModal && (
         <ProspectModal
           prospect={editingProspect}
@@ -415,16 +489,20 @@ export function CRMAdminPage() {
         />
       )}
 
-      {/* Panneau latéral : détails du prospect */}
+      {/* Panneau latéral : détails */}
       {activeProspect && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={() => setActiveProspect(null)}>
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-slate-900/40"
+          onClick={() => setActiveProspect(null)}
+        >
           <aside
             onClick={(e) => e.stopPropagation()}
             className="h-full w-full max-w-md overflow-y-auto bg-white shadow-2xl"
           >
-            {/* Header */}
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
-              <h2 className="text-base font-extrabold text-slate-800">{activeProspect.full_name}</h2>
+              <h2 className="text-base font-extrabold text-slate-800">
+                {activeProspect.full_name}
+              </h2>
               <button
                 onClick={() => setActiveProspect(null)}
                 className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
@@ -434,12 +512,32 @@ export function CRMAdminPage() {
             </div>
 
             <div className="space-y-5 p-5">
-              {/* Info */}
               <div className="space-y-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-[10px] font-bold ${PRIORITY_COLORS[activeProspect.priority]}`}
+                  >
+                    {t(
+                      `crm.priority${activeProspect.priority.charAt(0).toUpperCase() + activeProspect.priority.slice(1)}`,
+                    )}
+                  </span>
+                  {activeProspect.requested_date && (
+                    <span className="text-xs text-slate-400">
+                      {t("crm.requestedDate")}:{" "}
+                      {new Date(activeProspect.requested_date).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
                 {activeProspect.company_name && (
                   <div className="flex items-center gap-2 text-slate-600">
                     <UserCheck size={14} className="text-slate-400" />
                     {activeProspect.company_name}
+                  </div>
+                )}
+                {activeProspect.contact_person && (
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <Users size={14} className="text-slate-400" />
+                    {activeProspect.contact_person}
                   </div>
                 )}
                 {activeProspect.email && (
@@ -457,7 +555,7 @@ export function CRMAdminPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setShowInteractionModal(true)}
                   className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -477,7 +575,26 @@ export function CRMAdminPage() {
                     )}
                   </button>
                 )}
+                {activeProspect.stage === "gagne" && (
+                  <button
+                    onClick={() => void handleCreateProject(activeProspect)}
+                    disabled={creatingProject === activeProspect.id}
+                    className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {creatingProject === activeProspect.id ? (
+                      <Loader2 size={12} className="mx-auto animate-spin" />
+                    ) : (
+                      t("crm.createProjectButton")
+                    )}
+                  </button>
+                )}
               </div>
+
+              {createdProjectCode && (
+                <div className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">
+                  {t("crm.projectCreatedSuccess", { code: createdProjectCode })}
+                </div>
+              )}
 
               {/* Historique des interactions */}
               <div>
@@ -491,15 +608,24 @@ export function CRMAdminPage() {
                 ) : (
                   <ul className="space-y-2">
                     {interactions.map((it) => {
-                      const Icon = it.type === "appel" ? Phone
-                        : it.type === "email" ? Mail
-                        : it.type === "rdv" ? Calendar
-                        : FileText;
+                      const Icon =
+                        it.type === "appel"
+                          ? Phone
+                          : it.type === "email"
+                            ? Mail
+                            : it.type === "rdv"
+                              ? Calendar
+                              : FileText;
                       return (
-                        <li key={it.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                        <li
+                          key={it.id}
+                          className="rounded-lg border border-slate-100 bg-slate-50/60 p-3"
+                        >
                           <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                             <Icon size={12} className="text-indigo-500" />
-                            {t(`crm.interactionType${it.type.charAt(0).toUpperCase() + it.type.slice(1)}`)}
+                            {t(
+                              `crm.interactionType${it.type.charAt(0).toUpperCase() + it.type.slice(1)}`,
+                            )}
                             <span className="ms-auto text-slate-400">
                               {new Date(it.happened_at).toLocaleString()}
                             </span>

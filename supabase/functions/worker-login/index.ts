@@ -38,10 +38,11 @@ serve(async (req) => {
 
     let passwordMatch = false;
 
-    // 1. تجاوز الاختبار للرقم 1234 أو 0000 مباشرة إذا دخل المستخدم amine
-    if (cleanPassword === "1234" || cleanPassword === "0000") {
-      passwordMatch = true;
-    } else {
+    // Vérification réelle uniquement — aucun contournement. Un mot de passe
+    // universel ici permettrait à n'importe qui de démarrer une shift/session
+    // au nom de n'importe quel opérateur, ce qui est exactement le type de
+    // session fictive/erronée que ce système doit empêcher.
+    {
       let targetHash = (worker.password_hash || worker.pin_code_hash || "").trim();
       if (targetHash.startsWith("$2y$") || targetHash.startsWith("$2b$")) {
         targetHash = "$2a$" + targetHash.slice(4);

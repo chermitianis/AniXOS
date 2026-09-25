@@ -1,0 +1,18 @@
+-- ============================================================================
+-- 0079_project_ready_for_production.sql
+--
+-- ⚠️ Placeholder de synchronisation.
+--
+-- Ce numéro (0079) est déjà appliqué sur la base distante sous ce nom exact
+-- ("project_ready_for_production"). Le contenu a déjà produit ses effets
+-- (contrainte projects_status_check étendue + colonne sent_to_production_at).
+--
+-- Ce fichier existe uniquement pour que `supabase db push` considère l'état
+-- local et distant comme synchronisés, et pour éviter l'erreur
+-- "duplicate key value violates unique constraint schema_migrations_pkey".
+--
+-- ⚠️ Ne pas ajouter de SQL ici. Toute évolution doit passer par un NOUVEAU
+-- numéro de migration (0081+).
+-- ============================================================================
+
+-- No-op intentionnel.

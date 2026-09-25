@@ -33,3 +33,11 @@ supabase/functions/.env.*
 # AniXOS — Examples are tracked
 !.env.local.example
 !.env.example
+# AniXOS - Setup secrets (local only)
+.env.setup
+.setup-state.json
+release/
+src-tauri/target/
+src-tauri/gen/
+android/app/build/
+

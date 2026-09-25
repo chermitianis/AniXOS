@@ -105,7 +105,7 @@ export function AccountingAdminPage() {
   // Filtres & KPIs
   // ---------------------------------------------------------------------
   const filteredClientInvoices = useMemo(
-    () => clientInvoices.filter((i) => isWithinPeriod(i.issue_date, period)),
+    () => clientInvoices.filter((i) => isWithinPeriod(i.issued_date, period)),  // ← corrigé
     [clientInvoices, period],
   );
   const filteredSupplierInvoices = useMemo(
@@ -471,7 +471,7 @@ export function AccountingAdminPage() {
                         <tr key={inv.id} className="border-t border-slate-100">
                           <td className="px-3 py-2 font-mono text-xs" dir="ltr">{inv.invoice_number}</td>
                           <td className="px-3 py-2 text-slate-600">
-                            {new Date(inv.issue_date).toLocaleDateString()}
+                            {new Date(inv.issued_date).toLocaleDateString()}   {/* ← corrigé */}
                           </td>
                           <td className="px-3 py-2 text-end font-semibold text-slate-700" dir="ltr">
                             {Number(inv.total).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} TND

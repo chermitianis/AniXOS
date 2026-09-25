@@ -1,19 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { TrendingUp, Activity, AlertTriangle, PackageX } from "lucide-react";
+import { TrendingUp, Activity, AlertTriangle, PackageX, LockOpen, XCircle } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
+import { fetchOpenShifts, type OpenShiftRow } from "../api/shiftAdminApi";
+import { ForceCloseShiftModal } from "../components/ForceCloseShiftModal";
 import type { ProjectProfitability, InventoryItem } from "../../../shared/types/database";
 
 interface LiveOperationRow {
-  shift_id: string;
   worker_id: string;
   worker_name: string;
-  shift_started_at: string;
-  session_id: string | null;
+  session_id: string;
   session_type: "production" | "downtime" | null;
-  started_at: string | null;
+  started_at: string;
   machine_id: string | null;
   machine_name: string | null;
   project_id: string | null;
@@ -49,18 +49,26 @@ export function ManagerDashboardPage() {
   const [profitability, setProfitability] = useState<ProjectProfitability[]>([]);
   const [liveOps, setLiveOps] = useState<LiveOperationRow[]>([]);
   const [lowStock, setLowStock] = useState<InventoryItem[]>([]);
+  const [openShifts, setOpenShifts] = useState<OpenShiftRow[]>([]);
+  const [shiftToForceClose, setShiftToForceClose] = useState<OpenShiftRow | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadDashboard = useCallback(async () => {
-    const [{ data: profit }, { data: live }, { data: stock }] = await Promise.all([
+    const [{ data: profit }, { data: live }, { data: stock }, shifts] = await Promise.all([
       supabase.from("v_project_profitability").select("*").order("net_profit", { ascending: true }),
-      supabase.from("v_live_operations").select("*").order("shift_started_at", { ascending: false }),
+      // NB : la vue v_live_operations n'a jamais eu de colonne "shift_started_at"
+      // (seulement "started_at" au niveau de la session) — ce order() échouait
+      // silencieusement à chaque chargement (erreur PostgREST avalée par le
+      // destructuring ci-dessous), corrigé au passage.
+      supabase.from("v_live_operations").select("*").order("started_at", { ascending: false }),
       supabase.from("v_inventory_low_stock").select("*"),
+      fetchOpenShifts(),
     ]);
 
     setProfitability((profit as ProjectProfitability[]) ?? []);
     setLiveOps((live as LiveOperationRow[]) ?? []);
     setLowStock((stock as InventoryItem[]) ?? []);
+    setOpenShifts(shifts);
     setIsLoading(false);
   }, []);
 
@@ -144,6 +152,63 @@ export function ManagerDashboardPage() {
       </div>
 
       {/* ============================================================= */}
+      {/* Sessions bloquées — indépendant de "Live Operations" : montre  */}
+      {/* toute shift ouverte, même sans événement production actif     */}
+      {/* (cas exact d'un opérateur qui a perdu l'accès à son appareil  */}
+      {/* sans avoir pu se déconnecter).                                */}
+      {/* ============================================================= */}
+      {openShifts.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-amber-800 sm:text-lg">
+            <LockOpen size={18} /> {t("setup.openShiftsTitle")} ({openShifts.length})
+          </h2>
+          <ul className="flex flex-col gap-2">
+            {openShifts.map((shift) => {
+              const elapsedHours = elapsedSecondsSince(shift.started_at) / 3600;
+              const isSuspicious = elapsedHours > 12;
+              return (
+                <li
+                  key={shift.id}
+                  className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-slate-700">{shift.worker_name}</span>
+                      {isSuspicious && (
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-600">
+                          ⚠️ {t("setup.suspiciousShift")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400" dir="ltr">
+                      {formatElapsed(elapsedSecondsSince(shift.started_at))} — {new Date(shift.started_at).toLocaleString()}
+                    </p>
+                  </div>
+                  {staffUser?.is_owner && (
+                    <button
+                      type="button"
+                      onClick={() => setShiftToForceClose(shift)}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                    >
+                      <XCircle size={14} /> {t("setup.forceCloseButton")}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {shiftToForceClose && (
+        <ForceCloseShiftModal
+          shift={shiftToForceClose}
+          onClose={() => setShiftToForceClose(null)}
+          onClosed={() => void loadDashboard()}
+        />
+      )}
+
+      {/* ============================================================= */}
       {/* Live Operations — cartes empilées sur mobile                  */}
       {/* ============================================================= */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
@@ -160,7 +225,7 @@ export function ManagerDashboardPage() {
                   r.session_type === "production" ? 0 : r.session_type === "downtime" ? 1 : 2;
                 return (
                   rank(a) - rank(b) ||
-                  new Date(b.shift_started_at).getTime() - new Date(a.shift_started_at).getTime()
+                  new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
                 );
               })
               .map((op) => {
@@ -173,11 +238,11 @@ export function ManagerDashboardPage() {
                   : isDowntime
                     ? op.stop_reason_name ?? t("setup.inDowntime")
                     : t("setup.workerLoggedInWaiting");
-                const elapsed = elapsedSecondsSince(op.started_at ?? op.shift_started_at);
+                const elapsed = elapsedSecondsSince(op.started_at);
 
                 return (
                   <li
-                    key={op.shift_id}
+                    key={op.session_id}
                     className="rounded-lg bg-slate-50 p-3 text-sm transition-colors hover:bg-slate-100 sm:flex sm:items-center sm:justify-between sm:px-3 sm:py-2"
                   >
                     {/* Ligne 1 : worker + status */}

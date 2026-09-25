@@ -1,0 +1,266 @@
+﻿
+apps
+├── web
+│   ├── public
+│   │   ├── apple-touch-icon.png
+│   │   ├── favicon.svg
+│   │   ├── icon-1254.png
+│   │   ├── icon-128.png
+│   │   ├── icon-144.png
+│   │   ├── icon-152.png
+│   │   ├── icon-192.png
+│   │   ├── icon-384.png
+│   │   ├── icon-512.png
+│   │   ├── icon-72.png
+│   │   ├── icon-96.png
+│   │   ├── icons.svg
+│   │   └── planning-manifest.webmanifest
+│   ├── src
+│   │   ├── app
+│   │   │   ├── AppRouter.tsx
+│   │   │   ├── ChangePasswordModal.tsx
+│   │   │   ├── GeneralSettingsModal.tsx
+│   │   │   ├── GeneralSettingsPage.tsx
+│   │   │   ├── NavContext.tsx
+│   │   │   ├── NavItem.tsx
+│   │   │   ├── navTree.ts
+│   │   │   ├── ProfileMenu.tsx
+│   │   │   ├── SubscriptionGate.tsx
+│   │   │   ├── ThemeContext.tsx
+│   │   │   └── TopRightActions.tsx
+│   │   ├── assets
+│   │   │   ├── hero.png
+│   │   │   └── vite.svg
+│   │   ├── auth
+│   │   │   ├── permissions.ts
+│   │   │   ├── StaffAuthContext.tsx
+│   │   │   └── WorkerSessionContext.tsx
+│   │   ├── i18n
+│   │   │   └── config.ts
+│   │   ├── lib
+│   │   │   ├── activeCompany.ts
+│   │   │   ├── companyContext.ts
+│   │   │   ├── connectivity.ts
+│   │   │   ├── credentialsSync.ts
+│   │   │   ├── deviceContext.ts
+│   │   │   ├── ephemeralAuthClient.ts
+│   │   │   ├── localDb.ts
+│   │   │   ├── paddleConfig.ts
+│   │   │   ├── realtimeChannel.ts
+│   │   │   ├── supabaseClient.ts
+│   │   │   ├── syncEngine.ts
+│   │   │   └── syncQueue.ts
+│   │   ├── locales
+│   │   │   ├── ar
+│   │   │   │   └── translation.json
+│   │   │   ├── en
+│   │   │   │   └── translation.json
+│   │   │   └── fr
+│   │   │       └── translation.json
+│   │   ├── modules
+│   │   │   ├── accounting
+│   │   │   │   ├── api
+│   │   │   │   │   └── accountingApi.ts
+│   │   │   │   ├── components
+│   │   │   │   │   └── SupplierInvoiceModal.tsx
+│   │   │   │   └── pages
+│   │   │   │       ├── AccountingAdminPage.tsx
+│   │   │   │       └── AccountingPage.tsx
+│   │   │   ├── admin
+│   │   │   ├── crm
+│   │   │   │   ├── api
+│   │   │   │   │   └── crmApi.ts
+│   │   │   │   ├── components
+│   │   │   │   │   ├── InteractionModal.tsx
+│   │   │   │   │   └── ProspectModal.tsx
+│   │   │   │   └── pages
+│   │   │   │       └── CRMAdminPage.tsx
+│   │   │   ├── developer
+│   │   │   │   ├── components
+│   │   │   │   │   ├── AccountDetailsModal.tsx
+│   │   │   │   │   ├── AccountsTab.tsx
+│   │   │   │   │   ├── AnalyticsTab.tsx
+│   │   │   │   │   ├── EventsTab.tsx
+│   │   │   │   │   ├── OverviewTab.tsx
+│   │   │   │   │   └── PricingTab.tsx
+│   │   │   │   └── pages
+│   │   │   │       └── DeveloperPanelPage.tsx
+│   │   │   ├── engineering
+│   │   │   │   ├── components
+│   │   │   │   │   └── PiecePicker.tsx
+│   │   │   │   └── pages
+│   │   │   │       ├── DossiersTechniquesPage.tsx
+│   │   │   │       ├── GammesTempsPage.tsx
+│   │   │   │       └── ValidationTechniquePage.tsx
+│   │   │   ├── hr
+│   │   │   ├── inventory
+│   │   │   ├── kiosk
+│   │   │   │   ├── api
+│   │   │   │   │   └── kioskApi.ts
+│   │   │   │   ├── components
+│   │   │   │   │   ├── ContextBar.tsx
+│   │   │   │   │   ├── EventLogTab.tsx
+│   │   │   │   │   ├── FooterBar.tsx
+│   │   │   │   │   ├── LogoutConfirmModal.tsx
+│   │   │   │   │   ├── MachineToolsModal.tsx
+│   │   │   │   │   ├── ManagerDeviceResetModal.tsx
+│   │   │   │   │   ├── PassationPanel.tsx
+│   │   │   │   │   ├── PlanningOverviewModal.tsx
+│   │   │   │   │   ├── ProductionTasksGrid.tsx
+│   │   │   │   │   ├── ProjectPieceSelectorModal.tsx
+│   │   │   │   │   ├── ReclamationModal.tsx
+│   │   │   │   │   ├── SessionCorrectionModal.tsx
+│   │   │   │   │   ├── SidePanel.tsx
+│   │   │   │   │   ├── StopReasonsGrid.tsx
+│   │   │   │   │   ├── SummaryTab.tsx
+│   │   │   │   │   ├── TaskCard.tsx
+│   │   │   │   │   └── TopNavBar.tsx
+│   │   │   │   ├── hooks
+│   │   │   │   │   ├── useActiveTask.ts
+│   │   │   │   │   ├── useActivityLog.ts
+│   │   │   │   │   ├── useOfflineSync.ts
+│   │   │   │   │   ├── usePieceHandoffsUnread.ts
+│   │   │   │   │   ├── useSessionSummary.ts
+│   │   │   │   │   ├── useSessionTimer.ts
+│   │   │   │   │   ├── useStopReasons.ts
+│   │   │   │   │   ├── useTaskTypes.ts
+│   │   │   │   │   └── useWorkerPlanning.ts
+│   │   │   │   └── pages
+│   │   │   │       ├── KioskMainPage.tsx
+│   │   │   │       ├── KioskRouter.tsx
+│   │   │   │       └── WorkerLoginPage.tsx
+│   │   │   ├── manager
+│   │   │   ├── nomenclature
+│   │   │   │   ├── api
+│   │   │   │   │   └── costingApi.ts
+│   │   │   │   ├── components
+│   │   │   │   │   ├── CostingEditorPage.tsx
+│   │   │   │   │   ├── CostingModal.tsx
+│   │   │   │   │   ├── MaterialCard.tsx
+│   │   │   │   │   └── OperationCard.tsx
+│   │   │   │   ├── defaults
+│   │   │   │   │   └── defaultTemplate.ts
+│   │   │   │   ├── lib
+│   │   │   │   │   └── costingConstants.ts
+│   │   │   │   └── pages
+│   │   │   │       ├── CostingArchivePage.tsx
+│   │   │   │       ├── CostingPage.tsx
+│   │   │   │       ├── NomenclatureEditorPage.tsx
+│   │   │   │       ├── NomenclatureListPage.tsx
+│   │   │   │       └── NomenclaturePage.tsx
+│   │   │   ├── planning
+│   │   │   ├── procurement
+│   │   │   ├── reports
+│   │   │   │   ├── components
+│   │   │   │   │   ├── ChartCard.tsx
+│   │   │   │   │   ├── EmptyState.tsx
+│   │   │   │   │   ├── KpiCard.tsx
+│   │   │   │   │   └── PeriodSelector.tsx
+│   │   │   │   ├── pages
+│   │   │   │   │   ├── FinanceReportTab.tsx
+│   │   │   │   │   ├── MachinesReportTab.tsx
+│   │   │   │   │   ├── OverviewTab.tsx
+│   │   │   │   │   ├── ProjectsReportTab.tsx
+│   │   │   │   │   ├── ReportsPage.tsx
+│   │   │   │   │   └── WorkersReportTab.tsx
+│   │   │   │   └── types.ts
+│   │   │   ├── sales
+│   │   │   ├── settings
+│   │   │   │   ├── components
+│   │   │   │   │   ├── OdooActivationModal.tsx
+│   │   │   │   │   ├── OdooIntegrationPanel.tsx
+│   │   │   │   │   ├── PlanningQrSecurityCard.tsx
+│   │   │   │   │   └── SettingsGate.tsx
+│   │   │   │   ├── hooks
+│   │   │   │   │   └── useOdooConfig.ts
+│   │   │   │   ├── pages
+│   │   │   │   │   ├── DatabasePage.tsx
+│   │   │   │   │   ├── DeviceSettingsPage.tsx
+│   │   │   │   │   ├── MyProfilePage.tsx
+│   │   │   │   │   ├── RolesAdminPage.tsx
+│   │   │   │   │   ├── SettingsPage.tsx
+│   │   │   │   │   └── StaffAdminPage.tsx
+│   │   │   │   └── permissionModules.ts
+│   │   │   ├── setup
+│   │   │   │   ├── api
+│   │   │   │   │   └── shiftAdminApi.ts
+│   │   │   │   ├── components
+│   │   │   │   │   ├── AdminField.tsx
+│   │   │   │   │   ├── CreateDatabaseModal.tsx
+│   │   │   │   │   ├── DeleteDatabaseModal.tsx
+│   │   │   │   │   ├── ForceCloseShiftModal.tsx
+│   │   │   │   │   ├── ProjectReportModal.tsx
+│   │   │   │   │   └── ReclamationsBell.tsx
+│   │   │   │   ├── pages
+│   │   │   │   │   ├── AdminHomePage.tsx
+│   │   │   │   │   ├── ArchivePage.tsx
+│   │   │   │   │   ├── ClientsAdminPage.tsx
+│   │   │   │   │   ├── ComingSoonPage.tsx
+│   │   │   │   │   ├── CreateAccountPage.tsx
+│   │   │   │   │   ├── CreateCompanyPage.tsx
+│   │   │   │   │   ├── DatabaseSelectorPage.tsx
+│   │   │   │   │   ├── DatabasesManagerPage.tsx
+│   │   │   │   │   ├── DeviceRoleSelectionPage.tsx
+│   │   │   │   │   ├── InventoryAdminPage.tsx
+│   │   │   │   │   ├── MachinesAdminPage.tsx
+│   │   │   │   │   ├── ManagerDashboardPage.tsx
+│   │   │   │   │   ├── ManufacturingOrdersAdminPage.tsx
+│   │   │   │   │   ├── OperationsAdminPage.tsx
+│   │   │   │   │   ├── PlanningAdminPage.tsx
+│   │   │   │   │   ├── ProductionDashboardPage.tsx
+│   │   │   │   │   ├── ProductionPreparationPage.tsx
+│   │   │   │   │   ├── ProjectsAdminPage.tsx
+│   │   │   │   │   ├── SalesAdminPage.tsx
+│   │   │   │   │   ├── StaffLoginPage.tsx
+│   │   │   │   │   ├── StopReasonsAdminPage.tsx
+│   │   │   │   │   ├── TaskTypesAdminPage.tsx
+│   │   │   │   │   ├── WorkersAdminPage.tsx
+│   │   │   │   │   └── WorkshopInfoPage.tsx
+│   │   │   │   └── steps
+│   │   │   ├── subscription
+│   │   │   │   ├── components
+│   │   │   │   │   ├── BillingToggle.tsx
+│   │   │   │   │   └── PlanCard.tsx
+│   │   │   │   └── pages
+│   │   │   │       └── SubscriptionPage.tsx
+│   │   │   └── worker-planning
+│   │   │       ├── api
+│   │   │       │   └── workerPlanningApi.ts
+│   │   │       ├── context
+│   │   │       │   └── PlanningSessionContext.tsx
+│   │   │       └── pages
+│   │   │           ├── WorkerPlanningApp.tsx
+│   │   │           ├── WorkerPlanningHomePage.tsx
+│   │   │           └── WorkerPlanningQRScannerPage.tsx
+│   │   ├── shared
+│   │   │   ├── components
+│   │   │   │   ├── AppLogo.tsx
+│   │   │   │   └── LanguageSwitcher.tsx
+│   │   │   ├── constants
+│   │   │   │   ├── materials.ts
+│   │   │   │   └── toolTypes.ts
+│   │   │   ├── layouts
+│   │   │   ├── types
+│   │   │   │   └── database.ts
+│   │   │   └── utils
+│   │   │       └── planningQrToken.ts
+│   │   ├── styles
+│   │   ├── types
+│   │   │   └── database.ts
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── main.tsx
+│   │   └── vite-env.d.ts
+│   ├── .env.local
+│   ├── .env.local.example
+│   ├── .gitignore
+│   ├── .oxlintrc.json
+│   ├── index.html
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── README.md
+│   ├── tsconfig.app.json
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   └── vite.config.ts
+└── structure.txt
