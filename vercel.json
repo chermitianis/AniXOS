@@ -34,7 +34,7 @@
       ]
     },
     {
-      "source": "/workbox-.*\\.js",
+      "source": "/workbox-(.*)",
       "headers": [
         {
           "key": "Cache-Control",
