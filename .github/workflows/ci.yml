@@ -8,7 +8,12 @@ on:
 
 jobs:
   build-and-check:
+    name: Typecheck & Build (apps/web)
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/web
 
     steps:
       - name: Checkout Code
@@ -17,17 +22,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: 'apps/web/package-lock.json'
 
       - name: Install Dependencies
         run: npm ci
-        working-directory: apps/web
 
-      - name: Run Build & Typecheck
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+        env:
+          VITE_SUPABASE_URL: https://loqgaepskvqkhmcweszd.supabase.co
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Build
         run: npm run build
-        working-directory: apps/web
         env:
           VITE_SUPABASE_URL: https://loqgaepskvqkhmcweszd.supabase.co
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -35,9 +44,8 @@ jobs:
       - name: Verify Build Output
         run: |
           if [ -d "dist" ]; then
-            echo "Build succeeded: apps/web/dist found."
+            echo "✅ Build succeeded: apps/web/dist found."
           else
-            echo "Build failed: apps/web/dist missing!"
+            echo "❌ Build failed: apps/web/dist missing!"
             exit 1
           fi
-        working-directory: apps/web
