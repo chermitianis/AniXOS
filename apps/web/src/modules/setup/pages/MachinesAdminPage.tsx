@@ -7,14 +7,12 @@ import { connectivityMonitor } from "../../../lib/connectivity";
 import { enqueueSync } from "../../../lib/syncQueue";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
-import type { Machine } from "../../../shared/types/database";
-
-type InterfaceType = "cnc" | "manual" | "both";
+import type { Machine, InterfaceType } from "../../../shared/types/database";
 
 const INTERFACE_OPTIONS: { value: InterfaceType; labelKey: string; icon: typeof Cpu; color: string }[] = [
-  { value: "cnc",    labelKey: "setup.interfaceCnc",    icon: Cpu,     color: "text-amber-700 bg-amber-100" },
-  { value: "manual", labelKey: "setup.interfaceManual", icon: Wrench,  color: "text-blue-700 bg-blue-100" },
-  { value: "both",   labelKey: "setup.interfaceBoth",   icon: Layers,  color: "text-slate-700 bg-slate-100" },
+  { value: "cnc",       labelKey: "setup.interfaceCnc",       icon: Cpu,     color: "text-amber-700 bg-amber-100" },
+  { value: "classique", labelKey: "setup.interfaceClassique", icon: Wrench,  color: "text-blue-700 bg-blue-100" },
+  { value: "both",      labelKey: "setup.interfaceBoth",      icon: Layers,  color: "text-slate-700 bg-slate-100" },
 ];
 
 function buildEmptyToolRows(companyId: string, machineId: string, count: number, startFrom = 1) {
@@ -51,7 +49,7 @@ export function MachinesAdminPage() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [machineType, setMachineType] = useState("");
-  const [interfaceType, setInterfaceType] = useState<InterfaceType>("manual");
+  const [interfaceType, setInterfaceType] = useState<InterfaceType>("classique");
   const [toolCount, setToolCount] = useState("0");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +79,7 @@ export function MachinesAdminPage() {
     setName("");
     setCode("");
     setMachineType("");
-    setInterfaceType("manual");
+    setInterfaceType("classique");
     setToolCount("0");
   }
 
@@ -90,9 +88,7 @@ export function MachinesAdminPage() {
     setName(machine.name);
     setCode(machine.code);
     setMachineType(machine.machine_type ?? "");
-    setInterfaceType(
-      ((machine as unknown as { interface_type?: InterfaceType }).interface_type) ?? "manual",
-    );
+    setInterfaceType((machine.interface_type as InterfaceType) ?? "classique");
     setToolCount(String(machine.tool_count ?? 0));
     setError(null);
   }
@@ -310,8 +306,7 @@ export function MachinesAdminPage() {
         </h2>
         <ul className="flex flex-col gap-2">
           {machines.map((m) => {
-            const mInterface =
-              ((m as unknown as { interface_type?: InterfaceType }).interface_type) ?? "manual";
+            const mInterface = (m.interface_type as InterfaceType) ?? "classique";
             const interfaceMeta = INTERFACE_OPTIONS.find((o) => o.value === mInterface) ?? INTERFACE_OPTIONS[1];
             const InterfaceIcon = interfaceMeta.icon;
             return (

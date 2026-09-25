@@ -34,6 +34,10 @@ import type {
 
 export type ToggleResult = { ok: true } | { ok: false; reason: "max_active" };
 
+/** الحد الأقصى لرقم الـPhase: سقف عملي يمنع الأخطاء عبر الضغط المتكرر على
+ * زر + (لا يوجد مسار إنتاج حقيقي يصل إلى 200 Phase على قطعة واحدة). */
+const MAX_PHASE = 200;
+
 interface ActiveTaskState {
   machine: Machine | null;
   project: Project | null;
@@ -207,10 +211,12 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
   }, [pieceTask, workerId]);
 
+  /** يعدّل رقم Phase القطعة الحالية ضمن الحدود [1, MAX_PHASE]. */
   const changePhase = useCallback(async (delta: number) => {
     if (!pieceTask) return;
     const current = Number.parseInt(pieceTask.phase ?? "1", 10) || 1;
-    const next = Math.max(1, current + delta);
+    const next = Math.min(MAX_PHASE, Math.max(1, current + delta));
+    if (next === current) return; // لا حاجة لمزامنة إن لم يتغير شيء
     setPieceTask((previous) => previous ? { ...previous, phase: String(next) } : previous);
     await updatePiecePhase(pieceTask.id, next);
   }, [pieceTask]);

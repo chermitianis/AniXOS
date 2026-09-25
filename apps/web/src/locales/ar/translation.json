@@ -311,6 +311,10 @@
     "addTaskType": "إضافة نوع مهمة إنتاجية",
     "taskTypeName": "اسم المهمة",
     "cardColor": "لون البطاقة",
+    "interfaceLabel": "الواجهة",
+"interfaceBoth": "الكل (CNC + تقليدي)",
+"interfaceCnc": "CNC فقط",
+"interfaceClassique": "تقليدي فقط",
     "taskTypesList": "أنواع المهام",
     "addStopReason": "إضافة سبب توقف",
     "stopReasonName": "اسم السبب",
@@ -714,7 +718,15 @@
     "sendToProductionConfirm": "إرسال هذا المشروع إلى التصنيع؟ سيصبح متاحا في أوامر التصنيع.",
     "duplicateWarningTitle": "مشروع مشابه موجود",
     "duplicateWarningBody": "يوجد {{count}} مشروع بنفس الاسم. هل تريد المتابعة حقا؟",
-    "duplicateConfirm": "تأكيد الإضافة"
+    "duplicateConfirm": "تأكيد الإضافة",
+    "statusNotSent": "لم تُرسل",
+"statusSent": "مُرسَلة",
+"statusInPreparation": "قيد التحضير",
+"statusReadyToStart": "جاهزة للبدء",
+"statusScheduled": "مُجدوَلة",
+"statusInProgress": "قيد التنفيذ",
+"statusCompleted": "مكتملة",
+"statusOnHold": "متوقفة"
   },
     "etude": {
     "tabs": {
@@ -751,21 +763,25 @@
   },
 
   "production": {
-    "kpi": {
-      "waiting": "في الانتظار",
-      "ready": "جاهزة",
-      "inProgress": "قيد التنفيذ",
-      "late": "متأخرة"
-    },
-    "sections": {
-      "waiting": "قطع في الانتظار",
-      "inProgress": "قطع قيد التنفيذ",
-      "orders": "أوامر التصنيع"
-    },
-    "actions": {
-      "preparer": "تحضير",
-      "viewAll": "عرض الكل"
-    },
+   "kpi": {
+  "waiting": "في الانتظار",
+  "ready": "جاهزة",
+  "inProgress": "قيد التنفيذ",
+  "completed": "مكتملة",
+  "late": "متأخرة"
+},
+"sections": {
+  "waiting": "قطع في الانتظار",
+  "inProgress": "قطع قيد التنفيذ",
+  "completed": "قطع مكتملة",
+  "orders": "أوامر التصنيع"
+},
+"empty": {
+  "waiting": "لا توجد قطع في الانتظار",
+  "inProgress": "لا توجد قطع قيد التنفيذ",
+  "completed": "لا توجد قطع مكتملة",
+  "orders": "لا توجد أوامر تصنيع"
+},
     "empty": {
       "waiting": "لا توجد قطع في الانتظار",
       "inProgress": "لا توجد قطع قيد التنفيذ",

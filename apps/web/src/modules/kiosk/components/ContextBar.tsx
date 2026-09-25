@@ -12,6 +12,8 @@ interface ContextBarProps {
   machine: Machine | null;
   project: Project | null;
   pieceTask: PieceTask | null;
+  /** Temps total estimé pour la pièce (depuis piece_costing_operations). */
+  estimatedTotalMinutes?: number | null;
   onOpenSelector: () => void;
   onCompletePiece: () => void;
   onPausePiece: () => void;
@@ -51,7 +53,6 @@ function Field({
   );
 }
 
-/** أزرار الحسم النهائي (Terminer / En cours d'usinage) بتأكيد صريح قبل التنفيذ */
 function DecisionButtons({
   onCompletePiece,
   onPausePiece,
@@ -127,11 +128,22 @@ function DecisionButtons({
   );
 }
 
+/** Formate un nombre de minutes en "Xh YYmin" — retourne "—" si 0/null. */
+function formatMinutes(min: number | null | undefined): string {
+  if (!min || min <= 0) return "—";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${m.toString().padStart(2, "0")}`;
+}
+
 export function ContextBar({
   worker,
   machine,
   project,
   pieceTask,
+  estimatedTotalMinutes,
   onOpenSelector,
   onCompletePiece,
   onPausePiece,
@@ -142,16 +154,18 @@ export function ContextBar({
   const [isPassationOpen, setIsPassationOpen] = useState(false);
   const { unreadCount, refresh: refreshUnread } = usePieceHandoffsUnread(pieceTask?.id ?? null, worker.id);
 
-  // حساب وقت التقدير بالدقائق من أي من الحقلين المتوفرين
+  // Priorité : estimation totale passée par le parent, sinon fallback
+  // sur les champs de la pièce.
   const estimatedMin =
-    pieceTask?.estimated_minutes ?? pieceTask?.estimated_time_minutes ?? 0;
+    estimatedTotalMinutes ??
+    pieceTask?.estimated_minutes ??
+    pieceTask?.estimated_time_minutes ??
+    0;
 
   return (
     <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-100/70 px-4 py-3">
-      {/* اسم العامل */}
       <Field label={t("kiosk.operator")} value={worker.full_name} />
 
-      {/* الماكينة المختارة أداة الأطقم */}
       <Field
         label={t("kiosk.machine")}
         value={machine?.name ?? t("kiosk.noMachine")}
@@ -162,7 +176,6 @@ export function ContextBar({
         }
       />
 
-      {/* الـ Phase مع زري التحكم + و - */}
       <div className="flex min-w-[130px] flex-col rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
           {t("kiosk.phase")}
@@ -190,7 +203,6 @@ export function ContextBar({
         </div>
       </div>
 
-      {/* المشروع كود واسم */}
       <Field
         label={t("kiosk.projectName")}
         value={project?.name ?? t("kiosk.noActiveProject")}
@@ -198,18 +210,20 @@ export function ContextBar({
       />
       <Field label={t("kiosk.projectCode")} value={project?.code ?? "—"} />
 
-      {/* اسم القطعة والوقت المقدر */}
       <Field label={t("kiosk.piece")} value={pieceTask?.name ?? "—"} />
+
+      {/* Nouveau : quantité issue de la fiche pièce */}
       <Field
-        label={t("kiosk.estimation")}
-        value={
-          estimatedMin > 0
-            ? `${estimatedMin} ${t("kiosk.minutesShort")}`
-            : "—"
-        }
+        label={t("kiosk.quantity")}
+        value={pieceTask?.quantity != null ? String(pieceTask.quantity) : "—"}
       />
 
-      {/* زر الـ Passation — يومض فقط عند وجود رسالة غير مقروءة بانتظار العامل */}
+      {/* Temps estimé total */}
+      <Field
+        label={t("kiosk.estimation")}
+        value={formatMinutes(estimatedMin)}
+      />
+
       {pieceTask && (
         <button
           type="button"
@@ -232,7 +246,6 @@ export function ContextBar({
         </button>
       )}
 
-      {/* أزرار الحسم والإكمال */}
       {pieceTask && (
         <DecisionButtons
           onCompletePiece={onCompletePiece}
@@ -240,7 +253,6 @@ export function ContextBar({
         />
       )}
 
-      {/* Modals الجداول والأدوات والملاحظات */}
       {isToolsOpen && machine && (
         <MachineToolsModal
           machine={machine}

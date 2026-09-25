@@ -105,6 +105,18 @@ export type Quote = Tables['quotes']['Row'];
 // ==================== التقارير ولوحة التحكم ====================
 export type ProjectProfitability = Views['v_project_profitability']['Row'];
 export type LiveOperation = Views['v_live_operations']['Row'];
+// ==================== نوع واجهة Kiosk (CNC / Classique) ====================
+/**
+ * تصنيف واجهة Kiosk. يُستخدم في 4 جداول:
+ *   - workers.interface_type       → أي واجهة يرى العامل (cnc / classique / both)
+ *   - machines.interface_type      → أي واجهة تناسب الآلة (cnc / classique / both)
+ *   - task_types.interface_type    → أي واجهة تظهر فيها بطاقة المهمة
+ *   - stop_reasons.interface_type  → أي واجهة يظهر فيها زر التوقف
+ *
+ * القيمة 'manual' مُبقاة مؤقتًا للتوافق مع البيانات القديمة (migration 0091)؛
+ * ستُزال في migration 0092. كود الفلترة يعاملها كـ'classique'.
+ */
+export type InterfaceType = "cnc" | "classique" | "manual" | "both";
 
 // ==================== تصدير نوع قاعدة البيانات نفسه ====================
 export type { Database };

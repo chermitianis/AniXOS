@@ -4,11 +4,20 @@ import { connectivityMonitor } from "../../../lib/connectivity";
 import { resolveCompanyId } from "../../../lib/companyContext";
 import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
+import { useWorkerSession } from "../../../auth/WorkerSessionContext";
+import { filterByInterface } from "../../../shared/utils/interfaceFilter";
 import type { StopReason } from "../../../shared/types/database";
 
+/**
+ * يجلب أسباب التوقف (العمود البرتقالي) ويفلترها حسب interface_type للعامل
+ * بنفس منطق useTaskTypes (انظر التعليق هناك).
+ */
 export function useStopReasons() {
+  const { activeWorker } = useWorkerSession();
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const workerInterface = activeWorker?.interface_type ?? "both";
 
   useEffect(() => {
     let isMounted = true;
@@ -17,7 +26,7 @@ export function useStopReasons() {
       setIsLoading(true);
       const data = await fetchStopReasons();
       if (isMounted) {
-        setStopReasons(data);
+        setStopReasons(filterByInterface(data, workerInterface));
         setIsLoading(false);
       }
     }
@@ -47,7 +56,7 @@ export function useStopReasons() {
       unsubscribe();
       channelCleanup?.();
     };
-  }, []);
+  }, [workerInterface]);
 
   return { stopReasons, isLoading };
 }

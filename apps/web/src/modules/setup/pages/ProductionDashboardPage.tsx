@@ -29,16 +29,16 @@ interface OfWithContext extends ManufacturingOrder {
 
 const STATUS_META: Record<
   ProductionStatus,
-  { label: string; color: string; icon: typeof CheckCircle2 }
+  { labelKey: string; color: string; icon: typeof CheckCircle2 }
 > = {
-  not_sent:       { label: "Non envoyé",       color: "bg-slate-100 text-slate-600",   icon: CircleDashed },
-  sent:           { label: "Envoyé",           color: "bg-blue-100 text-blue-700",     icon: Package },
-  in_preparation: { label: "En préparation",   color: "bg-amber-100 text-amber-700",   icon: Clock },
-  ready_to_start: { label: "Prêt à démarrer",  color: "bg-indigo-100 text-indigo-700", icon: Play },
-  scheduled:      { label: "Planifié",         color: "bg-purple-100 text-purple-700", icon: Calendar },
-  in_progress:    { label: "En cours",         color: "bg-amber-100 text-amber-800",   icon: Play },
-  completed:      { label: "Terminé",          color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
-  on_hold:        { label: "En pause",         color: "bg-orange-100 text-orange-700", icon: Pause },
+  not_sent:       { labelKey: "setup.statusNotSent",       color: "bg-slate-100 text-slate-600",   icon: CircleDashed },
+  sent:           { labelKey: "setup.statusSent",          color: "bg-blue-100 text-blue-700",     icon: Package },
+  in_preparation: { labelKey: "setup.statusInPreparation", color: "bg-amber-100 text-amber-700",   icon: Clock },
+  ready_to_start: { labelKey: "setup.statusReadyToStart",  color: "bg-indigo-100 text-indigo-700", icon: Play },
+  scheduled:      { labelKey: "setup.statusScheduled",     color: "bg-purple-100 text-purple-700", icon: Calendar },
+  in_progress:    { labelKey: "setup.statusInProgress",    color: "bg-amber-100 text-amber-800",   icon: Play },
+  completed:      { labelKey: "setup.statusCompleted",     color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
+  on_hold:        { labelKey: "setup.statusOnHold",        color: "bg-orange-100 text-orange-700", icon: Pause },
 };
 
 export function ProductionDashboardPage() {
@@ -60,7 +60,7 @@ export function ProductionDashboardPage() {
         .select("*, projects(name, code, due_date, clients(name))")
         .neq("production_status", "not_sent")
         .order("sent_to_production_at", { ascending: false })
-        .limit(200);
+        .limit(300);
 
       if (piecesErr) throw piecesErr;
 
@@ -125,6 +125,7 @@ export function ProductionDashboardPage() {
         (p) => p.production_status === "ready_to_start" || p.production_status === "scheduled",
       ).length,
       inProgress: pieces.filter((p) => p.production_status === "in_progress").length,
+      completed: pieces.filter((p) => p.production_status === "completed").length,
       late: pieces.filter(
         (p) =>
           p.due_date &&
@@ -143,6 +144,17 @@ export function ProductionDashboardPage() {
     () => pieces.filter((p) => p.production_status === "in_progress"),
     [pieces],
   );
+  const completedPieces = useMemo(
+    () =>
+      pieces
+        .filter((p) => p.production_status === "completed")
+        .sort((a, b) => {
+          const aDate = a.sent_to_production_at ?? a.updated_at ?? "";
+          const bDate = b.sent_to_production_at ?? b.updated_at ?? "";
+          return bDate.localeCompare(aDate);
+        }),
+    [pieces],
+  );
 
   if (isLoading) {
     return (
@@ -159,13 +171,16 @@ export function ProductionDashboardPage() {
         <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* 5 KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label={t("production.kpi.waiting")} value={kpis.waiting} icon={Package} color="text-blue-600" />
         <KpiCard label={t("production.kpi.ready")} value={kpis.ready} icon={Play} color="text-indigo-600" />
         <KpiCard label={t("production.kpi.inProgress")} value={kpis.inProgress} icon={TrendingUp} color="text-amber-600" />
+        <KpiCard label={t("production.kpi.completed")} value={kpis.completed} icon={CheckCircle2} color="text-green-600" />
         <KpiCard label={t("production.kpi.late")} value={kpis.late} icon={AlertTriangle} color="text-red-600" />
       </div>
 
+      {/* Waiting + In progress */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Section
           title={t("production.sections.waiting")}
@@ -182,6 +197,20 @@ export function ProductionDashboardPage() {
         </Section>
       </div>
 
+      {/* Completed */}
+      <Section
+        title={t("production.sections.completed")}
+        count={completedPieces.length}
+        icon={CheckCircle2}
+      >
+        <PieceList
+          pieces={completedPieces}
+          emptyMessage={t("production.empty.completed")}
+          maxHeight="max-h-96"
+        />
+      </Section>
+
+      {/* Orders */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-700">
@@ -264,38 +293,46 @@ function Section({ title, count, icon: Icon, onOpen, actionLabel, children }: {
   );
 }
 
-function PieceList({ pieces, emptyMessage }: { pieces: PieceWithContext[]; emptyMessage: string }) {
-    if (pieces.length === 0) {
-      return <p className="py-4 text-center text-xs text-slate-400">{emptyMessage}</p>;
-    }
-    return (
-      <ul className="max-h-80 space-y-1.5 overflow-y-auto">
-        {pieces.slice(0, 20).map((p) => {
-          // Fallback si la valeur en DB n'est pas reconnue
-          const meta =
-            STATUS_META[p.production_status] ?? STATUS_META["sent"];
-          const Icon = meta.icon;
-          return (
-            <li key={p.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs">
-              <Package size={12} className="shrink-0 text-slate-400" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate font-semibold text-slate-700">{p.name}</span>
-                  <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">
-                    {p.code ?? "—"}
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-[10px] text-slate-400">
-                  {p.project_name} {p.client_name && `· ${p.client_name}`}
-                </div>
-              </div>
-              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${meta.color}`}>
-                <Icon size={9} />
-                {meta.label}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    );
+function PieceList({
+  pieces,
+  emptyMessage,
+  maxHeight = "max-h-80",
+}: {
+  pieces: PieceWithContext[];
+  emptyMessage: string;
+  maxHeight?: string;
+}) {
+  const { t } = useTranslation();
+
+  if (pieces.length === 0) {
+    return <p className="py-4 text-center text-xs text-slate-400">{emptyMessage}</p>;
   }
+  return (
+    <ul className={`${maxHeight} space-y-1.5 overflow-y-auto`}>
+      {pieces.slice(0, 20).map((p) => {
+        const meta = STATUS_META[p.production_status] ?? STATUS_META["sent"];
+        const Icon = meta.icon;
+        return (
+          <li key={p.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs">
+            <Package size={12} className="shrink-0 text-slate-400" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate font-semibold text-slate-700">{p.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">
+                  {p.code ?? "—"}
+                </span>
+              </div>
+              <div className="mt-0.5 truncate text-[10px] text-slate-400">
+                {p.project_name} {p.client_name && `· ${p.client_name}`}
+              </div>
+            </div>
+            <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${meta.color}`}>
+              <Icon size={9} />
+              {t(meta.labelKey)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

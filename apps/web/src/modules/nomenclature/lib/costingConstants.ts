@@ -17,7 +17,13 @@ export type CostingStage =
   | "controle_qualite"
   | "autre";
 
-export type OperationInterface = "cnc" | "manual";
+/**
+ * Interface Kiosk. ⚠️ Aligné sur le type global InterfaceType
+ * (shared/types/database.ts) : "cnc" | "classique" | "both".
+ * La valeur historique "manual" a été remplacée par "classique" lors de
+ * la migration 0091.
+ */
+export type OperationInterface = "cnc" | "classique";
 
 export interface StageDef {
   key: CostingStage;
@@ -31,29 +37,35 @@ export interface StageDef {
 
 export const STAGES: StageDef[] = [
   // ─── CNC ───────────────────────────────────────────────────────────
-  { key: "usinage_cnc",        labelKey: "costing.stage.usinage_cnc",        icon: "🎯", color: "amber",   interface: "cnc",    isPivot: true, defaultHourlyRate: 45 },
-  { key: "tournage_cnc",       labelKey: "costing.stage.tournage_cnc",       icon: "🌀", color: "amber",   interface: "cnc",    defaultHourlyRate: 45 },
+  { key: "usinage_cnc",        labelKey: "costing.stage.usinage_cnc",        icon: "🎯", color: "amber",   interface: "cnc",       isPivot: true, defaultHourlyRate: 45 },
+  { key: "tournage_cnc",       labelKey: "costing.stage.tournage_cnc",       icon: "🌀", color: "amber",   interface: "cnc",       defaultHourlyRate: 45 },
+  { key: "fraisage_cnc",       labelKey: "costing.stage.fraisage_cnc",       icon: "🛠️", color: "amber",   interface: "cnc",       defaultHourlyRate: 45 },
 
-  // ─── Manuel ────────────────────────────────────────────────────────
-  { key: "usinage_classique",  labelKey: "costing.stage.usinage_classique",  icon: "⚙️", color: "blue",    interface: "manual", defaultHourlyRate: 35 },
-  { key: "tournage_classique", labelKey: "costing.stage.tournage_classique", icon: "🔄", color: "sky",     interface: "manual", defaultHourlyRate: 30 },
-  { key: "rectification",      labelKey: "costing.stage.rectification",      icon: "📐", color: "indigo",  interface: "manual", defaultHourlyRate: 40 },
-  { key: "ajustage",           labelKey: "costing.stage.ajustage",           icon: "🔧", color: "violet",  interface: "manual", defaultHourlyRate: 35 },
-  { key: "taraudage",          labelKey: "costing.stage.taraudage",          icon: "🔩", color: "violet",  interface: "manual", defaultHourlyRate: 30 },
-  { key: "stt",                labelKey: "costing.stage.stt",                icon: "🔥", color: "teal",    interface: "manual", defaultHourlyRate: 40 },
-  { key: "anodisation",        labelKey: "costing.stage.anodisation",        icon: "🧪", color: "fuchsia", interface: "manual", defaultHourlyRate: 50 },
-  { key: "controle_qualite",   labelKey: "costing.stage.controle_qualite",   icon: "✅", color: "emerald", interface: "manual", defaultHourlyRate: 25 },
-  { key: "autre",              labelKey: "costing.stage.autre",              icon: "➕", color: "slate",   interface: "manual" },
+  // ─── Classique ─────────────────────────────────────────────────────
+  { key: "usinage_classique",  labelKey: "costing.stage.usinage_classique",  icon: "⚙️", color: "blue",    interface: "classique", defaultHourlyRate: 35 },
+  { key: "tournage_classique", labelKey: "costing.stage.tournage_classique", icon: "🔄", color: "sky",     interface: "classique", defaultHourlyRate: 30 },
+  { key: "fraisage_classique", labelKey: "costing.stage.fraisage_classique", icon: "🔨", color: "sky",     interface: "classique", defaultHourlyRate: 35 },
+  { key: "rectification",      labelKey: "costing.stage.rectification",      icon: "📐", color: "indigo",  interface: "classique", defaultHourlyRate: 40 },
+  { key: "ajustage",           labelKey: "costing.stage.ajustage",           icon: "🔧", color: "violet",  interface: "classique", defaultHourlyRate: 35 },
+  { key: "taraudage",          labelKey: "costing.stage.taraudage",          icon: "🔩", color: "violet",  interface: "classique", defaultHourlyRate: 30 },
+  { key: "stt",                labelKey: "costing.stage.stt",                icon: "🔥", color: "teal",    interface: "classique", defaultHourlyRate: 40 },
+  { key: "anodisation",        labelKey: "costing.stage.anodisation",        icon: "🧪", color: "fuchsia", interface: "classique", defaultHourlyRate: 50 },
+  { key: "controle_qualite",   labelKey: "costing.stage.controle_qualite",   icon: "✅", color: "emerald", interface: "classique", defaultHourlyRate: 25 },
+  { key: "autre",              labelKey: "costing.stage.autre",              icon: "➕", color: "slate",   interface: "classique" },
 ];
 
 export function getStageDef(key: CostingStage): StageDef {
   return STAGES.find((s) => s.key === key) ?? STAGES[STAGES.length - 1];
 }
 
+/**
+ * Retourne l'interface requise pour une étape donnée.
+ * Historiquement retournait "manual" — aligné sur "classique" depuis 0091.
+ */
 export function getStageInterface(key: string | null | undefined): OperationInterface {
-  if (!key) return "manual";
+  if (!key) return "classique";
   const def = STAGES.find((s) => s.key === key);
-  return def?.interface ?? "manual";
+  return def?.interface ?? "classique";
 }
 
 // ----------------------------------------------------------------------------

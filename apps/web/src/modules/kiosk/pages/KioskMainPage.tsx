@@ -15,13 +15,12 @@ import { ProjectPieceSelectorModal } from "../components/ProjectPieceSelectorMod
 import { SessionCorrectionModal } from "../components/SessionCorrectionModal";
 import { LogoutConfirmModal } from "../components/LogoutConfirmModal";
 import { startCredentialsSync } from "../../../lib/credentialsSync";
+import {
+  fetchPieceOperationsWithEstimate,
+  type PieceOperationEstimate,
+} from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
 
-/**
- * غلاف خارجي: يتحقق فقط من وجود عامل نشط قبل عرض أي شيء. هذا الفصل ضروري
- * لأن KioskWorkspace يستدعي hooks لا يجوز استدعاؤها بشكل مشروط — يجب أن
- * يُعرَض المكوّن الداخلي فقط بعد التأكد من وجود activeWorker.
- */
 export function KioskMainPage() {
   const { activeWorker, logout, hasOpenPieceEvents } = useWorkerSession();
 
@@ -36,10 +35,6 @@ interface KioskWorkspaceProps {
   hasOpenPieceEvents: () => Promise<boolean>;
 }
 
-/**
- * الفضاء الفعلي لواجهة الكشك — يجمع كل مكونات وثيقة التصميم:
- * الشريط العلوي، شريط السياق، اللوحة المركزية (3 أعمدة)، والشريط السفلي.
- */
 function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspaceProps) {
   const { t } = useTranslation();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -48,8 +43,8 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
+  const [pieceOperations, setPieceOperations] = useState<PieceOperationEstimate[]>([]);
 
-  // تفعيل مزامنة بيانات كاش العمال محلياً حصراً عند تواجد المستخدم في واجهة الكشك
   useEffect(() => {
     const stopCredentialsSync = startCredentialsSync();
     return () => {
@@ -79,6 +74,27 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   const { projectOptions, loadPiecesForOption, reload: reloadPlanning } = useWorkerPlanning(worker.id);
 
+  // Charger les opérations estimées à chaque changement de pièce
+  useEffect(() => {
+    let isMounted = true;
+    if (!pieceTask?.id) {
+      setPieceOperations([]);
+      return;
+    }
+    void fetchPieceOperationsWithEstimate(pieceTask.id).then((ops) => {
+      if (isMounted) setPieceOperations(ops);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [pieceTask?.id]);
+
+  /** Total estimé en minutes pour la pièce, calculé depuis les opérations. */
+  const estimatedTotalMinutes = pieceOperations.reduce(
+    (sum, op) => sum + Math.round(op.estimated_hours * 60),
+    0,
+  );
+
   async function handleSelectFromModal(...args: Parameters<typeof selectPlanningOption>) {
     await selectPlanningOption(...args);
     setIsSelectorOpen(false);
@@ -94,8 +110,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     void reloadPlanning();
   }
 
-  /** لا يُسمح بتسجيل الخروج صامتاً مع وجود قطعة نشطة دون تحديد حالتها —
-   * يُعرَض تأكيد واضح للعامل أولاً (البند 8) */
   async function handleLogoutRequest() {
     if (await hasOpenPieceEvents()) {
       setIsLogoutConfirmOpen(true);
@@ -113,13 +127,19 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
-      <TopNavBar sessionStartedAt={worker.session_started_at} workerId={worker.id} onLogout={() => void handleLogoutRequest()} isLoggingOut={isLoggingOut} />
+      <TopNavBar
+        sessionStartedAt={worker.session_started_at}
+        workerId={worker.id}
+        onLogout={() => void handleLogoutRequest()}
+        isLoggingOut={isLoggingOut}
+      />
 
       <ContextBar
         worker={worker}
         machine={machine}
         project={project}
         pieceTask={pieceTask}
+        estimatedTotalMinutes={estimatedTotalMinutes || null}
         onOpenSelector={() => setIsSelectorOpen(true)}
         onCompletePiece={() => void handleCompletePiece()}
         onPausePiece={() => void handlePausePiece()}
@@ -137,6 +157,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         <div className="overflow-hidden rounded-xl border border-blue-100 bg-white">
           <ProductionTasksGrid
             activeSessions={activeSessions}
+            pieceOperations={pieceOperations}
             onToggle={toggleProductionTask}
             onMaxActiveEvents={() => setShowMaxActiveWarning(true)}
             onCorrectSession={setCorrectionSession}
@@ -184,7 +205,10 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
       )}
 
       {isLogoutConfirmOpen && (
-        <LogoutConfirmModal onCancel={() => setIsLogoutConfirmOpen(false)} onConfirm={() => void confirmLogoutAnyway()} />
+        <LogoutConfirmModal
+          onCancel={() => setIsLogoutConfirmOpen(false)}
+          onConfirm={() => void confirmLogoutAnyway()}
+        />
       )}
     </div>
   );

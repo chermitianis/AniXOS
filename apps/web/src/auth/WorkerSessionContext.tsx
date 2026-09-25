@@ -33,6 +33,7 @@ import {
   hydrateWorkerStateFromServer,
   WorkerAlreadyConnectedError,
 } from "../modules/kiosk/api/kioskApi";
+import type { InterfaceType } from "../shared/types/database";
 
 const WORKER_SESSION_STORAGE_KEY = "anixos_worker_session";
 
@@ -43,6 +44,11 @@ export interface ActiveWorkerProfile {
   session_started_at: string;
   /** حصة الدوام الحالية — تُغلق فقط عند تسجيل الخروج الصريح */
   shift_id: string;
+  /**
+   * نوع واجهة العامل: 'cnc' | 'classique' | 'both' | 'manual'.
+   * يحدد أي أزرار (task_types + stop_reasons) تظهر له في الكشك.
+   */
+  interface_type: InterfaceType;
 }
 
 export interface WorkerLoginResult {
@@ -70,15 +76,19 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<ActiveWorkerProfile>;
-    // جلسات قديمة محفوظة قبل إضافة shift_id: غير صالحة، يجب إعادة الدخول
-    if (!parsed.id || !parsed.shift_id) return null;
+    // جلسات قديمة محفوظة قبل إضافة shift_id أو interface_type: غير صالحة،
+    // يجب إعادة الدخول للحصول على البيانات الكاملة من السيرفر.
+    if (!parsed.id || !parsed.shift_id || !parsed.interface_type) return null;
     return parsed as ActiveWorkerProfile;
   } catch {
     return null;
   }
 }
 
-async function loginOnline(username: string, password: string): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> }> {
+async function loginOnline(
+  username: string,
+  password: string
+): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> }> {
   const { data, error } = await supabase.functions.invoke("worker-login", {
     body: { username, password },
   });
@@ -98,6 +108,9 @@ async function loginOnline(username: string, password: string): Promise<WorkerLo
       full_name: data.worker.full_name,
       photo_url: data.worker.photo_url,
       session_started_at: data.session_started_at,
+      // يُرجعه worker-login Edge Function؛ fallback 'both' إن لم يُرجع
+      // (لجلسات محفوظة قبل النشر أو للتوافق الخلفي)
+      interface_type: (data.worker.interface_type ?? "both") as InterfaceType,
     },
   };
 }
@@ -140,7 +153,8 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
           return { success: true };
         } catch (error) {
           const isAlreadyConnected =
-            error instanceof WorkerAlreadyConnectedError || (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED");
+            error instanceof WorkerAlreadyConnectedError ||
+            (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED");
           if (!isAlreadyConnected) throw error;
 
           // كلمة السر صحيحة، لكن توجد حصة مفتوحة أصلاً لهذا العامل نفسه —
@@ -191,7 +205,9 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <WorkerSessionContext.Provider value={{ activeWorker, isLoggingIn, isLoggingOut, login, hasOpenPieceEvents, logout }}>
+    <WorkerSessionContext.Provider
+      value={{ activeWorker, isLoggingIn, isLoggingOut, login, hasOpenPieceEvents, logout }}
+    >
       {children}
     </WorkerSessionContext.Provider>
   );

@@ -5,18 +5,16 @@ import { Pencil, Trash2, Check, X, Cpu, Wrench, Layers } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
-import type { Worker } from "../../../shared/types/database";
-
-type InterfaceType = "cnc" | "manual" | "both";
+import type { Worker, InterfaceType } from "../../../shared/types/database";
 
 function isForeignKeyError(message: string): boolean {
   return message.includes("foreign key") || message.includes("violates");
 }
 
 const INTERFACE_OPTIONS: { value: InterfaceType; labelKey: string; icon: typeof Cpu; color: string }[] = [
-  { value: "cnc",    labelKey: "setup.interfaceCnc",    icon: Cpu,     color: "text-amber-700 bg-amber-100" },
-  { value: "manual", labelKey: "setup.interfaceManual", icon: Wrench,  color: "text-blue-700 bg-blue-100" },
-  { value: "both",   labelKey: "setup.interfaceBoth",   icon: Layers,  color: "text-slate-700 bg-slate-100" },
+  { value: "cnc",       labelKey: "setup.interfaceCnc",       icon: Cpu,     color: "text-amber-700 bg-amber-100" },
+  { value: "classique", labelKey: "setup.interfaceClassique", icon: Wrench,  color: "text-blue-700 bg-blue-100" },
+  { value: "both",      labelKey: "setup.interfaceBoth",      icon: Layers,  color: "text-slate-700 bg-slate-100" },
 ];
 
 export function WorkersAdminPage() {
@@ -106,9 +104,7 @@ export function WorkersAdminPage() {
     setEditUsername(w.username);
     setEditPassword("");
     setEditSkillLevel(w.skill_level ?? "");
-    setEditInterfaceType(
-      ((w as unknown as { interface_type?: InterfaceType }).interface_type) ?? "both",
-    );
+    setEditInterfaceType((w.interface_type as InterfaceType) ?? "both");
     setError(null);
   }
 
@@ -232,7 +228,7 @@ export function WorkersAdminPage() {
         </h2>
         <ul className="flex flex-col gap-2">
           {workers.map((w) => {
-            const wInterface = ((w as unknown as { interface_type?: InterfaceType }).interface_type) ?? "both";
+            const wInterface = (w.interface_type as InterfaceType) ?? "both";
             const interfaceMeta = INTERFACE_OPTIONS.find((o) => o.value === wInterface) ?? INTERFACE_OPTIONS[2];
             const InterfaceIcon = interfaceMeta.icon;
 

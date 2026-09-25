@@ -68,6 +68,10 @@ serve(async (req) => {
           id: worker.id,
           full_name: worker.full_name,
           photo_url: worker.photo_url || null,
+          // ← يُستخدم في WorkerSessionContext لفلترة أزرار Kiosk
+          //   القيم: 'cnc' | 'classique' | 'both' | 'manual'
+          //   (يُرسل 'both' كافتراضي إن كان فارغاً لسبب ما)
+          interface_type: worker.interface_type || "both",
         },
         session_started_at: new Date().toISOString(),
       }),

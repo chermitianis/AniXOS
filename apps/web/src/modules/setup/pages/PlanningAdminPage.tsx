@@ -3,10 +3,15 @@ import { useTranslation } from "react-i18next";
 import {
   Loader2, Factory, Calendar, User, Clock, Play, CheckCircle2,
   AlertTriangle, Cpu, Wrench, ChevronRight, XCircle, Filter,
+  Pencil, Check,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { getStageDef, getStageInterface, type OperationInterface } from "../../nomenclature/lib/costingConstants";
+import {
+  STAGES, getStageDef, getStageInterface,
+  type OperationInterface,
+} from "../../nomenclature/lib/costingConstants";
+import type { InterfaceType } from "../../../shared/types/database";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,14 +37,14 @@ interface MachineRow {
   id: string;
   name: string;
   code: string | null;
-  interface_type: OperationInterface | "both";
+  interface_type: InterfaceType;
   is_active: boolean;
 }
 
 interface WorkerRow {
   id: string;
   full_name: string;
-  interface_type: OperationInterface | "both";
+  interface_type: InterfaceType;
   is_active: boolean;
 }
 
@@ -52,12 +57,11 @@ interface PlanningRow {
   planned_date: string;
   shift_number: string | null;
   status: string;
-  // Enriched
   machine_name: string | null;
   worker_name: string | null;
-  project_name: string | null;
   order_number: string | null;
   piece_name: string | null;
+  piece_primary_op: string | null;
 }
 
 type Step = 1 | 2 | 3;
@@ -67,6 +71,18 @@ const SHIFT_OPTIONS = [
   { value: "poste_2", labelKey: "setup.poste2" },
   { value: "poste_3", labelKey: "setup.poste3" },
 ];
+
+/**
+ * Détecte les erreurs de violation cross-tenant remontées par les triggers DB
+ * et les traduit en message clair pour l'UI.
+ */
+function isCrossTenantError(message: string): boolean {
+  return (
+    message.includes("CROSS_TENANT") ||
+    message.includes("PLANNING_CROSS_TENANT") ||
+    message.includes("WORK_SESSION_CROSS_TENANT")
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Composant
@@ -85,24 +101,30 @@ export function PlanningAdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  // Sélection courante
   const [selectedOf, setSelectedOf] = useState<OfToSchedule | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [plannedDate, setPlannedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [shiftNumber, setShiftNumber] = useState("poste_1");
-
   const [isSaving, setIsSaving] = useState(false);
 
-  // Filtres vue planning
   const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 10));
 
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editWorkerId, setEditWorkerId] = useState<string>("");
+  const [editMachineId, setEditMachineId] = useState<string>("");
+  const [editDate, setEditDate] = useState<string>("");
+  const [editShift, setEditShift] = useState<string>("poste_1");
+  const [isUpdatingEntry, setIsUpdatingEntry] = useState(false);
+
   // ---------------------------------------------------------------------
-  // Chargement
+  // Chargement — TOUS les appels filtrent explicitement sur company_id.
   // ---------------------------------------------------------------------
   const loadAll = useCallback(async () => {
     if (!staffUser?.company_id) return;
+    const companyId = staffUser.company_id;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -110,6 +132,7 @@ export function PlanningAdminPage() {
       const { data: ofsData, error: ofsErr } = await supabase
         .from("manufacturing_orders")
         .select("*, projects(name, code, clients(name))")
+        .eq("company_id", companyId)
         .eq("status", "prepared")
         .order("prepared_at", { ascending: false });
 
@@ -125,6 +148,7 @@ export function PlanningAdminPage() {
         const { data: piecesData } = await supabase
           .from("pieces_tasks")
           .select("id, code, name, primary_operation_type")
+          .eq("company_id", companyId)
           .in("id", pieceIds);
         for (const p of (piecesData ?? []) as { id: string; code: string | null; name: string; primary_operation_type: string | null }[]) {
           piecesMap.set(p.id, { code: p.code, name: p.name, primary_operation_type: p.primary_operation_type });
@@ -153,24 +177,26 @@ export function PlanningAdminPage() {
       });
       setOfs(ofRows);
 
-      // 3) Machines actives
+      // 3) Machines — FILTRE EXPLICITE company_id
       const { data: machData } = await supabase
         .from("machines")
         .select("id, name, code, interface_type, is_active")
+        .eq("company_id", companyId)
         .eq("is_active", true)
         .order("name");
       setMachines((machData as MachineRow[]) ?? []);
 
-      // 4) Workers actifs
+      // 4) Workers — FILTRE EXPLICITE company_id
       const { data: workersData } = await supabase
         .from("workers")
         .select("id, full_name, interface_type, is_active")
+        .eq("company_id", companyId)
         .eq("is_active", true)
         .order("full_name");
       setWorkers((workersData as WorkerRow[]) ?? []);
 
       // 5) Planning existant
-      await loadPlanning();
+      await loadPlanning(companyId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -178,10 +204,11 @@ export function PlanningAdminPage() {
     }
   }, [staffUser?.company_id]);
 
-  const loadPlanning = useCallback(async () => {
+  const loadPlanning = useCallback(async (companyId: string) => {
     const { data, error: planErr } = await supabase
       .from("planning")
-      .select("*, workers(full_name), machines(name), manufacturing_orders(order_number, product_name)")
+      .select("*, workers(full_name), machines(name), manufacturing_orders(order_number, product_name), pieces_tasks(primary_operation_type)")
+      .eq("company_id", companyId)
       .order("planned_date", { ascending: false })
       .limit(200);
 
@@ -192,6 +219,7 @@ export function PlanningAdminPage() {
 
     const rows: PlanningRow[] = ((data ?? []) as Record<string, unknown>[]).map((row) => {
       const mo = row.manufacturing_orders as { order_number?: string; product_name?: string } | null;
+      const piece = row.pieces_tasks as { primary_operation_type?: string | null } | null;
       return {
         id: row.id as string,
         manufacturing_order_id: row.manufacturing_order_id as string | null,
@@ -203,9 +231,9 @@ export function PlanningAdminPage() {
         status: row.status as string,
         machine_name: (row.machines as { name?: string } | null)?.name ?? null,
         worker_name: (row.workers as { full_name?: string } | null)?.full_name ?? null,
-        project_name: null,
         order_number: mo?.order_number ?? null,
         piece_name: mo?.product_name ?? null,
+        piece_primary_op: piece?.primary_operation_type ?? null,
       };
     });
     setEntries(rows);
@@ -216,7 +244,7 @@ export function PlanningAdminPage() {
   }, [loadAll]);
 
   // ---------------------------------------------------------------------
-  // Filtres des machines/workers selon le type d'opération
+  // Compatibilité machines/workers
   // ---------------------------------------------------------------------
   const requiredInterface: OperationInterface | null = useMemo(() => {
     if (!selectedOf?.primary_operation_type) return null;
@@ -237,16 +265,12 @@ export function PlanningAdminPage() {
     );
   }, [workers, requiredInterface]);
 
-  // ---------------------------------------------------------------------
-  // Étapes
-  // ---------------------------------------------------------------------
-  const currentStep: Step = !selectedOf ? 1 : !selectedMachineId ? 2 : !selectedWorkerId ? 3 : 3;
+  const currentStep: Step = !selectedOf ? 1 : !selectedMachineId ? 2 : 3;
 
   // ---------------------------------------------------------------------
-  // Actions
+  // Actions — Création
   // ---------------------------------------------------------------------
   function handleSelectOf(of: OfToSchedule) {
-    // Vérifier que l'OF a des opérations
     void (async () => {
       if (!of.piece_task_id) {
         setError(t("production.planning.noOperationsBlocked"));
@@ -272,7 +296,6 @@ export function PlanningAdminPage() {
     setIsSaving(true);
     setError(null);
     try {
-      // Vérifier doublon
       const duplicate = entries.some(
         (e) =>
           e.worker_id === selectedWorkerId &&
@@ -287,7 +310,6 @@ export function PlanningAdminPage() {
         return;
       }
 
-      // 1) Insérer dans planning
       const { error: insertErr } = await supabase.from("planning").insert({
         company_id: staffUser.company_id,
         worker_id: selectedWorkerId,
@@ -302,29 +324,25 @@ export function PlanningAdminPage() {
       } as never);
 
       if (insertErr) {
-        setError(insertErr.message);
+        setError(isCrossTenantError(insertErr.message)
+          ? "Erreur : référence cross-tenant détectée et bloquée."
+          : insertErr.message);
         setIsSaving(false);
         return;
       }
 
-      // 2) Mettre à jour l'OF
       await supabase
         .from("manufacturing_orders")
-        .update({
-          status: "scheduled",
-          scheduled_at: new Date().toISOString(),
-        } as never)
-        .eq("id", selectedOf.id);
+        .update({ status: "scheduled", scheduled_at: new Date().toISOString() } as never)
+        .eq("id", selectedOf.id)
+        .eq("company_id", staffUser.company_id);
 
-      // 3) Mettre à jour la pièce
       if (selectedOf.piece_task_id) {
         await supabase
           .from("pieces_tasks")
-          .update({
-            production_status: "scheduled",
-            scheduled_at: new Date().toISOString(),
-          } as never)
-          .eq("id", selectedOf.piece_task_id);
+          .update({ production_status: "scheduled", scheduled_at: new Date().toISOString() } as never)
+          .eq("id", selectedOf.piece_task_id)
+          .eq("company_id", staffUser.company_id);
       }
 
       setInfoMessage(t("production.planning.savedSuccess"));
@@ -341,18 +359,136 @@ export function PlanningAdminPage() {
     }
   }
 
-  async function handleCancelPlanning(entryId: string) {
+  async function handleCancelPlanning(entry: PlanningRow) {
+    if (!staffUser?.company_id) return;
     if (!window.confirm(t("production.planning.confirmCancel"))) return;
-    await supabase.from("planning").update({ status: "cancelled" } as never).eq("id", entryId);
-    await loadPlanning();
+
+    await supabase
+      .from("planning")
+      .update({ status: "cancelled" } as never)
+      .eq("id", entry.id)
+      .eq("company_id", staffUser.company_id);
+
+    if (entry.manufacturing_order_id) {
+      const { data: stillActive } = await supabase
+        .from("planning")
+        .select("id")
+        .eq("manufacturing_order_id", entry.manufacturing_order_id)
+        .eq("company_id", staffUser.company_id)
+        .not("status", "in", "(cancelled,done)")
+        .limit(1);
+
+      if (!stillActive || stillActive.length === 0) {
+        await supabase
+          .from("manufacturing_orders")
+          .update({ status: "prepared", scheduled_at: null } as never)
+          .eq("id", entry.manufacturing_order_id)
+          .eq("company_id", staffUser.company_id);
+
+        if (entry.piece_task_id) {
+          await supabase
+            .from("pieces_tasks")
+            .update({ production_status: "ready_to_start", scheduled_at: null } as never)
+            .eq("id", entry.piece_task_id)
+            .eq("company_id", staffUser.company_id);
+        }
+      }
+    }
+
+    await loadPlanning(staffUser.company_id);
   }
+
+  // ---------------------------------------------------------------------
+  // Actions — Édition inline
+  // ---------------------------------------------------------------------
+  function startEditEntry(entry: PlanningRow) {
+    setEditingEntryId(entry.id);
+    setEditWorkerId(entry.worker_id);
+    setEditMachineId(entry.machine_id ?? "");
+    setEditDate(entry.planned_date);
+    setEditShift(entry.shift_number ?? "poste_1");
+    setError(null);
+  }
+
+  function cancelEditEntry() {
+    setEditingEntryId(null);
+    setError(null);
+  }
+
+  async function saveEditEntry(entryId: string) {
+    if (!staffUser?.company_id) return;
+    setIsUpdatingEntry(true);
+    setError(null);
+    try {
+      const duplicate = entries.some(
+        (e) =>
+          e.id !== entryId &&
+          e.worker_id === editWorkerId &&
+          e.machine_id === editMachineId &&
+          e.planned_date === editDate &&
+          e.shift_number === editShift &&
+          e.status !== "cancelled",
+      );
+      if (duplicate) {
+        setError(t("production.planning.duplicateAssignment"));
+        setIsUpdatingEntry(false);
+        return;
+      }
+
+      const { error: updateErr } = await supabase
+        .from("planning")
+        .update({
+          worker_id: editWorkerId,
+          machine_id: editMachineId || null,
+          planned_date: editDate,
+          shift_number: editShift,
+        } as never)
+        .eq("id", entryId)
+        .eq("company_id", staffUser.company_id);
+
+      if (updateErr) {
+        setError(isCrossTenantError(updateErr.message)
+          ? "Erreur : référence cross-tenant détectée et bloquée."
+          : updateErr.message);
+        setIsUpdatingEntry(false);
+        return;
+      }
+
+      setInfoMessage(t("production.planning.savedSuccess"));
+      setEditingEntryId(null);
+      await loadPlanning(staffUser.company_id);
+      setTimeout(() => setInfoMessage(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setIsUpdatingEntry(false);
+    }
+  }
+
+  const workersForEdit = useMemo(() => {
+    if (!editingEntryId) return [];
+    const entry = entries.find((e) => e.id === editingEntryId);
+    if (!entry) return workers;
+    if (!entry.piece_primary_op) return workers;
+    const iface = getStageInterface(entry.piece_primary_op);
+    return workers.filter((w) => w.interface_type === iface || w.interface_type === "both");
+  }, [editingEntryId, entries, workers]);
+
+  const machinesForEdit = useMemo(() => {
+    if (!editingEntryId) return [];
+    const entry = entries.find((e) => e.id === editingEntryId);
+    if (!entry) return machines;
+    if (!entry.piece_primary_op) return machines;
+    const iface = getStageInterface(entry.piece_primary_op);
+    return machines.filter((m) => m.interface_type === iface || m.interface_type === "both");
+  }, [editingEntryId, entries, machines]);
 
   // ---------------------------------------------------------------------
   // Filtres vue
   // ---------------------------------------------------------------------
   const filteredEntries = useMemo(() => {
     return entries
-      .filter((e) => e.status !== "cancelled")
+      .filter((e) => e.status !== "cancelled" && e.status !== "done")
       .filter((e) => (filterMachineId ? e.machine_id === filterMachineId : true))
       .filter((e) => (filterDate ? e.planned_date === filterDate : true));
   }, [entries, filterMachineId, filterDate]);
@@ -371,7 +507,6 @@ export function PlanningAdminPage() {
 
   return (
     <div className="space-y-4">
-      {/* Messages */}
       {error && (
         <div className="flex items-start justify-between gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
           <span>{error}</span>
@@ -388,15 +523,9 @@ export function PlanningAdminPage() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* ─── Colonne gauche : sélection OF + 3 étapes ─── */}
+        {/* Colonne gauche */}
         <div className="space-y-3">
-          {/* Étape 1 : choisir OF */}
-          <StepCard
-            step={1}
-            title={t("production.planning.step1Title")}
-            active={currentStep === 1}
-            done={!!selectedOf}
-          >
+          <StepCard step={1} title={t("production.planning.step1Title")} active={currentStep === 1} done={!!selectedOf}>
             {!selectedOf ? (
               ofs.length === 0 ? (
                 <div className="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">
@@ -472,14 +601,8 @@ export function PlanningAdminPage() {
             )}
           </StepCard>
 
-          {/* Étape 2 : choisir machine */}
           {selectedOf && (
-            <StepCard
-              step={2}
-              title={t("production.planning.step2Title")}
-              active={currentStep === 2}
-              done={!!selectedMachineId}
-            >
+            <StepCard step={2} title={t("production.planning.step2Title")} active={currentStep === 2} done={!!selectedMachineId}>
               {!selectedMachineId ? (
                 compatibleMachines.length === 0 ? (
                   <div className="rounded-lg bg-amber-50 px-3 py-4 text-center text-xs text-amber-700">
@@ -488,7 +611,7 @@ export function PlanningAdminPage() {
                 ) : (
                   <ul className="space-y-1.5">
                     {compatibleMachines.map((m) => {
-                      const Icon = m.interface_type === "cnc" ? Cpu : m.interface_type === "manual" ? Wrench : Filter;
+                      const Icon = m.interface_type === "cnc" ? Cpu : m.interface_type === "classique" ? Wrench : Filter;
                       return (
                         <li key={m.id}>
                           <button
@@ -498,9 +621,7 @@ export function PlanningAdminPage() {
                           >
                             <Icon
                               size={14}
-                              className={
-                                m.interface_type === "cnc" ? "text-amber-600" : "text-blue-600"
-                              }
+                              className={m.interface_type === "cnc" ? "text-amber-600" : "text-blue-600"}
                             />
                             <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">
                               {m.code ? `${m.code} — ` : ""}
@@ -510,7 +631,7 @@ export function PlanningAdminPage() {
                               className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
                                 m.interface_type === "cnc"
                                   ? "bg-amber-100 text-amber-800"
-                                  : m.interface_type === "manual"
+                                  : m.interface_type === "classique"
                                     ? "bg-blue-100 text-blue-700"
                                     : "bg-slate-100 text-slate-600"
                               }`}
@@ -543,16 +664,9 @@ export function PlanningAdminPage() {
             </StepCard>
           )}
 
-          {/* Étape 3 : choisir worker + date + shift */}
           {selectedOf && selectedMachineId && (
-            <StepCard
-              step={3}
-              title={t("production.planning.step3Title")}
-              active={currentStep === 3}
-              done={false}
-            >
+            <StepCard step={3} title={t("production.planning.step3Title")} active={currentStep === 3} done={false}>
               <div className="space-y-3">
-                {/* Workers compatibles */}
                 <div>
                   <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     {t("setup.worker")}
@@ -571,16 +685,13 @@ export function PlanningAdminPage() {
                       {compatibleWorkers.map((w) => (
                         <option key={w.id} value={w.id}>
                           {w.full_name}
-                          {w.interface_type !== "both"
-                            ? ` (${w.interface_type.toUpperCase()})`
-                            : ""}
+                          {w.interface_type !== "both" ? ` (${w.interface_type.toUpperCase()})` : ""}
                         </option>
                       ))}
                     </select>
                   )}
                 </div>
 
-                {/* Date */}
                 <div>
                   <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     {t("setup.date")}
@@ -593,7 +704,6 @@ export function PlanningAdminPage() {
                   />
                 </div>
 
-                {/* Shift */}
                 <div>
                   <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     {t("setup.shiftNumber")}
@@ -619,17 +729,12 @@ export function PlanningAdminPage() {
                   </div>
                 </div>
 
-                {/* Bouton planifier */}
                 <button
                   onClick={() => void handleSave()}
                   disabled={isSaving || !selectedWorkerId}
                   className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-50"
                 >
-                  {isSaving ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Calendar size={14} />
-                  )}
+                  {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
                   {t("production.planning.confirmSchedule")}
                 </button>
               </div>
@@ -637,7 +742,7 @@ export function PlanningAdminPage() {
           )}
         </div>
 
-        {/* ─── Colonne droite : planning existant ─── */}
+        {/* Colonne droite */}
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-slate-700">
@@ -645,7 +750,6 @@ export function PlanningAdminPage() {
             </h2>
           </div>
 
-          {/* Filtres */}
           <div className="mb-3 grid grid-cols-2 gap-2">
             <input
               type="date"
@@ -673,52 +777,152 @@ export function PlanningAdminPage() {
             </p>
           ) : (
             <ul className="max-h-[70vh] space-y-1.5 overflow-y-auto">
-              {filteredEntries.map((e) => (
-                <li
-                  key={e.id}
-                  className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs"
-                >
-                  <Calendar size={12} className="mt-0.5 shrink-0 text-indigo-500" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono font-bold text-slate-500" dir="ltr">
-                        {e.planned_date}
-                      </span>
-                      {e.shift_number && (
-                        <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
-                          {t(SHIFT_OPTIONS.find((s) => s.value === e.shift_number)?.labelKey ?? "")}
-                        </span>
-                      )}
-                      {e.order_number && (
-                        <span className="font-mono text-[10px] text-slate-400" dir="ltr">
-                          OF-{e.order_number}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                      {e.worker_name && (
-                        <span className="inline-flex items-center gap-1">
-                          <User size={9} />
-                          {e.worker_name}
-                        </span>
-                      )}
-                      {e.machine_name && (
-                        <span className="inline-flex items-center gap-1">
-                          <Factory size={9} />
-                          {e.machine_name}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => void handleCancelPlanning(e.id)}
-                    className="shrink-0 text-slate-300 hover:text-red-500"
-                    title={t("production.planning.cancelEntry")}
-                  >
-                    <XCircle size={14} />
-                  </button>
-                </li>
-              ))}
+              {filteredEntries.map((e) => {
+                const isEditing = editingEntryId === e.id;
+                return (
+                  <li key={e.id} className="rounded-lg bg-slate-50 px-3 py-2 text-xs">
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar size={12} className="shrink-0 text-indigo-500" />
+                          <span className="font-mono font-bold text-slate-500" dir="ltr">
+                            {editDate}
+                          </span>
+                          {e.order_number && (
+                            <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                              OF-{e.order_number}
+                            </span>
+                          )}
+                        </div>
+
+                        <select
+                          value={editWorkerId}
+                          onChange={(ev) => setEditWorkerId(ev.target.value)}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                        >
+                          {workersForEdit.map((w) => (
+                            <option key={w.id} value={w.id}>
+                              {w.full_name}
+                              {w.interface_type !== "both" ? ` (${w.interface_type.toUpperCase()})` : ""}
+                            </option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={editMachineId}
+                          onChange={(ev) => setEditMachineId(ev.target.value)}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                        >
+                          <option value="">— {t("kiosk.noMachine")} —</option>
+                          {machinesForEdit.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.code ? `${m.code} — ` : ""}{m.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <input
+                          type="date"
+                          value={editDate}
+                          onChange={(ev) => setEditDate(ev.target.value)}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                        />
+
+                        <div className="grid grid-cols-3 gap-1">
+                          {SHIFT_OPTIONS.map((s) => (
+                            <button
+                              key={s.value}
+                              type="button"
+                              onClick={() => setEditShift(s.value)}
+                              className={`rounded border px-1 py-1 text-[10px] font-semibold ${
+                                editShift === s.value
+                                  ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                                  : "border-slate-200 text-slate-500"
+                              }`}
+                            >
+                              {t(s.labelKey)}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => void saveEditEntry(e.id)}
+                            disabled={isUpdatingEntry}
+                            className="flex flex-1 items-center justify-center gap-1 rounded bg-green-600 px-2 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
+                          >
+                            {isUpdatingEntry ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Check size={11} />
+                            )}
+                            {t("common.save")}
+                          </button>
+                          <button
+                            onClick={cancelEditEntry}
+                            disabled={isUpdatingEntry}
+                            className="flex flex-1 items-center justify-center gap-1 rounded bg-slate-300 px-2 py-1.5 text-[11px] font-bold text-white disabled:opacity-50"
+                          >
+                            <XCircle size={11} />
+                            {t("common.cancel")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <Calendar size={12} className="mt-0.5 shrink-0 text-indigo-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono font-bold text-slate-500" dir="ltr">
+                              {e.planned_date}
+                            </span>
+                            {e.shift_number && (
+                              <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
+                                {t(SHIFT_OPTIONS.find((s) => s.value === e.shift_number)?.labelKey ?? "")}
+                              </span>
+                            )}
+                            {e.order_number && (
+                              <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                                OF-{e.order_number}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                            {e.worker_name && (
+                              <span className="inline-flex items-center gap-1">
+                                <User size={9} />
+                                {e.worker_name}
+                              </span>
+                            )}
+                            {e.machine_name && (
+                              <span className="inline-flex items-center gap-1">
+                                <Factory size={9} />
+                                {e.machine_name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            onClick={() => startEditEntry(e)}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-indigo-600"
+                            title={t("common.edit")}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            onClick={() => void handleCancelPlanning(e)}
+                            className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                            title={t("production.planning.cancelEntry")}
+                          >
+                            <XCircle size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

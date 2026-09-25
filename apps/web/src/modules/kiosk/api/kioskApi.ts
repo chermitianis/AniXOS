@@ -513,8 +513,20 @@ export async function closeAllOpenShiftPieceWorkForShift(shiftId: string, endedA
   }
 }
 
-/** يبدّل السياق من قطعة إلى أخرى ضمن نفس الحصة: يُغلق فترة القطعة القديمة
- * (إن وُجدت ومختلفة) ويفتح فترة جديدة للقطعة الجديدة. */
+/**
+ * يبدّل السياق من قطعة إلى أخرى ضمن نفس الحصة.
+ *
+ * عندما يختار العامل قطعة جديدة دون إنهاء القديمة بشكل صريح:
+ *   1) تُغلق كل الأحداث (production + downtime المرتبطة بالقطعة) المفتوحة
+ *      على القطعة السابقة لهذا العامل — يُحفظ وقتها المنجز.
+ *   2) تُغلق فترة الاشتغال (`shift_piece_work`) على القطعة السابقة.
+ *   3) يُعاد رقم Phase القطعة السابقة إلى 1 — لأن العمل عليها انتهى دون
+ *      Terminer، فتُسلَّم للعامل التالي من البداية.
+ *   4) تُفتح فترة اشتغال جديدة على القطعة الجديدة.
+ *
+ * ⚠️ التوقفات العامة (بدون piece_task_id) لا تُغلق — فهي غير مرتبطة بقطعة
+ * معيّنة وتبقى مفتوحة عبر تبديل القطع (مثل "عطل كهربائي").
+ */
 export async function switchShiftPiece(
   shiftId: string | null,
   workerId: string,
@@ -523,7 +535,9 @@ export async function switchShiftPiece(
   newProjectId: string | null
 ): Promise<void> {
   if (previousPieceTaskId && previousPieceTaskId !== newPieceTaskId) {
+    await closeOpenSessionsForWorkerPiece(workerId, previousPieceTaskId);
     await closeShiftPieceWork(shiftId, previousPieceTaskId);
+    await resetPiecePhase(previousPieceTaskId);
   }
   await openShiftPieceWork(shiftId, workerId, newPieceTaskId, newProjectId);
 }
@@ -625,8 +639,9 @@ async function closeSession(session: WorkSession): Promise<WorkSession> {
 }
 
 /** يُغلق كل الأحداث المفتوحة لعامل معيّن على قطعة محددة — يُستخدم عند
- * الضغط على Terminer/À continuer، وليس عند تسجيل الخروج (شامل كل القطع). */
-async function closeOpenSessionsForWorkerPiece(workerId: string, pieceTaskId: string): Promise<void> {
+ * الضغط على Terminer/À continuer، وعند تبديل القطعة (switchShiftPiece)،
+ * وليس عند تسجيل الخروج (شامل كل القطع). */
+export async function closeOpenSessionsForWorkerPiece(workerId: string, pieceTaskId: string): Promise<void> {
   const open = await fetchOpenSessionsForWorker(workerId);
   for (const s of open.filter((s) => s.piece_task_id === pieceTaskId)) {
     await closeSession(s);
@@ -696,7 +711,11 @@ async function logActivity(
 /**
  * زر "Terminer": القطعة انتهت بالكامل. تُغلق كل الأحداث المفتوحة على هذه
  * القطعة تحديداً لهذا العامل (تُحسب ضمن الوقت الفعلي الإجمالي)، ثم تُعلَّم
- * القطعة "مكتملة" — يمنع الإكمال المكرر إن كانت مكتملة أصلاً.
+ * القطعة "مكتملة" على مستويين:
+ *   - `status = 'completed'`        → الحالة العامة (تُستخدم في المخطط والأرشيف).
+ *   - `production_status = 'completed'` → حالة الإنتاج (تُستخدم في ProductionDashboard).
+ * تحديث الحقلين معاً يضمن اتساق العرض بين Kiosk والإدارة دون انتظار Trigger.
+ * يمنع الإكمال المكرر إن كانت مكتملة أصلاً.
  */
 export async function markPieceTaskComplete(pieceTaskId: string, workerId: string, shiftId: string | null): Promise<void> {
   const cachedPiece = await localDb.piecesTasks.get(pieceTaskId);
@@ -710,15 +729,20 @@ export async function markPieceTaskComplete(pieceTaskId: string, workerId: strin
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase
       .from("pieces_tasks")
-      .update({ status: "completed" })
+      .update({ status: "completed", production_status: "completed" })
       .eq("id", pieceTaskId)
       .neq("status", "completed");
     if (!error) {
-      await localDb.piecesTasks.update(pieceTaskId, { status: "completed" });
+      await localDb.piecesTasks.update(pieceTaskId, {
+        status: "completed",
+        production_status: "completed",
+      });
       await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓");
       return;
     }
   }
+
+ 
 
   if (!cachedPiece) {
     console.error("تعذر إكمال القطعة أوفلاين: لا توجد نسخة محلية كافية منها");
@@ -753,9 +777,29 @@ export async function updatePiecePhase(pieceTaskId: string, phase: number): Prom
   if (cached) await enqueueSync("pieces_tasks", "update", { ...cached, phase: value } as unknown as Record<string, unknown>);
 }
 
+/** يُعيد رقم الـPhase إلى 1 محلياً وسحابياً — يُستخدم عند تبديل القطعة
+ * (عمل العامل السابق لم يكتمل، فالقطعة تعود لحالتها الابتدائية للعامل
+ * التالي). */
+export async function resetPiecePhase(pieceTaskId: string): Promise<void> {
+  const cached = await localDb.piecesTasks.get(pieceTaskId);
+  if (cached) await localDb.piecesTasks.put({ ...cached, phase: "1" });
+  if (connectivityMonitor.getStatus()) {
+    const { error } = await supabase
+      .from("pieces_tasks")
+      .update({ phase: "1" })
+      .eq("id", pieceTaskId);
+    if (!error) return;
+  }
+  if (cached) {
+    await enqueueSync("pieces_tasks", "update", {
+      ...cached,
+      phase: "1",
+    } as unknown as Record<string, unknown>);
+  }
+}
+
 // ------------------------------------------------------------------
-// سجل الأحداث والتصحيحات — بدون حذف فعلي أبداً، مع سجل تدقيق كامل
-// ------------------------------------------------------------------
+// سجل الأحداث والتصحيحات — بدون حذف فعلي أبداً، مع سجل تدقيق كامل// ------------------------------------------------------------------
 
 export interface CorrectionContext {
   reason: string;
@@ -1006,4 +1050,48 @@ export async function fetchMachinePlanningOverview(date?: string): Promise<Machi
     .order("machine_name");
   if (error || !data) return [];
   return data as MachinePlanningRow[];
+
+  if (error || !data) return [];
+  return data as MachinePlanningRow[];
+}
+
+// ------------------------------------------------------------------
+// العمليات المُقدَّرة لقطعة (للعرض على Kiosk)
+// ------------------------------------------------------------------
+export interface PieceOperationEstimate {
+  id: string;
+  stage: string;
+  label: string | null;
+  estimated_hours: number;
+  hourly_rate: number;
+  subtotal: number;
+  sequence_order: number;
+  machine_id: string | null;
+}
+
+/**
+ * يجلب عمليات قطعة مع تقديرات الوقت والتكلفة — تُستخدم لعرض "الوقت
+ * التقديري" على بطاقات المهام في Kiosk (لكل عملية، وليس فقط للقطعة).
+ * offline-first.
+ */
+export async function fetchPieceOperationsWithEstimate(
+  pieceTaskId: string
+): Promise<PieceOperationEstimate[]> {
+  const companyId = await resolveCompanyId();
+  if (!companyId) return [];
+
+  if (connectivityMonitor.getStatus()) {
+    const { data, error } = await supabase
+      .from("piece_costing_operations")
+      .select("id, stage, label, estimated_hours, hourly_rate, subtotal, sequence_order, machine_id")
+      .eq("company_id", companyId)
+      .eq("piece_task_id", pieceTaskId)
+      .order("sequence_order");
+
+    if (!error && data) {
+      return data as PieceOperationEstimate[];
+    }
+  }
+
+  return [];
 }

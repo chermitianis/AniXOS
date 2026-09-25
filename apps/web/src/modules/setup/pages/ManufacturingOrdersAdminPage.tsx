@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   Loader2, Package, FolderOpen, FileText, Clock, Cog, Wrench, Cpu,
   ChevronDown, ChevronRight, Printer, Search, ArrowRight,
-  CheckCircle2, AlertTriangle, Calendar, Play,
+  CheckCircle2, AlertTriangle, Calendar,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
@@ -60,11 +60,11 @@ interface DocumentRow {
 // Constantes d'affichage
 // ---------------------------------------------------------------------------
 
-const STATUS_META: Record<string, { labelKey: string; color: string; icon: typeof Play }> = {
+const STATUS_META: Record<string, { labelKey: string; color: string; icon: typeof Calendar }> = {
   draft:       { labelKey: "production.of.statusDraft",       color: "bg-slate-100 text-slate-600",   icon: Package },
   prepared:    { labelKey: "production.of.statusPrepared",    color: "bg-blue-100 text-blue-700",     icon: CheckCircle2 },
   scheduled:   { labelKey: "production.of.statusScheduled",   color: "bg-purple-100 text-purple-700", icon: Calendar },
-  in_progress: { labelKey: "production.of.statusInProgress",  color: "bg-amber-100 text-amber-800",   icon: Play },
+  in_progress: { labelKey: "production.of.statusInProgress",  color: "bg-amber-100 text-amber-800",   icon: Clock },
   completed:   { labelKey: "production.of.statusCompleted",   color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
   cancelled:   { labelKey: "production.of.statusCancelled",   color: "bg-red-100 text-red-700",       icon: AlertTriangle },
   // legacy
@@ -101,15 +101,14 @@ export function ManufacturingOrdersAdminPage() {
   const [loadingDetails, setLoadingDetails] = useState<string | null>(null);
   const [updatingOfId, setUpdatingOfId] = useState<string | null>(null);
 
-   // ---------------------------------------------------------------------
-  // Chargement liste — 2 requêtes séparées (pas d'embed pieces_tasks)
+  // ---------------------------------------------------------------------
+  // Chargement liste
   // ---------------------------------------------------------------------
   const load = useCallback(async () => {
     if (!staffUser?.company_id) return;
     setIsLoading(true);
     setError(null);
     try {
-      // 1) Charger les OFs avec embed projects/clients (relation connue)
       const { data: ofData, error: ofErr } = await supabase
         .from("manufacturing_orders")
         .select("*, projects(name, code, clients(name))")
@@ -117,7 +116,6 @@ export function ManufacturingOrdersAdminPage() {
 
       if (ofErr) throw ofErr;
 
-      // 2) Charger les pièces liées en une seconde requête
       const pieceIds = ((ofData ?? []) as { piece_task_id: string | null }[])
         .map((o) => o.piece_task_id)
         .filter((id): id is string => !!id);
@@ -154,7 +152,6 @@ export function ManufacturingOrdersAdminPage() {
         }
       }
 
-      // 3) Construire les lignes
       const rows: OfRow[] = ((ofData ?? []) as Record<string, unknown>[]).map((row) => {
         const proj = row.projects as {
           name?: string;
@@ -200,7 +197,7 @@ export function ManufacturingOrdersAdminPage() {
   }, [load]);
 
   // ---------------------------------------------------------------------
-  // Chargement détails d'un OF (opérations + documents de la pièce liée)
+  // Chargement détails d'un OF
   // ---------------------------------------------------------------------
   async function loadOfDetails(of: OfRow) {
     if (!of.piece_task_id) return;
@@ -221,7 +218,6 @@ export function ManufacturingOrdersAdminPage() {
 
       const opsList = (ops ?? []) as OperationRow[];
 
-      // Récupérer les noms des machines
       const machineIds = Array.from(
         new Set(opsList.map((o) => o.machine_id).filter((id): id is string => !!id)),
       );
@@ -261,22 +257,26 @@ export function ManufacturingOrdersAdminPage() {
   }
 
   // ---------------------------------------------------------------------
-  // Changement de statut
+  // Actions autorisées
   // ---------------------------------------------------------------------
-  async function handleStatusChange(of: OfRow, newStatus: OFStatus) {
+
+  /** Planifier : transition prepared → scheduled + redirection vers Planification.
+   * ⚠️ Ne change PAS le statut manuellement — c'est PlanningAdminPage qui le fait
+   * via son insert de planning (handleSave). Ce bouton navigue seulement. */
+  function handleGoToPlanning(of: OfRow) {
+    if (!of.piece_task_id) return;
+    nav.goToSection("production_planification");
+  }
+
+  /** Annuler : disponible pour tout OF non terminé. */
+  async function handleCancel(of: OfRow) {
+    if (!window.confirm(t("production.of.confirmCancel"))) return;
     setUpdatingOfId(of.id);
     try {
-      const patch: Record<string, unknown> = { status: newStatus };
-      if (newStatus === "prepared" && !of.prepared_at) {
-        patch.prepared_at = new Date().toISOString();
-      } else if (newStatus === "scheduled" && !of.scheduled_at) {
-        patch.scheduled_at = new Date().toISOString();
-      } else if (newStatus === "in_progress" && !of.started_at) {
-        patch.started_at = new Date().toISOString();
-      } else if (newStatus === "completed" && !of.completed_at) {
-        patch.completed_at = new Date().toISOString();
-      }
-      await supabase.from("manufacturing_orders").update(patch as never).eq("id", of.id);
+      await supabase
+        .from("manufacturing_orders")
+        .update({ status: "cancelled" } as never)
+        .eq("id", of.id);
       await load();
     } finally {
       setUpdatingOfId(null);
@@ -341,7 +341,7 @@ export function ManufacturingOrdersAdminPage() {
         <KpiCard label={t("production.of.statusCompleted")} value={kpis.completed} color="text-green-600" />
       </div>
 
-      {/* Filtres + recherche */}
+      {/* Recherche */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search size={14} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -354,6 +354,7 @@ export function ManufacturingOrdersAdminPage() {
         </div>
       </div>
 
+      {/* Tabs filtre */}
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {FILTER_TABS.map((tab) => {
           const active = activeFilter === tab.key;
@@ -402,7 +403,6 @@ export function ManufacturingOrdersAdminPage() {
 
             return (
               <li key={o.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                {/* En-tête OF */}
                 <button
                   type="button"
                   onClick={() => toggleExpand(o)}
@@ -441,7 +441,6 @@ export function ManufacturingOrdersAdminPage() {
                   </span>
                 </button>
 
-                {/* Détails (si expandu) */}
                 {isOpen && (
                   <div className="border-t border-slate-100 px-4 py-3">
                     {isDetailLoading ? (
@@ -450,7 +449,7 @@ export function ManufacturingOrdersAdminPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {/* Métadonnées de suivi */}
+                        {/* Métadonnées */}
                         <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
                           <Meta label={t("production.of.preparedAt")} value={o.prepared_at} />
                           <Meta label={t("production.of.scheduledAt")} value={o.scheduled_at} />
@@ -547,7 +546,7 @@ export function ManufacturingOrdersAdminPage() {
                           )}
                         </div>
 
-                        {/* Actions */}
+                        {/* Actions — SEULEMENT : Print + Planifier + Annuler */}
                         <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 print:hidden">
                           <button
                             onClick={() => window.print()}
@@ -558,55 +557,37 @@ export function ManufacturingOrdersAdminPage() {
                           </button>
 
                           {o.status === "prepared" && (
-  <button
-    onClick={() => void handleStatusChange(o, "scheduled")}
-    disabled={isUpdating || ops.length === 0}
-    title={ops.length === 0 ? t("production.planning.noOperationsBlocked") : undefined}
-    className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <Calendar size={12} />}
-    {t("production.of.actionSchedule")}
-    <ArrowRight size={11} />
-  </button>
-)}
-                          {o.status === "scheduled" && (
                             <button
-                              onClick={() => void handleStatusChange(o, "in_progress")}
-                              disabled={isUpdating}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+                              onClick={() => handleGoToPlanning(o)}
+                              disabled={ops.length === 0}
+                              title={ops.length === 0 ? t("production.planning.noOperationsBlocked") : undefined}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-                              {t("production.of.actionStart")}
+                              <Calendar size={12} />
+                              {t("production.of.actionSchedule")}
                               <ArrowRight size={11} />
                             </button>
                           )}
-                          {o.status === "in_progress" && (
+
+                          {o.status !== "cancelled" && o.status !== "completed" && (
                             <button
-                              onClick={() => void handleStatusChange(o, "completed")}
-                              disabled={isUpdating}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700 disabled:opacity-50"
-                            >
-                              {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                              {t("production.of.actionComplete")}
-                              <ArrowRight size={11} />
-                            </button>
-                          )}
-                          {o.status === "completed" && (
-                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700">
-                              <CheckCircle2 size={12} />
-                              {t("production.of.allDone")}
-                            </span>
-                          )}
-                          {(o.status !== "cancelled" && o.status !== "completed") && (
-                            <button
-                              onClick={() => void handleStatusChange(o, "cancelled")}
+                              onClick={() => void handleCancel(o)}
                               disabled={isUpdating}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                             >
+                              {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
                               {t("production.of.actionCancel")}
                             </button>
                           )}
                         </div>
+
+                        {/* Bandeau informatif pour OF completed */}
+                        {o.status === "completed" && (
+                          <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                            <CheckCircle2 size={12} className="inline me-1.5" />
+                            {t("production.of.allDone")}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

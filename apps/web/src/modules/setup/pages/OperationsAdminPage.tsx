@@ -4,13 +4,56 @@ import { Pencil, Trash2, Check, X } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
-import type { TaskType, StopReason } from "../../../shared/types/database";
+import type { TaskType, StopReason, InterfaceType } from "../../../shared/types/database";
 
 const TASK_COLORS = ["#2563EB", "#7C3AED", "#0891B2", "#059669", "#DC2626", "#EA580C"];
 const STOP_COLORS = ["#F97316", "#EA580C", "#DC2626", "#B45309", "#9A3412", "#78350F"];
 
+const INTERFACE_OPTIONS: { value: InterfaceType; labelKey: string; short: string }[] = [
+  { value: "both", labelKey: "setup.interfaceBoth", short: "" },
+  { value: "cnc", labelKey: "setup.interfaceCnc", short: "CNC" },
+  { value: "classique", labelKey: "setup.interfaceClassique", short: "Class." },
+];
+
 function isForeignKeyError(message: string): boolean {
   return message.includes("foreign key") || message.includes("violates");
+}
+
+/** شارة صغيرة تُعرَض على البطاقة لتوضيح واجهة الزر (CNC / Classique). */
+function InterfaceBadge({ value }: { value: InterfaceType }) {
+  const opt = INTERFACE_OPTIONS.find((o) => o.value === value);
+  if (!opt || !opt.short) return null;
+  return (
+    <span className="rounded-full bg-white/25 px-1.5 py-0.5 text-[10px] font-bold">
+      {opt.short}
+    </span>
+  );
+}
+
+/** قائمة منسدلة موحّدة لاختيار واجهة الزر. */
+function InterfaceSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: InterfaceType;
+  onChange: (v: InterfaceType) => void;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as InterfaceType)}
+      className={className}
+    >
+      {INTERFACE_OPTIONS.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {t(opt.labelKey)}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 export function OperationsAdminPage() {
@@ -21,18 +64,22 @@ export function OperationsAdminPage() {
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [ttName, setTtName] = useState("");
   const [ttColor, setTtColor] = useState(TASK_COLORS[0]);
+  const [ttInterface, setTtInterface] = useState<InterfaceType>("both");
   const [editingTtId, setEditingTtId] = useState<string | null>(null);
   const [editTtName, setEditTtName] = useState("");
   const [editTtColor, setEditTtColor] = useState("");
+  const [editTtInterface, setEditTtInterface] = useState<InterfaceType>("both");
 
   const [stopReasons, setStopReasons] = useState<StopReason[]>([]);
   const [srName, setSrName] = useState("");
   const [srColor, setSrColor] = useState(STOP_COLORS[0]);
   const [srRequiresNote, setSrRequiresNote] = useState(false);
+  const [srInterface, setSrInterface] = useState<InterfaceType>("both");
   const [editingSrId, setEditingSrId] = useState<string | null>(null);
   const [editSrName, setEditSrName] = useState("");
   const [editSrColor, setEditSrColor] = useState("");
   const [editSrRequiresNote, setEditSrRequiresNote] = useState(false);
+  const [editSrInterface, setEditSrInterface] = useState<InterfaceType>("both");
 
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +108,7 @@ export function OperationsAdminPage() {
         company_id: staffUser.company_id,
         name: ttName,
         color: ttColor,
+        interface_type: ttInterface,
         sort_order: taskTypes.length,
       });
       if (insertError) {
@@ -68,6 +116,7 @@ export function OperationsAdminPage() {
         return;
       }
       setTtName("");
+      setTtInterface("both");
       await loadTaskTypes();
     } finally {
       setIsSaving(false);
@@ -85,6 +134,7 @@ export function OperationsAdminPage() {
         name: srName,
         color: srColor,
         requires_note: srRequiresNote,
+        interface_type: srInterface,
         sort_order: stopReasons.length,
       });
       if (insertError) {
@@ -93,6 +143,7 @@ export function OperationsAdminPage() {
       }
       setSrName("");
       setSrRequiresNote(false);
+      setSrInterface("both");
       await loadStopReasons();
     } finally {
       setIsSaving(false);
@@ -103,9 +154,14 @@ export function OperationsAdminPage() {
     setEditingTtId(tt.id);
     setEditTtName(tt.name);
     setEditTtColor(tt.color);
+    setEditTtInterface((tt.interface_type as InterfaceType) ?? "both");
   }
   async function saveEditTaskType(id: string) {
-    await supabase.from("task_types").update({ name: editTtName, color: editTtColor }).eq("id", id);
+    await supabase.from("task_types").update({
+      name: editTtName,
+      color: editTtColor,
+      interface_type: editTtInterface,
+    }).eq("id", id);
     setEditingTtId(null);
     await loadTaskTypes();
   }
@@ -124,9 +180,15 @@ export function OperationsAdminPage() {
     setEditSrName(sr.name);
     setEditSrColor(sr.color);
     setEditSrRequiresNote(sr.requires_note);
+    setEditSrInterface((sr.interface_type as InterfaceType) ?? "both");
   }
   async function saveEditStopReason(id: string) {
-    await supabase.from("stop_reasons").update({ name: editSrName, color: editSrColor, requires_note: editSrRequiresNote }).eq("id", id);
+    await supabase.from("stop_reasons").update({
+      name: editSrName,
+      color: editSrColor,
+      requires_note: editSrRequiresNote,
+      interface_type: editSrInterface,
+    }).eq("id", id);
     setEditingSrId(null);
     await loadStopReasons();
   }
@@ -182,6 +244,9 @@ export function OperationsAdminPage() {
                 ))}
               </div>
             </AdminField>
+            <AdminField label={t("setup.interfaceLabel")}>
+              <InterfaceSelect value={ttInterface} onChange={setTtInterface} className={adminInputClass} />
+            </AdminField>
             <button type="submit" disabled={isSaving} className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white disabled:opacity-50">
               {isSaving ? t("setup.saving") : t("setup.addButton")}
             </button>
@@ -199,6 +264,9 @@ export function OperationsAdminPage() {
                         <button key={c} type="button" onClick={() => setEditTtColor(c)} className="h-6 w-6 rounded-full" style={{ backgroundColor: c, outline: editTtColor === c ? "2px solid #1e293b" : "none" }} />
                       ))}
                     </div>
+                    <div className="mb-2">
+                      <InterfaceSelect value={editTtInterface} onChange={setEditTtInterface} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+                    </div>
                     <div className="flex gap-2">
                       <button onClick={() => saveEditTaskType(tt.id)} className="flex-1 rounded-lg bg-green-600 py-1.5 text-xs font-bold text-white"><Check size={14} className="mx-auto" /></button>
                       <button onClick={() => setEditingTtId(null)} className="flex-1 rounded-lg bg-slate-300 py-1.5 text-xs font-bold text-white"><X size={14} className="mx-auto" /></button>
@@ -207,7 +275,10 @@ export function OperationsAdminPage() {
                 ) : (
                   <li key={tt.id} className="rounded-lg px-3 py-2 text-sm text-white" style={{ backgroundColor: tt.color }}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-semibold">{tt.name}</span>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate font-semibold">{tt.name}</span>
+                        <InterfaceBadge value={(tt.interface_type as InterfaceType) ?? "both"} />
+                      </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <button onClick={() => toggleActive("task_types", tt.id, tt.is_active)} className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-semibold">
                           {tt.is_active ? t("common.active") : t("common.inactive")}
@@ -238,6 +309,9 @@ export function OperationsAdminPage() {
                 ))}
               </div>
             </AdminField>
+            <AdminField label={t("setup.interfaceLabel")}>
+              <InterfaceSelect value={srInterface} onChange={setSrInterface} className={adminInputClass} />
+            </AdminField>
             <label className="mb-4 flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={srRequiresNote} onChange={(e) => setSrRequiresNote(e.target.checked)} />
               {t("setup.requiresNote")}
@@ -259,6 +333,9 @@ export function OperationsAdminPage() {
                         <button key={c} type="button" onClick={() => setEditSrColor(c)} className="h-6 w-6 rounded-full" style={{ backgroundColor: c, outline: editSrColor === c ? "2px solid #1e293b" : "none" }} />
                       ))}
                     </div>
+                    <div className="mb-2">
+                      <InterfaceSelect value={editSrInterface} onChange={setEditSrInterface} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+                    </div>
                     <label className="mb-2 flex items-center gap-1 text-xs text-slate-500">
                       <input type="checkbox" checked={editSrRequiresNote} onChange={(e) => setEditSrRequiresNote(e.target.checked)} />
                       {t("setup.requiresNote")}
@@ -271,9 +348,12 @@ export function OperationsAdminPage() {
                 ) : (
                   <li key={r.id} className="rounded-lg px-3 py-2 text-sm text-white" style={{ backgroundColor: r.color }}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate font-semibold">
-                        {r.name} {r.requires_note && "📝"}
-                      </span>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate font-semibold">
+                          {r.name} {r.requires_note && "📝"}
+                        </span>
+                        <InterfaceBadge value={(r.interface_type as InterfaceType) ?? "both"} />
+                      </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <button onClick={() => toggleActive("stop_reasons", r.id, r.is_active)} className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-semibold">
                           {r.is_active ? t("common.active") : t("common.inactive")}

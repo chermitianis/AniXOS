@@ -4,11 +4,20 @@ import { connectivityMonitor } from "../../../lib/connectivity";
 import { resolveCompanyId } from "../../../lib/companyContext";
 import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
+import { useWorkerSession } from "../../../auth/WorkerSessionContext";
+import { filterByInterface } from "../../../shared/utils/interfaceFilter";
 import type { TaskType } from "../../../shared/types/database";
 
+/**
+ * يجلب أنواع المهام الإنتاجية (العمود الأزرق) ويفلترها حسب interface_type
+ * للعامل الحالي.
+ */
 export function useTaskTypes() {
+  const { activeWorker } = useWorkerSession();
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const workerInterface = activeWorker?.interface_type ?? "both";
 
   useEffect(() => {
     let isMounted = true;
@@ -17,20 +26,17 @@ export function useTaskTypes() {
       setIsLoading(true);
       const data = await fetchTaskTypes();
       if (isMounted) {
-        setTaskTypes(data);
+        setTaskTypes(filterByInterface(data, workerInterface));
         setIsLoading(false);
       }
     }
 
     void load();
 
-    // إعادة التحميل عند عودة الاتصال لضمان أحدث قائمة (قد تكون تغيّرت من الإعداد)
     const unsubscribe = connectivityMonitor.subscribe((isOnline) => {
       if (isOnline) void load();
     });
 
-    // بث حي: أي إضافة/تعديل/حذف لنوع مهمة من واجهة الإدارة يظهر فوراً في
-    // الكشك دون أي تحديث يدوي — البند 11 (التزامن اللحظي)
     let channelCleanup: (() => void) | undefined;
     void resolveCompanyId().then((companyId) => {
       if (!isMounted || !companyId) return;
@@ -49,7 +55,7 @@ export function useTaskTypes() {
       unsubscribe();
       channelCleanup?.();
     };
-  }, []);
+  }, [workerInterface]);
 
   return { taskTypes, isLoading };
 }

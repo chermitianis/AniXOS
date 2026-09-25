@@ -312,6 +312,10 @@
     "addTaskType": "Add task type",
     "taskTypeName": "Task name",
     "cardColor": "Card color",
+    "interfaceLabel": "Interface",
+    "interfaceBoth": "Both (CNC + Conventional)",
+    "interfaceCnc": "CNC only",
+    "interfaceClassique": "Conventional",
     "taskTypesList": "Task types",
     "addStopReason": "Add stop reason",
     "stopReasonName": "Reason name",
@@ -719,7 +723,15 @@
 "duplicateWarningTitle": "Similar project detected",
 "duplicateWarningBody": "{{count}} project(s) with the same name already exist. Are you sure you want to continue?",
 "duplicateConfirm": "Confirm add",
-"approveStudy": "Approve study"
+"approveStudy": "Approve study",
+"statusNotSent": "Not sent",
+"statusSent": "Sent",
+"statusInPreparation": "In preparation",
+"statusReadyToStart": "Ready to start",
+"statusScheduled": "Scheduled",
+"statusInProgress": "In progress",
+"statusCompleted": "Completed",
+"statusOnHold": "On hold"
   },
   "staffAuth": {
     "notLinked": "This account is not linked to any employee in the system"
@@ -758,26 +770,25 @@
     }
   },
   "production": {
-    "kpi": {
-      "waiting": "Waiting",
-      "ready": "Ready",
-      "inProgress": "In progress",
-      "late": "Late"
-    },
-    "sections": {
-      "waiting": "Waiting pieces",
-      "inProgress": "In progress pieces",
-      "orders": "Manufacturing orders"
-    },
-    "actions": {
-      "preparer": "Prepare",
-      "viewAll": "View all"
-    },
-    "empty": {
-      "waiting": "No waiting pieces",
-      "inProgress": "No in-progress pieces",
-      "orders": "No manufacturing orders"
-    },
+   "kpi": {
+  "waiting": "Waiting",
+  "ready": "Ready",
+  "inProgress": "In progress",
+  "completed": "Completed",
+  "late": "Late"
+},
+"sections": {
+  "waiting": "Waiting pieces",
+  "inProgress": "In-progress pieces",
+  "completed": "Completed pieces",
+  "orders": "Manufacturing orders"
+},
+"empty": {
+  "waiting": "No waiting pieces",
+  "inProgress": "No in-progress pieces",
+  "completed": "No completed pieces",
+  "orders": "No manufacturing orders"
+},
     "piecesDone": "done",
     "of": {
   "statusDraft": "Draft",
