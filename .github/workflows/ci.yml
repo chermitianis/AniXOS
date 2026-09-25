@@ -19,7 +19,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-           - name: Install Dependencies (workspace root)
+
+      - name: Install Dependencies (workspace root)
         run: |
           rm -f package-lock.json
           npm install --no-audit --no-fund
