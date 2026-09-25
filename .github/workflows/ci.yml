@@ -19,8 +19,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install Dependencies (workspace root)
-        run: npm install --no-audit --no-fund
+           - name: Install Dependencies (workspace root)
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
 
       - name: Typecheck (apps/web)
         run: cd apps/web && npx tsc --noEmit
