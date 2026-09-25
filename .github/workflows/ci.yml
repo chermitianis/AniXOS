@@ -11,10 +11,6 @@ jobs:
     name: Typecheck & Build (apps/web)
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: apps/web
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,24 +20,24 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install Dependencies
+      - name: Install Dependencies (workspace root)
         run: npm ci
 
-      - name: Typecheck (tsc --noEmit)
-        run: npx tsc --noEmit
+      - name: Typecheck (apps/web)
+        run: cd apps/web && npx tsc --noEmit
         env:
           VITE_SUPABASE_URL: https://loqgaepskvqkhmcweszd.supabase.co
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Build
-        run: npm run build
+      - name: Build (apps/web)
+        run: cd apps/web && npm run build
         env:
           VITE_SUPABASE_URL: https://loqgaepskvqkhmcweszd.supabase.co
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Verify Build Output
         run: |
-          if [ -d "dist" ]; then
+          if [ -d "apps/web/dist" ]; then
             echo "✅ Build succeeded: apps/web/dist found."
           else
             echo "❌ Build failed: apps/web/dist missing!"
