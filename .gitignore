@@ -40,3 +40,5 @@ release/
 src-tauri/target/
 src-tauri/gen/
 android/app/build/
+# Lockfile — npm bug #4828 (platform-specific, non-portable)
+package-lock.json
