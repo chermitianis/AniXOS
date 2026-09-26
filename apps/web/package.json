@@ -26,6 +26,13 @@
     "react-router-dom": "^7.18.2",
     "recharts": "^2.15.4"
   },
+  "optionalDependencies": {
+    "@rolldown/binding-linux-x64-gnu": "1.2.11",
+    "@rolldown/binding-linux-x64-musl": "1.2.11",
+    "@rolldown/binding-win32-x64-msvc": "1.2.11",
+    "@rolldown/binding-darwin-arm64": "1.2.11",
+    "@rolldown/binding-darwin-x64": "1.2.11"
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/bcryptjs": "^2.4.6",
