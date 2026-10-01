@@ -44,6 +44,9 @@ import { DatabasesManagerPage } from "./DatabasesManagerPage";
 import { SubscriptionPage } from "../../subscription/pages/SubscriptionPage";
 import { ChangePasswordModal } from "../../../app/ChangePasswordModal";
 import { GeneralSettingsPage } from "../../../app/GeneralSettingsPage";
+import { MaterialPricesPage } from "../../settings/pages/MaterialPricesPage";
+import { CompanyWorkSettingsPage } from "../../settings/pages/CompanyWorkSettingsPage";
+import { ProductionReportsPage } from "../../production-reports/pages/ProductionReportsPage";
 
 // ---------------------------------------------------------------------------
 // Pages mapping
@@ -60,7 +63,7 @@ const PAGES: Record<string, React.ComponentType> = {
   nomenclature: NomenclaturePage,
   projects: ProjectsAdminPage,
   engineering_dossiers: DossiersTechniquesPage,
-  engineering_gammes: GammesTempsPage,
+  production_reports: ProductionReportsPage,
   engineering_validation: ValidationTechniquePage,
 
   // Production
@@ -89,6 +92,8 @@ const PAGES: Record<string, React.ComponentType> = {
   admin_staff: StaffAdminPage,
   admin_roles: RolesAdminPage,
   admin_general_settings: GeneralSettingsPage,
+  admin_work_settings: CompanyWorkSettingsPage,
+  admin_material_prices: MaterialPricesPage,
   admin_database: DatabasePage,
   admin_databases: DatabasesManagerPage,
   admin_subscription: SubscriptionPage,

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText } from "lucide-react";
+import {
+  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers,
+} from "lucide-react";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
 import type { Machine, Project, PieceTask } from "../../../shared/types/database";
 import { MachineToolsModal } from "./MachineToolsModal";
@@ -12,6 +14,8 @@ interface ContextBarProps {
   machine: Machine | null;
   project: Project | null;
   pieceTask: PieceTask | null;
+  /** ✅ NEW : la work package actuellement sélectionnée (CNC / Classique). */
+  ofWorkPackageId?: string | null;
   /** Temps total estimé pour la pièce (depuis piece_costing_operations). */
   estimatedTotalMinutes?: number | null;
   onOpenSelector: () => void;
@@ -143,6 +147,7 @@ export function ContextBar({
   machine,
   project,
   pieceTask,
+  ofWorkPackageId,
   estimatedTotalMinutes,
   onOpenSelector,
   onCompletePiece,
@@ -154,13 +159,14 @@ export function ContextBar({
   const [isPassationOpen, setIsPassationOpen] = useState(false);
   const { unreadCount, refresh: refreshUnread } = usePieceHandoffsUnread(pieceTask?.id ?? null, worker.id);
 
-  // Priorité : estimation totale passée par le parent, sinon fallback
-  // sur les champs de la pièce.
   const estimatedMin =
     estimatedTotalMinutes ??
     pieceTask?.estimated_minutes ??
     pieceTask?.estimated_time_minutes ??
     0;
+
+  // Nom court de la work package (juste pour indiquer qu'une WP est active)
+  const wpActive = Boolean(ofWorkPackageId);
 
   return (
     <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-100/70 px-4 py-3">
@@ -212,17 +218,28 @@ export function ContextBar({
 
       <Field label={t("kiosk.piece")} value={pieceTask?.name ?? "—"} />
 
-      {/* Nouveau : quantité issue de la fiche pièce */}
       <Field
         label={t("kiosk.quantity")}
         value={pieceTask?.quantity != null ? String(pieceTask.quantity) : "—"}
       />
 
-      {/* Temps estimé total */}
       <Field
         label={t("kiosk.estimation")}
         value={formatMinutes(estimatedMin)}
       />
+
+      {/* ✅ Nouveau : indicateur de work package active */}
+      {wpActive && (
+        <div className="flex min-w-[110px] flex-col rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 shadow-sm">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+            <Layers size={10} />
+            {t("kiosk.workPackage")}
+          </span>
+          <span className="mt-0.5 text-xs font-bold text-indigo-700">
+            {t("kiosk.workPackageActive")}
+          </span>
+        </div>
+      )}
 
       {pieceTask && (
         <button

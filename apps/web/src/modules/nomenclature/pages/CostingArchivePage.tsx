@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarDays, Search, X, FileText } from "lucide-react";
+import { CalendarDays, Search, X, FileText, RotateCcw } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
 import type { Project, Client, Nomenclature } from "../../../shared/types/database";
+
+type CostingStatus = "non_etudie" | "brouillon" | "en_attente" | "valide";
+
+interface PieceInStudy {
+  id: string;
+  name: string;
+  code: string | null;
+  costing_status: CostingStatus;
+}
 
 interface ArchiveRow {
   id: string;
@@ -12,19 +21,32 @@ interface ArchiveRow {
   project_id: string | null;
   project_name: string | null;
   project_code: string | null;
-  piece_names: string[];
-  status: "en_attente" | "valide";
+  pieces: PieceInStudy[];
+  status: CostingStatus;
   total_estimated_cost: number | null;
   updated_at: string;
 }
 
 interface CostingArchivePageProps {
-  onOpenPiece: (nomenclature: Nomenclature, pieceTaskId: string) => void;
+  onOpenPiece: (
+    nomenclature: Nomenclature,
+    pieceTaskId: string,
+    mode?: "study" | "resume",
+  ) => void;
 }
+
+const STATUS_BADGE: Record<CostingStatus, { labelKey: string; cls: string }> = {
+  non_etudie: { labelKey: "setup.costingNotStudied", cls: "bg-slate-100 text-slate-600" },
+  brouillon:  { labelKey: "setup.costingDraft",      cls: "bg-amber-100 text-amber-700" },
+  en_attente: { labelKey: "setup.costingPending",    cls: "bg-blue-100 text-blue-700" },
+  valide:     { labelKey: "setup.costingValidated",  cls: "bg-green-100 text-green-700" },
+};
 
 export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
+  const companyId = staffUser?.company_id ?? null;
+
   const [rows, setRows] = useState<ArchiveRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -36,27 +58,38 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
   const [dateFilter, setDateFilter] = useState("");
 
   const load = useCallback(async () => {
+    if (!companyId) return;
     setIsLoading(true);
     setLoadError(null);
 
-    // On N'utilise PAS .eq('company_id', ...) — RLS s'en charge côté serveur
+    // RÈGLE DE SÉCURITÉ (C5) : company_id explicite sur les 4 requêtes.
     const [
       { data: nomData, error: nomErr },
       { data: projData },
       { data: clientData },
-      { data: opsData },
+      { data: piecesData },
     ] = await Promise.all([
       supabase
-      .from("nomenclatures")
-      .select("id, name, project_id, status, total_estimated_cost, updated_at, projects!project_id(name, code)")
-      .eq("status", "valide")
-      .order("updated_at", { ascending: false }),
-      supabase.from("projects").select("*").eq("is_archived", false).order("name"),
-      supabase.from("clients").select("*").order("name"),
+        .from("nomenclatures")
+        .select("id, name, project_id, status, total_estimated_cost, updated_at, projects!project_id(name, code)")
+        .eq("company_id", companyId)
+        .order("updated_at", { ascending: false }),
       supabase
-        .from("piece_costing_operations")
-        .select("nomenclature_id, piece_task_id, pieces_tasks(name)")
-        .not("piece_task_id", "is", null),
+        .from("projects")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("is_archived", false)
+        .order("name"),
+      supabase
+        .from("clients")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("name"),
+      supabase
+        .from("pieces_tasks")
+        .select("id, name, code, project_id, costing_status, sequence_order")
+        .eq("company_id", companyId)
+        .order("sequence_order"),
     ]);
 
     if (nomErr) {
@@ -66,30 +99,37 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
       return;
     }
 
-    const piecesByStudy = new Map<string, Set<string>>();
-    for (const r of (opsData ?? []) as {
-      nomenclature_id: string;
-      piece_task_id: string | null;
-      pieces_tasks: { name?: string } | null;
+    // Regrouper les pièces par project_id
+    const piecesByProject = new Map<string, PieceInStudy[]>();
+    for (const p of (piecesData ?? []) as {
+      id: string;
+      name: string;
+      code: string | null;
+      project_id: string;
+      costing_status: CostingStatus;
     }[]) {
-      const name = r.pieces_tasks?.name;
-      if (!name) continue;
-      const set = piecesByStudy.get(r.nomenclature_id) ?? new Set<string>();
-      set.add(name);
-      piecesByStudy.set(r.nomenclature_id, set);
+      const arr = piecesByProject.get(p.project_id) ?? [];
+      arr.push({
+        id: p.id,
+        name: p.name,
+        code: p.code,
+        costing_status: p.costing_status,
+      });
+      piecesByProject.set(p.project_id, arr);
     }
 
     const parsed: ArchiveRow[] = ((nomData ?? []) as Record<string, unknown>[]).map((n) => {
       const proj = n.projects as { name?: string; code?: string } | null;
       const id = n.id as string;
+      const projectId = (n.project_id as string | null) ?? null;
       return {
         id,
         study_name: n.name as string,
-        project_id: (n.project_id as string | null) ?? null,
+        project_id: projectId,
         project_name: proj?.name ?? null,
         project_code: proj?.code ?? null,
-        piece_names: Array.from(piecesByStudy.get(id) ?? []),
-        status: n.status as "en_attente" | "valide",
+        pieces: projectId ? piecesByProject.get(projectId) ?? [] : [],
+        status: (n.status as CostingStatus) ?? "en_attente",
         total_estimated_cost: (n.total_estimated_cost as number | null) ?? null,
         updated_at: n.updated_at as string,
       };
@@ -99,25 +139,30 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
     setProjects((projData as Project[]) ?? []);
     setClients((clientData as Client[]) ?? []);
     setIsLoading(false);
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (!staffUser?.company_id) return;
-    const channel = createSafeChannel(`costing-archive-${staffUser.company_id}`)
+    if (!companyId) return;
+    const channel = createSafeChannel(`costing-archive-${companyId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "nomenclatures", filter: `company_id=eq.${staffUser.company_id}` },
-        () => void load()
+        { event: "*", schema: "public", table: "nomenclatures", filter: `company_id=eq.${companyId}` },
+        () => void load(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pieces_tasks", filter: `company_id=eq.${companyId}` },
+        () => void load(),
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [staffUser?.company_id, load]);
+  }, [companyId, load]);
 
   const filtered = useMemo(() => {
     const q = pieceQuery.trim().toLowerCase();
@@ -128,7 +173,11 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
         return false;
       if (q) {
         const matchesStudy = r.study_name.toLowerCase().includes(q);
-        const matchesPiece = r.piece_names.some((n) => n.toLowerCase().includes(q));
+        const matchesPiece = r.pieces.some(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            (p.code ?? "").toLowerCase().includes(q),
+        );
         if (!matchesStudy && !matchesPiece) return false;
       }
       if (dateFilter && r.updated_at.slice(0, 10) !== dateFilter) return false;
@@ -143,30 +192,25 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
     setDateFilter("");
   }
 
-  async function handleOpen(row: ArchiveRow) {
+  /** Ouvrir une pièce précise d'une nomenclature (avec son vrai id). */
+  async function handleOpenPiece(row: ArchiveRow, piece: PieceInStudy, mode: "study" | "resume") {
+    if (!companyId) return;
     const { data, error } = await supabase
       .from("nomenclatures")
       .select("*")
       .eq("id", row.id)
+      .eq("company_id", companyId)
       .single();
     if (error || !data) return;
-    const nom = data as Nomenclature;
-    // Ouvrir la première pièce du projet
-    if (nom.project_id) {
-      const { data: pieces } = await supabase
-        .from("pieces_tasks")
-        .select("id")
-        .eq("project_id", nom.project_id)
-        .order("sequence_order")
-        .limit(1);
-      const firstPiece = (pieces ?? [])[0] as { id: string } | undefined;
-      if (firstPiece) {
-        onOpenPiece(nom, firstPiece.id);
-        return;
-      }
-    }
-    // Fallback : ouvrir sans pièce
-    onOpenPiece(nom, "");
+    onOpenPiece(data as Nomenclature, piece.id, mode);
+  }
+
+  /** Reprendre la première pièce en brouillon du projet, sinon la première. */
+  function handleResumeStudy(row: ArchiveRow) {
+    const draftPiece = row.pieces.find((p) => p.costing_status === "brouillon");
+    const target = draftPiece ?? row.pieces[0];
+    if (!target) return;
+    void handleOpenPiece(row, target, "resume");
   }
 
   return (
@@ -255,125 +299,117 @@ export function CostingArchivePage({ onOpenPiece }: CostingArchivePageProps) {
         <div className="p-6 text-center text-sm text-slate-400">{t("common.loading")}</div>
       ) : rows.length === 0 ? (
         <div className="p-6 text-center text-sm text-slate-400">
-          Aucun chiffrage validé pour le moment.
+          {t("etude.archive.empty")}
         </div>
       ) : filtered.length === 0 ? (
         <div className="p-6 text-center text-sm text-slate-400">{t("etude.archive.empty")}</div>
       ) : (
-        <>
-          <div className="flex flex-col gap-2 md:hidden">
-            {filtered.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => void handleOpen(r)}
-                className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 text-start transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
-              >
-                <div className="flex items-start justify-between gap-2">
+        <div className="space-y-3">
+          {filtered.map((r) => {
+            const hasDraft = r.pieces.some((p) => p.costing_status === "brouillon");
+            return (
+              <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50/60">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-slate-700">
-                      {r.project_name ?? r.study_name}
-                    </div>
-                    {r.project_code && (
-                      <div className="truncate font-mono text-[11px] text-slate-400" dir="ltr">
-                        {r.project_code}
-                      </div>
-                    )}
-                  </div>
-                  <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
-                    {t("setup.nomenclatureValide")}
-                  </span>
-                </div>
-                {r.piece_names.length > 0 && (
-                  <div className="mt-2 text-xs text-slate-500">
-                    <span className="text-[10px] uppercase text-slate-400">
-                      {t("etude.archive.colPieces")}:
-                    </span>{" "}
-                    {r.piece_names.join(" · ")}
-                  </div>
-                )}
-                <div className="mt-2 flex items-end justify-between border-t border-slate-100 pt-2">
-                  <div className="text-[10px] text-slate-400" dir="ltr">
-                    {new Date(r.updated_at).toLocaleDateString("fr-FR")}
-                  </div>
-                  <div className="text-base font-extrabold text-indigo-700" dir="ltr">
-                    {r.total_estimated_cost !== null
-                      ? r.total_estimated_cost.toFixed(2)
-                      : "—"}
-                    <span className="ms-1 text-[10px] font-semibold text-indigo-400">TND</span>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-3 py-2.5 text-start">{t("etude.archive.colProject")}</th>
-                  <th className="px-3 py-2.5 text-start">{t("etude.archive.colPieces")}</th>
-                  <th className="px-3 py-2.5 text-start">{t("etude.archive.colStatus")}</th>
-                  <th className="px-3 py-2.5 text-left" dir="ltr">
-                    {t("etude.archive.colCost")}
-                  </th>
-                  <th className="px-3 py-2.5 text-left" dir="ltr">
-                    {t("etude.archive.colUpdated")}
-                  </th>
-                  <th className="px-3 py-2.5 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5 text-start">
-                      <div className="font-semibold text-slate-700">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-slate-800">
                         {r.project_name ?? r.study_name}
-                      </div>
-                      {r.project_code && (
-                        <div className="text-xs text-slate-400" dir="ltr">
-                          {r.project_code}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-start text-xs text-slate-500">
-                      {r.piece_names.length > 0 ? r.piece_names.join(" · ") : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-start">
-                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">
-                        {t("setup.nomenclatureValide")}
                       </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-left font-bold text-slate-700" dir="ltr">
-                      {r.total_estimated_cost !== null
-                        ? r.total_estimated_cost.toFixed(2)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-left text-xs text-slate-400" dir="ltr">
+                      {r.project_code && (
+                        <span className="font-mono text-[11px] text-slate-400" dir="ltr">
+                          {r.project_code}
+                        </span>
+                      )}
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[r.status].cls}`}>
+                        {t(STATUS_BADGE[r.status].labelKey)}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-400" dir="ltr">
                       {new Date(r.updated_at).toLocaleString("fr-FR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
+                        day: "2-digit", month: "2-digit", year: "numeric",
+                        hour: "2-digit", minute: "2-digit",
                       })}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <div className="text-end">
+                      <div className="text-sm font-extrabold text-indigo-700" dir="ltr">
+                        {r.total_estimated_cost !== null
+                          ? r.total_estimated_cost.toFixed(2)
+                          : "—"}
+                        <span className="ms-1 text-[10px] font-semibold text-indigo-400">TND</span>
+                      </div>
+                    </div>
+
+                    {hasDraft && (
                       <button
                         type="button"
-                        onClick={() => void handleOpen(r)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                        onClick={() => handleResumeStudy(r)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-600"
                       >
-                        <FileText size={12} />
-                        {t("setup.viewReport")}
+                        <RotateCcw size={12} />
+                        {t("setup.continueStudy")}
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Liste des pièces */}
+                {r.pieces.length > 0 && (
+                  <ul className="divide-y divide-slate-100">
+                    {r.pieces.map((p) => {
+                      const badge = STATUS_BADGE[p.costing_status];
+                      const isDraft = p.costing_status === "brouillon";
+                      return (
+                        <li
+                          key={p.id}
+                          className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs"
+                        >
+                          <span className="truncate font-semibold text-slate-700">{p.name}</span>
+                          {p.code && (
+                            <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                              {p.code}
+                            </span>
+                          )}
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge.cls}`}>
+                            {t(badge.labelKey)}
+                          </span>
+                          <div className="ms-auto flex gap-1.5">
+                            {isDraft && (
+                              <button
+                                type="button"
+                                onClick={() => void handleOpenPiece(r, p, "resume")}
+                                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600"
+                              >
+                                <RotateCcw size={11} />
+                                {t("setup.continueStudy")}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenPiece(r, p, "study")}
+                              className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-100"
+                            >
+                              <FileText size={11} />
+                              {t("setup.viewReport")}
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {r.pieces.length === 0 && (
+                  <div className="px-4 py-2 text-xs text-slate-400">
+                    {t("setup.noPiecesYet")}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

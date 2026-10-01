@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
+import { generateClientCode } from "../../../shared/utils/codes";
 
 // Pipeline complet : Nouveau → Qualification → Étude → Chiffrage →
 // Offre → Négociation → Gagné/Perdu
@@ -56,12 +57,16 @@ export interface Interaction {
 
 // ----------------------------------------------------------------------------
 // PROSPECTS
+//
+// RÈGLE DE SÉCURITÉ (C5) : chaque requête est explicitement filtrée par
+// company_id en plus de la RLS. Défense en profondeur — ne jamais retirer.
 // ----------------------------------------------------------------------------
 
-export async function listProspects(): Promise<Prospect[]> {
+export async function listProspects(companyId: string): Promise<Prospect[]> {
   const { data, error } = await supabase
     .from("crm_prospects")
     .select("*")
+    .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -84,21 +89,24 @@ export async function createProspect(
 
 export async function updateProspect(
   id: string,
+  companyId: string,
   patch: Partial<Prospect>,
 ): Promise<void> {
   const { error } = await supabase
     .from("crm_prospects")
     .update(patch)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }
 
-export async function deleteProspect(id: string): Promise<void> {
+export async function deleteProspect(id: string, companyId: string): Promise<void> {
   const { error } = await supabase
     .from("crm_prospects")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }
@@ -107,11 +115,15 @@ export async function deleteProspect(id: string): Promise<void> {
 // INTERACTIONS
 // ----------------------------------------------------------------------------
 
-export async function listInteractions(prospectId: string): Promise<Interaction[]> {
+export async function listInteractions(
+  prospectId: string,
+  companyId: string,
+): Promise<Interaction[]> {
   const { data, error } = await supabase
     .from("crm_interactions")
     .select("*")
     .eq("prospect_id", prospectId)
+    .eq("company_id", companyId)
     .order("happened_at", { ascending: false });
 
   if (error) throw error;
@@ -140,7 +152,8 @@ export async function convertProspectToClient(
   prospect: Prospect,
   companyId: string,
 ): Promise<{ clientId: string }> {
-  // 1) Créer le client
+  const clientCode = await generateClientCode(companyId);
+
   const { data: client, error: clientError } = await supabase
     .from("clients")
     .insert({
@@ -148,6 +161,7 @@ export async function convertProspectToClient(
       name: prospect.company_name ?? prospect.full_name,
       email: prospect.email,
       phone: prospect.phone,
+      code: clientCode,
     })
     .select("id")
     .single();
@@ -155,7 +169,6 @@ export async function convertProspectToClient(
   if (clientError) throw clientError;
   const clientId = (client as { id: string }).id;
 
-  // 2) Marquer le prospect comme converti
   const { error: updateError } = await supabase
     .from("crm_prospects")
     .update({
@@ -163,7 +176,8 @@ export async function convertProspectToClient(
       converted_at: new Date().toISOString(),
       converted_client_id: clientId,
     })
-    .eq("id", prospect.id);
+    .eq("id", prospect.id)
+    .eq("company_id", companyId);
 
   if (updateError) throw updateError;
 
@@ -190,6 +204,7 @@ export async function createProjectFromProspect(
     .from("projects")
     .select("id, code, client_id")
     .eq("opportunity_id", prospect.id)
+    .eq("company_id", companyId)
     .maybeSingle();
 
   if (existing) {
@@ -214,7 +229,8 @@ export async function createProjectFromProspect(
         stage: "gagne",
         converted_at: prospect.converted_at ?? new Date().toISOString(),
       })
-      .eq("id", prospect.id);
+      .eq("id", prospect.id)
+      .eq("company_id", companyId);
   }
 
   // Créer le projet

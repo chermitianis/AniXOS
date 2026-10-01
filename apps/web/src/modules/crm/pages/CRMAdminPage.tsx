@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import {
   Users, Plus, Search, Target, TrendingUp, DollarSign,
   Phone, Mail, Calendar, FileText, Loader2, UserCheck,
-  Pencil, Trash2, XCircle,
+  Pencil, Trash2, XCircle, FolderSearch,
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
+import { useNav } from "../../../app/NavContext";
+import { supabase } from "../../../lib/supabaseClient";
 import { ProspectModal } from "../components/ProspectModal";
 import { InteractionModal } from "../components/InteractionModal";
 import {
@@ -62,11 +64,16 @@ interface CRMAdminPageProps {
   initialTab?: TabKey;
 }
 
+// Map : opportunity_id → project code
+type ProjectCodeMap = Record<string, { id: string; code: string | null }>;
+
 export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}) {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
+  const nav = useNav();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [projectCodes, setProjectCodes] = useState<ProjectCodeMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
@@ -82,15 +89,36 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const [createdProjectCode, setCreatedProjectCode] = useState<string | null>(null);
 
+  const companyId = staffUser?.company_id ?? null;
+
   // ---------------------------------------------------------------------
   // Chargement
   // ---------------------------------------------------------------------
   async function load() {
+    if (!companyId) return;
     setIsLoading(true);
     setError(null);
     try {
-      const data = await listProspects();
+      const data = await listProspects(companyId);
       setProspects(data);
+
+      // Charger les codes projets liés aux opportunités
+      const opportunityIds = data.map((p) => p.id);
+      if (opportunityIds.length > 0) {
+        const { data: projectsData } = await supabase
+          .from("projects")
+          .select("id, code, opportunity_id")
+          .eq("company_id", companyId)
+          .in("opportunity_id", opportunityIds);
+        const map: ProjectCodeMap = {};
+        for (const row of projectsData ?? []) {
+          const r = row as { id: string; code: string | null; opportunity_id: string };
+          if (r.opportunity_id) map[r.opportunity_id] = { id: r.id, code: r.code };
+        }
+        setProjectCodes(map);
+      } else {
+        setProjectCodes({});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -100,18 +128,18 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     setCreatedProjectCode(null);
-    if (!activeProspect) {
+    if (!activeProspect || !companyId) {
       setInteractions([]);
       return;
     }
-    void listInteractions(activeProspect.id)
+    void listInteractions(activeProspect.id, companyId)
       .then(setInteractions)
       .catch(() => setInteractions([]));
-  }, [activeProspect]);
+  }, [activeProspect, companyId]);
 
   // ---------------------------------------------------------------------
   // KPIs
@@ -154,9 +182,9 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
   // Actions
   // ---------------------------------------------------------------------
   async function handleSaveProspect(data: Partial<Prospect>) {
-    if (!staffUser) return;
+    if (!staffUser || !companyId) return;
     if (editingProspect) {
-      await updateProspect(editingProspect.id, data);
+      await updateProspect(editingProspect.id, companyId, data);
     } else {
       await createProspect(
         {
@@ -175,7 +203,7 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
           requested_date: data.requested_date ?? null,
           owner_staff_id: data.owner_staff_id ?? staffUser.id,
         },
-        staffUser.company_id,
+        companyId,
       );
     }
     setShowProspectModal(false);
@@ -184,14 +212,16 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
   }
 
   async function handleDelete(prospect: Prospect) {
+    if (!companyId) return;
     if (!window.confirm(t("crm.confirmDelete"))) return;
-    await deleteProspect(prospect.id);
+    await deleteProspect(prospect.id, companyId);
     if (activeProspect?.id === prospect.id) setActiveProspect(null);
     await load();
   }
 
   async function handleStageChange(prospect: Prospect, newStage: ProspectStage) {
-    await updateProspect(prospect.id, { stage: newStage });
+    if (!companyId) return;
+    await updateProspect(prospect.id, companyId, { stage: newStage });
     await load();
   }
 
@@ -201,21 +231,21 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
     happened_at: string;
     author_staff_id: string | null;
   }) {
-    if (!staffUser || !activeProspect) return;
+    if (!staffUser || !activeProspect || !companyId) return;
     await createInteraction(
       { ...data, prospect_id: activeProspect.id },
-      staffUser.company_id,
+      companyId,
     );
-    const refreshed = await listInteractions(activeProspect.id);
+    const refreshed = await listInteractions(activeProspect.id, companyId);
     setInteractions(refreshed);
   }
 
   async function handleConvert(prospect: Prospect) {
-    if (!staffUser) return;
+    if (!staffUser || !companyId) return;
     if (!window.confirm(t("crm.confirmConvert"))) return;
     setConverting(prospect.id);
     try {
-      await convertProspectToClient(prospect, staffUser.company_id);
+      await convertProspectToClient(prospect, companyId);
       await load();
     } finally {
       setConverting(null);
@@ -223,11 +253,11 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
   }
 
   async function handleCreateProject(prospect: Prospect) {
-    if (!staffUser) return;
+    if (!staffUser || !companyId) return;
     if (!window.confirm(t("crm.confirmCreateProject"))) return;
     setCreatingProject(prospect.id);
     try {
-      const result = await createProjectFromProspect(prospect, staffUser.company_id);
+      const result = await createProjectFromProspect(prospect, companyId);
       setCreatedProjectCode(result.projectCode);
       await load();
     } catch (err) {
@@ -237,12 +267,16 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
     }
   }
 
+  // Ouvre le projet dans Ingénierie (Projets à étudier)
+  function openProjectInEngineering(projectId: string) {
+    nav.goToSection("ingenierie_projets", { projectId });
+  }
+
   // ---------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-extrabold text-slate-800">{t("crm.title")}</h1>
@@ -260,7 +294,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </button>
       </div>
 
-      {/* KPI */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
@@ -293,7 +326,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200">
         {(["pipeline", "prospects"] as TabKey[]).map((tab) => (
           <button
@@ -310,7 +342,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         ))}
       </div>
 
-      {/* Search (prospects tab) */}
       {activeTab === "prospects" && (
         <div className="relative max-w-sm">
           <Search
@@ -326,7 +357,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </div>
       )}
 
-      {/* Contenu */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-slate-400">
           <Loader2 className="me-2 animate-spin" size={18} />
@@ -341,7 +371,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </div>
       ) : (
         <>
-          {/* Vue Pipeline */}
           {activeTab === "pipeline" && (
             <div className="flex gap-3 overflow-x-auto pb-2">
               {STAGES.map((stage) => (
@@ -358,36 +387,44 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                     </span>
                   </div>
                   <div className="space-y-2">
-                    {byStage[stage].map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setActiveProspect(p)}
-                        className="w-full rounded-lg border border-white bg-white p-2.5 text-start shadow-sm transition-all hover:shadow-md"
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <div className="text-sm font-semibold text-slate-800">
-                            {p.full_name}
+                    {byStage[stage].map((p) => {
+                      const proj = projectCodes[p.id];
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => setActiveProspect(p)}
+                          className="w-full rounded-lg border border-white bg-white p-2.5 text-start shadow-sm transition-all hover:shadow-md"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
+                              {p.full_name}
+                            </div>
+                            {p.priority !== "normale" && (
+                              <span
+                                className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_COLORS[p.priority]}`}
+                              >
+                                {t(
+                                  `crm.priority${p.priority.charAt(0).toUpperCase() + p.priority.slice(1)}`,
+                                )}
+                              </span>
+                            )}
                           </div>
-                          {p.priority !== "normale" && (
-                            <span
-                              className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_COLORS[p.priority]}`}
-                            >
-                              {t(
-                                `crm.priority${p.priority.charAt(0).toUpperCase() + p.priority.slice(1)}`,
-                              )}
-                            </span>
+                          {p.company_name && (
+                            <div className="truncate text-xs text-slate-500">{p.company_name}</div>
                           )}
-                        </div>
-                        {p.company_name && (
-                          <div className="text-xs text-slate-500">{p.company_name}</div>
-                        )}
-                        {p.estimated_value != null && (
-                          <div className="mt-1 text-xs font-bold text-indigo-600">
-                            {p.estimated_value.toLocaleString("fr-FR")} TND
-                          </div>
-                        )}
-                      </button>
-                    ))}
+                          {proj?.code && (
+                            <div className="mt-1 inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-700" dir="ltr">
+                              {proj.code}
+                            </div>
+                          )}
+                          {p.estimated_value != null && (
+                            <div className="mt-1 text-xs font-bold text-indigo-600">
+                              {p.estimated_value.toLocaleString("fr-FR")} TND
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                     {byStage[stage].length === 0 && (
                       <div className="py-3 text-center text-[11px] text-slate-400">—</div>
                     )}
@@ -397,7 +434,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
             </div>
           )}
 
-          {/* Vue Liste */}
           {activeTab === "prospects" && (
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
               <table className="w-full text-sm">
@@ -405,71 +441,89 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                   <tr>
                     <th className="px-3 py-2 text-start">{t("crm.colName")}</th>
                     <th className="px-3 py-2 text-start">{t("crm.colCompany")}</th>
+                    <th className="px-3 py-2 text-start">Projet</th>
                     <th className="px-3 py-2 text-start">{t("crm.colStage")}</th>
                     <th className="px-3 py-2 text-end">{t("crm.colValue")}</th>
                     <th className="px-3 py-2 text-center">{t("common.edit")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredProspects.map((p) => (
-                    <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                      <td className="px-3 py-2">
-                        <button
-                          onClick={() => setActiveProspect(p)}
-                          className="font-semibold text-slate-700 hover:text-indigo-600"
-                        >
-                          {p.full_name}
-                        </button>
-                        {p.email && (
-                          <div className="text-xs text-slate-400" dir="ltr">
-                            {p.email}
+                  {filteredProspects.map((p) => {
+                    const proj = projectCodes[p.id];
+                    return (
+                      <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => setActiveProspect(p)}
+                            className="font-semibold text-slate-700 hover:text-indigo-600"
+                          >
+                            {p.full_name}
+                          </button>
+                          {p.email && (
+                            <div className="text-xs text-slate-400" dir="ltr">
+                              {p.email}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{p.company_name ?? "—"}</td>
+                        <td className="px-3 py-2">
+                          {proj ? (
+                            <button
+                              onClick={() => openProjectInEngineering(proj.id)}
+                              className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-mono font-bold text-indigo-700 hover:bg-indigo-100"
+                              dir="ltr"
+                            >
+                              <FolderSearch size={11} />
+                              {proj.code ?? "—"}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={p.stage}
+                            onChange={(e) =>
+                              void handleStageChange(p, e.target.value as ProspectStage)
+                            }
+                            className={`rounded border px-2 py-0.5 text-xs font-semibold ${STAGE_COLORS[p.stage].bg} ${STAGE_COLORS[p.stage].text} ${STAGE_COLORS[p.stage].border}`}
+                          >
+                            {STAGES.map((s) => (
+                              <option key={s} value={s}>
+                                {t(STAGE_LABEL_KEY[s])}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-end font-semibold text-slate-700" dir="ltr">
+                          {p.estimated_value != null
+                            ? `${p.estimated_value.toLocaleString("fr-FR")} TND`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingProspect(p);
+                                setShowProspectModal(true);
+                              }}
+                              className="rounded p-1.5 text-indigo-600 hover:bg-indigo-50"
+                              title={t("common.edit")}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => void handleDelete(p)}
+                              className="rounded p-1.5 text-red-500 hover:bg-red-50"
+                              title={t("common.delete")}
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-slate-600">{p.company_name ?? "—"}</td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={p.stage}
-                          onChange={(e) =>
-                            void handleStageChange(p, e.target.value as ProspectStage)
-                          }
-                          className={`rounded border px-2 py-0.5 text-xs font-semibold ${STAGE_COLORS[p.stage].bg} ${STAGE_COLORS[p.stage].text} ${STAGE_COLORS[p.stage].border}`}
-                        >
-                          {STAGES.map((s) => (
-                            <option key={s} value={s}>
-                              {t(STAGE_LABEL_KEY[s])}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 text-end font-semibold text-slate-700" dir="ltr">
-                        {p.estimated_value != null
-                          ? `${p.estimated_value.toLocaleString("fr-FR")} TND`
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingProspect(p);
-                              setShowProspectModal(true);
-                            }}
-                            className="rounded p-1.5 text-indigo-600 hover:bg-indigo-50"
-                            title={t("common.edit")}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => void handleDelete(p)}
-                            className="rounded p-1.5 text-red-500 hover:bg-red-50"
-                            title={t("common.delete")}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -477,7 +531,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </>
       )}
 
-      {/* Modal Prospect */}
       {showProspectModal && (
         <ProspectModal
           prospect={editingProspect}
@@ -489,7 +542,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         />
       )}
 
-      {/* Panneau latéral : détails */}
       {activeProspect && (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-slate-900/40"
@@ -512,6 +564,26 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
             </div>
 
             <div className="space-y-5 p-5">
+              {projectCodes[activeProspect.id] && (
+                <button
+                  onClick={() => {
+                    openProjectInEngineering(projectCodes[activeProspect.id].id);
+                    setActiveProspect(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-start hover:bg-indigo-100"
+                >
+                  <div>
+                    <div className="text-[10px] font-bold uppercase text-indigo-500">
+                      Projet lié
+                    </div>
+                    <div className="font-mono text-sm font-bold text-indigo-700" dir="ltr">
+                      {projectCodes[activeProspect.id].code ?? "—"}
+                    </div>
+                  </div>
+                  <FolderSearch size={16} className="text-indigo-500" />
+                </button>
+              )}
+
               <div className="space-y-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <span
@@ -554,7 +626,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                 )}
               </div>
 
-              {/* Actions */}
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setShowInteractionModal(true)}
@@ -562,7 +633,7 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                 >
                   + {t("crm.addInteraction")}
                 </button>
-                {activeProspect.stage !== "gagne" && (
+                {activeProspect.stage !== "gagne" && !projectCodes[activeProspect.id] && (
                   <button
                     onClick={() => void handleConvert(activeProspect)}
                     disabled={converting === activeProspect.id}
@@ -575,7 +646,7 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                     )}
                   </button>
                 )}
-                {activeProspect.stage === "gagne" && (
+                {activeProspect.stage === "gagne" && !projectCodes[activeProspect.id] && (
                   <button
                     onClick={() => void handleCreateProject(activeProspect)}
                     disabled={creatingProject === activeProspect.id}
@@ -596,7 +667,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
                 </div>
               )}
 
-              {/* Historique des interactions */}
               <div>
                 <h3 className="mb-2 text-xs font-bold uppercase text-slate-400">
                   {t("crm.tabs.interactions")}
@@ -642,7 +712,6 @@ export function CRMAdminPage({ initialTab = "pipeline" }: CRMAdminPageProps = {}
         </div>
       )}
 
-      {/* Modal Interaction */}
       {showInteractionModal && activeProspect && (
         <InteractionModal
           prospectId={activeProspect.id}

@@ -235,7 +235,8 @@ apps
 │   │   ├── shared
 │   │   │   ├── components
 │   │   │   │   ├── AppLogo.tsx
-│   │   │   │   └── LanguageSwitcher.tsx
+│   │   │   │   ├── LanguageSwitcher.tsx
+│   │   │   │   └── PiecesInput.tsx
 │   │   │   ├── constants
 │   │   │   │   ├── materials.ts
 │   │   │   │   └── toolTypes.ts
@@ -243,6 +244,8 @@ apps
 │   │   │   ├── types
 │   │   │   │   └── database.ts
 │   │   │   └── utils
+│   │   │       ├── codes.ts
+│   │   │       ├── interfaceFilter.ts
 │   │   │       └── planningQrToken.ts
 │   │   ├── styles
 │   │   ├── types
@@ -259,6 +262,7 @@ apps
 │   ├── package.json
 │   ├── postcss.config.js
 │   ├── README.md
+│   ├── structure.txt
 │   ├── tsconfig.app.json
 │   ├── tsconfig.json
 │   ├── tsconfig.node.json

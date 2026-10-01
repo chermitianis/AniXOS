@@ -15,6 +15,7 @@ import { ProjectPieceSelectorModal } from "../components/ProjectPieceSelectorMod
 import { SessionCorrectionModal } from "../components/SessionCorrectionModal";
 import { LogoutConfirmModal } from "../components/LogoutConfirmModal";
 import { startCredentialsSync } from "../../../lib/credentialsSync";
+import { getStageInterface } from "../../nomenclature/lib/costingConstants";
 import {
   fetchPieceOperationsWithEstimate,
   type PieceOperationEstimate,
@@ -62,6 +63,8 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     machine,
     project,
     pieceTask,
+    ofWorkPackageId,
+    ofWorkPackageInterface,  // ✅ NEW
     activeSessions,
     selectPlanningOption,
     toggleProductionTask,
@@ -89,11 +92,13 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     };
   }, [pieceTask?.id]);
 
-  /** Total estimé en minutes pour la pièce, calculé depuis les opérations. */
-  const estimatedTotalMinutes = pieceOperations.reduce(
-    (sum, op) => sum + Math.round(op.estimated_hours * 60),
-    0,
-  );
+  // ✅ Filtrer les opérations par interface de la WP active
+  const estimatedTotalMinutes = pieceOperations
+    .filter((op) => {
+      if (!ofWorkPackageInterface) return true; // pas de WP → total global
+      return getStageInterface(op.stage) === ofWorkPackageInterface;
+    })
+    .reduce((sum, op) => sum + Math.round(op.estimated_hours * 60), 0);
 
   async function handleSelectFromModal(...args: Parameters<typeof selectPlanningOption>) {
     await selectPlanningOption(...args);
@@ -139,6 +144,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         machine={machine}
         project={project}
         pieceTask={pieceTask}
+        ofWorkPackageId={ofWorkPackageId}
         estimatedTotalMinutes={estimatedTotalMinutes || null}
         onOpenSelector={() => setIsSelectorOpen(true)}
         onCompletePiece={() => void handleCompletePiece()}

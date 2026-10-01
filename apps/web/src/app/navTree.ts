@@ -4,9 +4,8 @@ import {
   FolderSearch, Calculator, FileBox, Clock4, BadgeCheck,
   Gauge, ClipboardCheck, ClipboardList, CalendarClock,
   HardHat, Wrench, Hammer, Package, Boxes, AlertTriangle, Layers,
-  ListChecks, Users2, Link2,
+  ListChecks, Users2, Link2, DollarSign,
   type LucideIcon,
-
 } from "lucide-react";
 
 export interface NavNode {
@@ -99,8 +98,8 @@ export const NAV_TREE: NavGroup[] = [
       L("ingenierie_dossiers", "Dossiers techniques", {
         page: "engineering_dossiers", perm: "nomenclature", icon: FileBox,
       }),
-      L("ingenierie_gammes", "Gammes & temps", {
-        page: "engineering_gammes", perm: "nomenclature", icon: Clock4,
+      L("ingenierie_rapports_prod", "Rapports production", {
+        page: "production_reports", perm: "reports", icon: BarChart3,
       }),
       L("ingenierie_validation", "Validation technique", {
         page: "engineering_validation", perm: "nomenclature", icon: BadgeCheck,
@@ -266,7 +265,6 @@ export const NAV_TREE: NavGroup[] = [
     items: [
       L("atelier_operateurs", "Opérateurs", { page: "workers", perm: "workers", icon: HardHat }),
       L("atelier_machines_cnc", "Machines", { page: "machines", perm: "machines", icon: Cog }),
-    
       L("atelier_operations", "Opérations", { page: "operations", perm: "operations", icon: ListChecks }),
       L("atelier_outillages", "Outillages", { icon: Hammer }),
       L("atelier_matieres", "Matières & consommables", { icon: Package }),
@@ -288,7 +286,7 @@ export const NAV_TREE: NavGroup[] = [
     ],
   },
 
-   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
   // 08. ADMINISTRATION
   // ─────────────────────────────────────────────────────────────
   {
@@ -303,6 +301,8 @@ export const NAV_TREE: NavGroup[] = [
 
       G("admin_settings", "Paramètres", [
         L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings" }),
+        L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings" }),
+        L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings", icon: DollarSign }),
         L("admin_settings_databases", "Bases de données", { page: "admin_databases" }),
         L("admin_settings_subscription", "Abonnement", { page: "admin_subscription" }),
       ], { icon: Settings2 }),

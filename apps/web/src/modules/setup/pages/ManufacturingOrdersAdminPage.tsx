@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Loader2, Package, FolderOpen, FileText, Clock, Cog, Wrench, Cpu,
+  Loader2, Package, FileText, Clock, Cog, Wrench, Cpu,
   ChevronDown, ChevronRight, Printer, Search, ArrowRight,
-  CheckCircle2, AlertTriangle, Calendar,
+  CheckCircle2, AlertTriangle, Calendar, Layers,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { useNav } from "../../../app/NavContext";
-import { STAGES, getStageDef, getStageInterface } from "../../nomenclature/lib/costingConstants";
+import { getStageDef, getStageInterface } from "../../nomenclature/lib/costingConstants";
+import type {
+  ManufacturingOrder,
+  OfOperation,
+  OfWorkPackage,
+} from "../../../shared/types/database";
 
 // ---------------------------------------------------------------------------
-// Types
+// Types locaux
 // ---------------------------------------------------------------------------
-
-type OFStatus = "draft" | "prepared" | "scheduled" | "in_progress" | "completed" | "cancelled" | "confirmed" | "done";
+type OFStatus =
+  | "draft" | "preparing" | "ready" | "scheduled"
+  | "in_progress" | "completed" | "cancelled";
 
 interface OfRow {
   id: string;
@@ -36,68 +42,58 @@ interface OfRow {
   piece_name: string | null;
   piece_status: string | null;
   piece_primary_op: string | null;
+  technical_drawing_url: string | null;
+  technical_drawing_path_local: string | null;
+  technical_drawing_path_network: string | null;
+  notes: string | null;
 }
 
-interface OperationRow {
-  id: string;
-  stage: string;
-  estimated_hours: number;
-  hourly_rate: number;
-  subtotal: number;
-  sequence_order: number;
-  machine_id: string | null;
-  machine_name: string | null;
-}
-
-interface DocumentRow {
-  id: string;
-  doc_type: string;
-  title: string;
-  url: string;
+interface OfDetails {
+  operations: OfOperation[];
+  work_packages: OfWorkPackage[];
 }
 
 // ---------------------------------------------------------------------------
 // Constantes d'affichage
 // ---------------------------------------------------------------------------
-
 const STATUS_META: Record<string, { labelKey: string; color: string; icon: typeof Calendar }> = {
-  draft:       { labelKey: "production.of.statusDraft",       color: "bg-slate-100 text-slate-600",   icon: Package },
-  prepared:    { labelKey: "production.of.statusPrepared",    color: "bg-blue-100 text-blue-700",     icon: CheckCircle2 },
-  scheduled:   { labelKey: "production.of.statusScheduled",   color: "bg-purple-100 text-purple-700", icon: Calendar },
-  in_progress: { labelKey: "production.of.statusInProgress",  color: "bg-amber-100 text-amber-800",   icon: Clock },
-  completed:   { labelKey: "production.of.statusCompleted",   color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
-  cancelled:   { labelKey: "production.of.statusCancelled",   color: "bg-red-100 text-red-700",       icon: AlertTriangle },
-  // legacy
-  confirmed:   { labelKey: "production.of.statusConfirmed",   color: "bg-slate-100 text-slate-500",   icon: Package },
-  done:        { labelKey: "production.of.statusCompleted",   color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
+  draft:       { labelKey: "production.of.statusDraft",     color: "bg-slate-100 text-slate-600",   icon: Package },
+  preparing:   { labelKey: "production.of.statusPreparing", color: "bg-amber-100 text-amber-700",   icon: Clock },
+  ready:       { labelKey: "production.of.statusReady",     color: "bg-blue-100 text-blue-700",     icon: CheckCircle2 },
+  scheduled:   { labelKey: "production.of.statusScheduled", color: "bg-purple-100 text-purple-700", icon: Calendar },
+  in_progress: { labelKey: "production.of.statusInProgress",color: "bg-indigo-100 text-indigo-700", icon: Clock },
+  completed:   { labelKey: "production.of.statusCompleted", color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
+  cancelled:   { labelKey: "production.of.statusCancelled", color: "bg-red-100 text-red-700",       icon: AlertTriangle },
 };
 
-const FILTER_TABS: { key: OFStatus | "all"; labelKey: string }[] = [
-  { key: "all",         labelKey: "production.of.filterAll" },
-  { key: "prepared",    labelKey: "production.of.statusPrepared" },
-  { key: "scheduled",   labelKey: "production.of.statusScheduled" },
-  { key: "in_progress", labelKey: "production.of.statusInProgress" },
-  { key: "completed",   labelKey: "production.of.statusCompleted" },
+type FilterKey = OFStatus | "all";
+
+const FILTER_TABS: { key: FilterKey; labelKey: string }[] = [
+  { key: "all",         labelKey: "production.of.tabAll" },
+  { key: "preparing",   labelKey: "production.of.tabPreparing" },
+  { key: "ready",       labelKey: "production.of.tabReady" },
+  { key: "scheduled",   labelKey: "production.of.tabScheduled" },
+  { key: "in_progress", labelKey: "production.of.tabInProgress" },
+  { key: "completed",   labelKey: "production.of.tabCompleted" },
 ];
 
 // ---------------------------------------------------------------------------
 // Composant
 // ---------------------------------------------------------------------------
-
 export function ManufacturingOrdersAdminPage() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
   const nav = useNav();
+  const companyId = staffUser?.company_id ?? null;
 
   const [orders, setOrders] = useState<OfRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState<OFStatus | "all">("all");
+  const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const [opCache, setOpCache] = useState<Record<string, OperationRow[]>>({});
-  const [docCache, setDocCache] = useState<Record<string, DocumentRow[]>>({});
+  const [detailsCache, setDetailsCache] = useState<Record<string, OfDetails>>({});
   const [loadingDetails, setLoadingDetails] = useState<string | null>(null);
   const [updatingOfId, setUpdatingOfId] = useState<string | null>(null);
 
@@ -105,13 +101,14 @@ export function ManufacturingOrdersAdminPage() {
   // Chargement liste
   // ---------------------------------------------------------------------
   const load = useCallback(async () => {
-    if (!staffUser?.company_id) return;
+    if (!companyId) return;
     setIsLoading(true);
     setError(null);
     try {
       const { data: ofData, error: ofErr } = await supabase
         .from("manufacturing_orders")
         .select("*, projects(name, code, clients(name))")
+        .eq("company_id", companyId)
         .order("created_at", { ascending: false });
 
       if (ofErr) throw ofErr;
@@ -134,6 +131,7 @@ export function ManufacturingOrdersAdminPage() {
         const { data: piecesData } = await supabase
           .from("pieces_tasks")
           .select("id, code, name, production_status, primary_operation_type")
+          .eq("company_id", companyId)
           .in("id", pieceIds);
 
         for (const p of (piecesData ?? []) as {
@@ -181,6 +179,10 @@ export function ManufacturingOrdersAdminPage() {
           piece_name: piece?.name ?? null,
           piece_status: piece?.production_status ?? null,
           piece_primary_op: piece?.primary_operation_type ?? null,
+          technical_drawing_url: row.technical_drawing_url as string | null,
+          technical_drawing_path_local: row.technical_drawing_path_local as string | null,
+          technical_drawing_path_network: row.technical_drawing_path_network as string | null,
+          notes: row.notes as string | null,
         };
       });
 
@@ -190,56 +192,40 @@ export function ManufacturingOrdersAdminPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [staffUser?.company_id]);
+  }, [companyId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   // ---------------------------------------------------------------------
-  // Chargement détails d'un OF
+  // Chargement détails d'un OF (depuis of_operations + of_work_packages)
   // ---------------------------------------------------------------------
   async function loadOfDetails(of: OfRow) {
-    if (!of.piece_task_id) return;
+    if (!companyId) return;
     setLoadingDetails(of.id);
     try {
-      const [{ data: ops }, { data: docs }] = await Promise.all([
+      const [{ data: ops }, { data: wps }] = await Promise.all([
         supabase
-          .from("piece_costing_operations")
-          .select("id, stage, estimated_hours, hourly_rate, subtotal, sequence_order, machine_id")
-          .eq("piece_task_id", of.piece_task_id)
+          .from("of_operations")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("manufacturing_order_id", of.id)
           .order("sequence_order"),
         supabase
-          .from("piece_documents")
-          .select("id, doc_type, title, url")
-          .eq("piece_task_id", of.piece_task_id)
-          .order("created_at", { ascending: false }),
+          .from("of_work_packages")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("manufacturing_order_id", of.id),
       ]);
 
-      const opsList = (ops ?? []) as OperationRow[];
-
-      const machineIds = Array.from(
-        new Set(opsList.map((o) => o.machine_id).filter((id): id is string => !!id)),
-      );
-      const machineNames = new Map<string, string>();
-      if (machineIds.length > 0) {
-        const { data: machinesData } = await supabase
-          .from("machines")
-          .select("id, name, code")
-          .in("id", machineIds);
-        for (const m of (machinesData ?? []) as { id: string; name: string; code: string | null }[]) {
-          machineNames.set(m.id, m.code ? `${m.code} — ${m.name}` : m.name);
-        }
-      }
-
-      setOpCache((prev) => ({
+      setDetailsCache((prev) => ({
         ...prev,
-        [of.id]: opsList.map((o) => ({
-          ...o,
-          machine_name: o.machine_id ? machineNames.get(o.machine_id) ?? null : null,
-        })),
+        [of.id]: {
+          operations: (ops as OfOperation[]) ?? [],
+          work_packages: (wps as OfWorkPackage[]) ?? [],
+        },
       }));
-      setDocCache((prev) => ({ ...prev, [of.id]: (docs ?? []) as DocumentRow[] }));
     } finally {
       setLoadingDetails(null);
     }
@@ -251,37 +237,54 @@ export function ManufacturingOrdersAdminPage() {
       return;
     }
     setExpandedId(of.id);
-    if (!opCache[of.id] || !docCache[of.id]) {
-      void loadOfDetails(of);
-    }
+    if (!detailsCache[of.id]) void loadOfDetails(of);
   }
 
   // ---------------------------------------------------------------------
-  // Actions autorisées
+  // Actions
   // ---------------------------------------------------------------------
-
-  /** Planifier : transition prepared → scheduled + redirection vers Planification.
-   * ⚠️ Ne change PAS le statut manuellement — c'est PlanningAdminPage qui le fait
-   * via son insert de planning (handleSave). Ce bouton navigue seulement. */
-  function handleGoToPlanning(of: OfRow) {
-    if (!of.piece_task_id) return;
-    nav.goToSection("production_planification");
-  }
-
-  /** Annuler : disponible pour tout OF non terminé. */
   async function handleCancel(of: OfRow) {
+    if (!companyId) return;
     if (!window.confirm(t("production.of.confirmCancel"))) return;
     setUpdatingOfId(of.id);
     try {
       await supabase
         .from("manufacturing_orders")
         .update({ status: "cancelled" } as never)
-        .eq("id", of.id);
+        .eq("id", of.id)
+        .eq("company_id", companyId);
       await load();
     } finally {
       setUpdatingOfId(null);
     }
   }
+
+  function handleOpenInPreparation(of: OfRow) {
+    if (!of.piece_task_id) return;
+    nav.goToSection("production_preparation");
+  }
+
+  function handleGoToPlanning() {
+    nav.goToSection("production_planification");
+  }
+
+  /** Ouvre le dessin technique : essaie local → réseau → url */
+  function openDrawing(of: OfRow) {
+    if (of.technical_drawing_path_local) {
+      window.open(`file:///${of.technical_drawing_path_local.replace(/\\/g, "/")}`, "_blank");
+      return;
+    }
+    if (of.technical_drawing_path_network) {
+      window.open(`file://${of.technical_drawing_path_network}`, "_blank");
+      return;
+    }
+    if (of.technical_drawing_url) {
+      window.open(of.technical_drawing_url, "_blank");
+    }
+  }
+
+  const hasDrawing = (of: OfRow) =>
+    !!(of.technical_drawing_url || of.technical_drawing_path_local || of.technical_drawing_path_network);
 
   // ---------------------------------------------------------------------
   // Filtrage
@@ -304,7 +307,8 @@ export function ManufacturingOrdersAdminPage() {
 
   const kpis = useMemo(
     () => ({
-      prepared: orders.filter((o) => o.status === "prepared").length,
+      preparing: orders.filter((o) => o.status === "preparing").length,
+      ready: orders.filter((o) => o.status === "ready").length,
       scheduled: orders.filter((o) => o.status === "scheduled").length,
       inProgress: orders.filter((o) => o.status === "in_progress").length,
       completed: orders.filter((o) => o.status === "completed").length,
@@ -312,7 +316,7 @@ export function ManufacturingOrdersAdminPage() {
     [orders],
   );
 
-  const countByFilter = (key: OFStatus | "all") =>
+  const countByFilter = (key: FilterKey) =>
     key === "all" ? orders.length : orders.filter((o) => o.status === key).length;
 
   // ---------------------------------------------------------------------
@@ -334,11 +338,12 @@ export function ManufacturingOrdersAdminPage() {
       )}
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label={t("production.of.statusPrepared")} value={kpis.prepared} color="text-blue-600" />
-        <KpiCard label={t("production.of.statusScheduled")} value={kpis.scheduled} color="text-purple-600" />
-        <KpiCard label={t("production.of.statusInProgress")} value={kpis.inProgress} color="text-amber-600" />
-        <KpiCard label={t("production.of.statusCompleted")} value={kpis.completed} color="text-green-600" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <KpiCard label={t("production.of.tabPreparing")} value={kpis.preparing} color="text-amber-600" />
+        <KpiCard label={t("production.of.tabReady")} value={kpis.ready} color="text-blue-600" />
+        <KpiCard label={t("production.of.tabScheduled")} value={kpis.scheduled} color="text-purple-600" />
+        <KpiCard label={t("production.of.tabInProgress")} value={kpis.inProgress} color="text-indigo-600" />
+        <KpiCard label={t("production.of.tabCompleted")} value={kpis.completed} color="text-green-600" />
       </div>
 
       {/* Recherche */}
@@ -396,8 +401,9 @@ export function ManufacturingOrdersAdminPage() {
             const meta = STATUS_META[o.status] ?? STATUS_META.draft;
             const MetaIcon = meta.icon;
             const isOpen = expandedId === o.id;
-            const ops = opCache[o.id] ?? [];
-            const docs = docCache[o.id] ?? [];
+            const details = detailsCache[o.id];
+            const ops = details?.operations ?? [];
+            const wps = details?.work_packages ?? [];
             const isDetailLoading = loadingDetails === o.id;
             const isUpdating = updatingOfId === o.id;
 
@@ -416,7 +422,7 @@ export function ManufacturingOrdersAdminPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs font-bold text-slate-500" dir="ltr">
-                        OF-{o.order_number}
+                        {o.order_number}
                       </span>
                       <span className="truncate text-sm font-bold text-slate-800">
                         {o.product_name || o.piece_name || "—"}
@@ -457,6 +463,43 @@ export function ManufacturingOrdersAdminPage() {
                           <Meta label={t("production.of.completedAt")} value={o.completed_at} />
                         </div>
 
+                        {/* Work packages */}
+                        <div>
+                          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            <Layers size={12} />
+                            {t("production.of.workPackages")} ({wps.length})
+                          </div>
+                          {wps.length === 0 ? (
+                            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                              {t("production.of.noWorkPackages")}
+                            </p>
+                          ) : (
+                            <ul className="flex flex-wrap gap-1.5">
+                              {wps.map((wp) => (
+                                <li
+                                  key={wp.id}
+                                  className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold"
+                                >
+                                  <span
+                                    className={`rounded-full px-1.5 py-0.5 font-bold ${
+                                      wp.interface_type === "cnc"
+                                        ? "bg-amber-200 text-amber-800"
+                                        : "bg-blue-200 text-blue-800"
+                                    }`}
+                                  >
+                                    {String(wp.interface_type).toUpperCase()}
+                                  </span>
+                                  <span className="text-slate-600">
+                                    {wp.status === "pending" && "En attente"}
+                                    {wp.status === "in_progress" && "En cours"}
+                                    {wp.status === "completed" && "Terminé"}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
                         {/* Opérations */}
                         <div>
                           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
@@ -471,7 +514,7 @@ export function ManufacturingOrdersAdminPage() {
                             <ul className="space-y-1">
                               {ops.map((op, idx) => {
                                 const def = getStageDef(op.stage as never);
-                                const iface = getStageInterface(op.stage);
+                                const iface = op.interface_type as "cnc" | "classique";
                                 return (
                                   <li
                                     key={op.id}
@@ -494,18 +537,8 @@ export function ManufacturingOrdersAdminPage() {
                                     <span className="shrink-0 font-mono text-[10px] text-slate-500" dir="ltr">
                                       {op.estimated_hours}h × {op.hourly_rate}
                                     </span>
-                                    {op.machine_name ? (
-                                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                                        {iface === "cnc" ? <Cpu size={9} /> : <Wrench size={9} />}
-                                        {op.machine_name}
-                                      </span>
-                                    ) : (
-                                      <span className="shrink-0 text-[10px] text-slate-400">
-                                        {t("production.of.noMachine")}
-                                      </span>
-                                    )}
                                     <span className="shrink-0 font-bold text-slate-700" dir="ltr">
-                                      {op.subtotal.toFixed(2)}
+                                      {Number(op.subtotal).toFixed(2)}
                                     </span>
                                   </li>
                                 );
@@ -514,39 +547,35 @@ export function ManufacturingOrdersAdminPage() {
                           )}
                         </div>
 
-                        {/* Documents */}
-                        <div>
-                          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                            <FileText size={12} />
-                            {t("production.of.documents")} ({docs.length})
+                        {/* Dessin technique */}
+                        {hasDrawing(o) && (
+                          <div>
+                            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                              <FileText size={12} />
+                              {t("production.of.documents")}
+                            </div>
+                            <button
+                              onClick={() => openDrawing(o)}
+                              className="flex w-full items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                            >
+                              <FileText size={12} />
+                              <span className="truncate">
+                                {o.technical_drawing_path_local ||
+                                 o.technical_drawing_path_network ||
+                                 o.technical_drawing_url}
+                              </span>
+                              <ArrowRight size={12} className="ms-auto shrink-0" />
+                            </button>
                           </div>
-                          {docs.length === 0 ? (
-                            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
-                              {t("production.preparation.noDocuments")}
-                            </p>
-                          ) : (
-                            <ul className="space-y-1">
-                              {docs.map((d) => (
-                                <li key={d.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs">
-                                  <FileText size={11} className="shrink-0 text-slate-400" />
-                                  <span className="min-w-0 flex-1 truncate text-slate-700">
-                                    {d.title}
-                                  </span>
-                                  <a
-                                    href={d.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="shrink-0 font-semibold text-indigo-600 hover:text-indigo-700"
-                                  >
-                                    {t("production.preparation.openDoc")} ↗
-                                  </a>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
+                        )}
 
-                        {/* Actions — SEULEMENT : Print + Planifier + Annuler */}
+                        {o.notes && (
+                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                            <span className="font-bold text-slate-500">Notes :</span> {o.notes}
+                          </div>
+                        )}
+
+                        {/* Actions */}
                         <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 print:hidden">
                           <button
                             onClick={() => window.print()}
@@ -556,12 +585,21 @@ export function ManufacturingOrdersAdminPage() {
                             {t("common.print")}
                           </button>
 
-                          {o.status === "prepared" && (
+                          {o.status === "preparing" && (
                             <button
-                              onClick={() => handleGoToPlanning(o)}
-                              disabled={ops.length === 0}
-                              title={ops.length === 0 ? t("production.planning.noOperationsBlocked") : undefined}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => handleOpenInPreparation(o)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-600"
+                            >
+                              <Clock size={12} />
+                              {t("production.of.actionContinuePreparation")}
+                              <ArrowRight size={11} />
+                            </button>
+                          )}
+
+                          {o.status === "ready" && (
+                            <button
+                              onClick={handleGoToPlanning}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700"
                             >
                               <Calendar size={12} />
                               {t("production.of.actionSchedule")}
@@ -575,13 +613,16 @@ export function ManufacturingOrdersAdminPage() {
                               disabled={isUpdating}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                             >
-                              {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
+                              {isUpdating ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <AlertTriangle size={12} />
+                              )}
                               {t("production.of.actionCancel")}
                             </button>
                           )}
                         </div>
 
-                        {/* Bandeau informatif pour OF completed */}
                         {o.status === "completed" && (
                           <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
                             <CheckCircle2 size={12} className="inline me-1.5" />
@@ -599,12 +640,12 @@ export function ManufacturingOrdersAdminPage() {
       )}
 
       {/* Lien vers Planification si OFs prêts */}
-      {kpis.scheduled > 0 && (
+      {kpis.ready > 0 && (
         <button
-          onClick={() => nav.goToSection("production_planification")}
+          onClick={handleGoToPlanning}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 py-3 text-sm font-bold text-indigo-700 hover:bg-indigo-100"
         >
-          {t("production.of.gotoPlanning", { count: kpis.scheduled })}
+          {t("production.of.gotoPlanning", { count: kpis.ready })}
           <ArrowRight size={14} />
         </button>
       )}
@@ -615,12 +656,11 @@ export function ManufacturingOrdersAdminPage() {
 // ---------------------------------------------------------------------------
 // Sous-composants
 // ---------------------------------------------------------------------------
-
 function KpiCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-xs font-semibold uppercase text-slate-400">{label}</div>
-      <div className={`mt-2 text-2xl font-extrabold ${color}`}>{value}</div>
+      <div className="text-[11px] font-semibold uppercase text-slate-400">{label}</div>
+      <div className={`mt-1.5 text-2xl font-extrabold ${color}`}>{value}</div>
     </div>
   );
 }

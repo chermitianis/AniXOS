@@ -11,6 +11,8 @@ type EtudeTab = "en_cours" | "historiques";
 export interface EditorTarget {
   nomenclature: Nomenclature;
   pieceTaskId: string;
+  /** "study" (première étude) ou "resume" (reprendre un brouillon). */
+  mode: "study" | "resume";
 }
 
 export function NomenclaturePage() {
@@ -19,6 +21,7 @@ export function NomenclaturePage() {
   const [activeTab, setActiveTab] = useState<EtudeTab>("en_cours");
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const params = nav.consumeParams();
@@ -34,12 +37,17 @@ export function NomenclaturePage() {
       <CostingEditorPage
         nomenclature={editorTarget.nomenclature}
         initialPieceTaskId={editorTarget.pieceTaskId}
-        onBack={() => setEditorTarget(null)}
+        mode={editorTarget.mode}
+        onBack={() => {
+          setEditorTarget(null);
+          // Force le rechargement des listes pour refléter les changements
+          setReloadKey((k) => k + 1);
+        }}
       />
     );
   }
 
-  const tabs: { key: EtudeTab; label: string; count?: number }[] = [
+  const tabs: { key: EtudeTab; label: string }[] = [
     { key: "en_cours", label: t("etude.tabs.nomenclature") },
     { key: "historiques", label: t("etude.tabs.archive") },
   ];
@@ -64,8 +72,9 @@ export function NomenclaturePage() {
 
       {activeTab === "en_cours" && (
         <NomenclatureListPage
+          key={`nomenclature-${reloadKey}`}
           onOpenPiece={(nomenclature, pieceTaskId) =>
-            setEditorTarget({ nomenclature, pieceTaskId })
+            setEditorTarget({ nomenclature, pieceTaskId, mode: "study" })
           }
           pendingProjectId={pendingProjectId}
           onPendingProjectHandled={() => setPendingProjectId(null)}
@@ -73,8 +82,9 @@ export function NomenclaturePage() {
       )}
       {activeTab === "historiques" && (
         <CostingArchivePage
-          onOpenPiece={(nomenclature, pieceTaskId) =>
-            setEditorTarget({ nomenclature, pieceTaskId })
+          key={`archive-${reloadKey}`}
+          onOpenPiece={(nomenclature, pieceTaskId, mode = "resume") =>
+            setEditorTarget({ nomenclature, pieceTaskId, mode })
           }
         />
       )}

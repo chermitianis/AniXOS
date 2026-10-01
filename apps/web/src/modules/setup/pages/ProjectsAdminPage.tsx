@@ -1,22 +1,28 @@
-import { useEffect, useRef, useState, useMemo, type FormEvent, type ChangeEvent } from "react";
+import { useEffect, useState, useMemo, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  FolderOpen, Loader2, X, Plus, ClipboardCheck, CheckCircle2,
-  AlertTriangle, Send, Search, Package,
+  Loader2, X, Plus, ClipboardCheck, CheckCircle2,
+  AlertTriangle, Send, Search, Package, Tag, RotateCcw,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { useNav } from "../../../app/NavContext";
 import { AdminField, adminInputClass } from "../components/AdminField";
 import { ProjectReportModal } from "../components/ProjectReportModal";
-import { COMMON_MATERIALS } from "../../../shared/constants/materials";
+import { PiecesInput, type PieceDraft } from "../../../shared/components/PiecesInput";
+import { generateProjectCode, generatePieceCode } from "../../../shared/utils/codes";
+import { deriveProjectStatus } from "../../production/api/projectsStatusApi";
 import type { Project, PieceTask, Client } from "../../../shared/types/database";
 
 type ClientWithCode = Client & { code: string | null };
 type StatusTab = "all" | "draft" | "studying" | "approved" | "in_production" | "completed";
+type CostingStatus = "non_etudie" | "brouillon" | "en_attente" | "valide";
+type ProductionStatus =
+  | "not_sent" | "sent" | "in_preparation" | "ready_to_start"
+  | "scheduled" | "in_progress" | "partially_done" | "completed" | "on_hold";
 
-type PieceWithProduction = PieceTask & {
-  production_status?: "not_sent" | "sent";
+type PieceWithStatus = PieceTask & {
+  costing_status: CostingStatus;
+  production_status: ProductionStatus;
 };
 
 const STATUS_TABS: { key: StatusTab; labelKey: string }[] = [
@@ -29,33 +35,46 @@ const STATUS_TABS: { key: StatusTab; labelKey: string }[] = [
 ];
 
 const STATUS_STYLES: Record<string, string> = {
-  draft:                  "bg-slate-100 text-slate-600",
-  studying:               "bg-amber-100 text-amber-700",
-  studied:                "bg-amber-100 text-amber-700",
-  approved:               "bg-blue-100 text-blue-700",
-  ready_for_production:   "bg-indigo-100 text-indigo-700",
-  in_production:          "bg-indigo-100 text-indigo-700",
-  on_hold:                "bg-orange-100 text-orange-700",
-  completed:              "bg-green-100 text-green-700",
-  cancelled:              "bg-red-100 text-red-600",
+  draft: "bg-slate-100 text-slate-600",
+  studying: "bg-amber-100 text-amber-700",
+  approved: "bg-blue-100 text-blue-700",
+  ready_for_production: "bg-indigo-100 text-indigo-700",
+  in_production: "bg-indigo-100 text-indigo-700",
+  completed: "bg-green-100 text-green-700",
+  cancelled: "bg-red-100 text-red-600",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
-  draft:                  "setup.statusDraft",
-  studying:               "setup.statusStudying",
-  studied:                "setup.statusStudied",
-  approved:               "setup.statusApproved",
-  ready_for_production:   "setup.statusReadyForProduction",
-  in_production:          "setup.statusInProduction",
-  on_hold:                "setup.statusOnHold",
-  completed:              "setup.statusCompleted",
-  cancelled:              "setup.statusCancelled",
+  draft: "setup.statusDraft",
+  studying: "setup.statusStudying",
+  approved: "setup.statusApproved",
+  ready_for_production: "setup.statusReadyForProduction",
+  completed: "setup.statusCompleted",
+};
+
+const COSTING_BADGE: Record<CostingStatus, { labelKey: string; cls: string }> = {
+  non_etudie: { labelKey: "setup.costingNotStudied", cls: "bg-slate-100 text-slate-600" },
+  brouillon:  { labelKey: "setup.costingDraft",      cls: "bg-amber-100 text-amber-700" },
+  en_attente: { labelKey: "setup.costingPending",    cls: "bg-blue-100 text-blue-700" },
+  valide:     { labelKey: "setup.costingValidated",  cls: "bg-green-100 text-green-700" },
+};
+
+const PROD_BADGE: Record<string, { labelKey: string; cls: string }> = {
+  not_sent:        { labelKey: "setup.prodNotSent",        cls: "bg-slate-100 text-slate-600" },
+  sent:            { labelKey: "setup.prodSent",           cls: "bg-indigo-100 text-indigo-700" },
+  in_preparation:  { labelKey: "setup.prodInPreparation",  cls: "bg-amber-100 text-amber-700" },
+  ready_to_start:  { labelKey: "setup.prodReadyToStart",   cls: "bg-blue-100 text-blue-700" },
+  scheduled:       { labelKey: "setup.prodScheduled",      cls: "bg-purple-100 text-purple-700" },
+  in_progress:     { labelKey: "setup.prodInProgress",     cls: "bg-indigo-100 text-indigo-700" },
+  partially_done:  { labelKey: "setup.prodPartiallyDone",  cls: "bg-amber-100 text-amber-700" },
+  completed:       { labelKey: "setup.prodCompleted",      cls: "bg-green-100 text-green-700" },
+  on_hold:         { labelKey: "setup.prodOnHold",         cls: "bg-orange-100 text-orange-700" },
 };
 
 function matchesTab(status: string, tab: StatusTab): boolean {
   if (tab === "all") return true;
   if (tab === "in_production")
-    return status === "in_production" || status === "ready_for_production";
+    return status === "ready_for_production" || status === "in_production";
   return status === tab;
 }
 
@@ -70,69 +89,110 @@ function formatMinutesAsHM(minutes: number): string {
 export function ProjectsAdminPage() {
   const { staffUser } = useStaffAuth();
   const { t } = useTranslation();
-  const nav = useNav();
+  const companyId = staffUser?.company_id ?? null;
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<ClientWithCode[]>([]);
-  const [piecesByProject, setPiecesByProject] = useState<Record<string, PieceWithProduction[]>>({});
+  const [piecesByProject, setPiecesByProject] = useState<Record<string, PieceWithStatus[]>>({});
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [reportProjectId, setReportProjectId] = useState<string | null>(null);
 
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [search, setSearch] = useState("");
+
+  // Modal création
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-
-  const [name, setName] = useState("");
-  const [clientId, setClientId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newClientId, setNewClientId] = useState("");
+  const [newDueDate, setNewDueDate] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+  const [newPieces, setNewPieces] = useState<PieceDraft[]>([]);
+  const [codePreview, setCodePreview] = useState<string | null>(null);
+  const [isCodeLoading, setIsCodeLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [createError, setCreateError] = useState<string | null>(null);
   const [duplicateMatches, setDuplicateMatches] = useState<Project[] | null>(null);
-  const [sendingPieceId, setSendingPieceId] = useState<string | null>(null);
 
-  const [pieceName, setPieceName] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingImportNames, setPendingImportNames] = useState<string[]>([]);
-  const [isImportingPieces, setIsImportingPieces] = useState(false);
-  const [pieceProjectId, setPieceProjectId] = useState("");
-  const [piecePhase, setPiecePhase] = useState("");
-  const [pieceEstimateHours, setPieceEstimateHours] = useState("");
-  const [pieceEstimateMinutesPart, setPieceEstimateMinutesPart] = useState("");
-  const [pieceMaterial, setPieceMaterial] = useState("");
-  const [pieceQuantity, setPieceQuantity] = useState("1");
+  // Modal ajout pièces
   const [showPieceForm, setShowPieceForm] = useState(false);
+  const [pieceProjectId, setPieceProjectId] = useState("");
+  const [pieceDrafts, setPieceDrafts] = useState<PieceDraft[]>([]);
+  const [isImportingPieces, setIsImportingPieces] = useState(false);
 
+  const [busyPieceId, setBusyPieceId] = useState<string | null>(null);
+
+  // -----------------------------------------------------------------------
+  // Chargements
+  // -----------------------------------------------------------------------
   async function loadProjects() {
+    if (!companyId) return;
     const { data } = await supabase
       .from("projects")
       .select("*")
+      .eq("company_id", companyId)
       .eq("is_archived", false)
       .order("created_at", { ascending: false });
     setProjects((data as Project[]) ?? []);
   }
 
   async function loadClients() {
-    const { data } = await supabase.from("clients").select("*").order("name");
+    if (!companyId) return;
+    const { data } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name");
     setClients((data as ClientWithCode[]) ?? []);
   }
 
   async function loadPieces(projectId: string) {
+    if (!companyId) return;
     const { data } = await supabase
       .from("pieces_tasks")
       .select("*")
+      .eq("company_id", companyId)
       .eq("project_id", projectId)
       .order("sequence_order");
     setPiecesByProject((prev) => ({
       ...prev,
-      [projectId]: (data as PieceWithProduction[]) ?? [],
+      [projectId]: (data as PieceWithStatus[]) ?? [],
     }));
   }
 
   useEffect(() => {
     void loadProjects();
     void loadClients();
-  }, []);
+  }, [companyId]);
 
+  useEffect(() => {
+    if (!companyId || !newClientId) {
+      setCodePreview(null);
+      return;
+    }
+    let mounted = true;
+    setIsCodeLoading(true);
+    void generateProjectCode(companyId, newClientId).then((code) => {
+      if (mounted) {
+        setCodePreview(code);
+        setIsCodeLoading(false);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [companyId, newClientId]);
+
+  // Auto-expand : pour chaque projet visible, charger ses pièces
+  useEffect(() => {
+    for (const p of projects) {
+      if (!piecesByProject[p.id]) void loadPieces(p.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects]);
+
+  // -----------------------------------------------------------------------
+  // Création projet
+  // -----------------------------------------------------------------------
   function detectDuplicates(nameToCheck: string): Project[] {
     const normalized = nameToCheck.trim().toLowerCase();
     if (!normalized) return [];
@@ -141,62 +201,150 @@ export function ProjectsAdminPage() {
 
   function handleCreateAttempt(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    const matches = detectDuplicates(name);
-    if (matches.length > 0) {
-      setDuplicateMatches(matches);
-      return;
-    }
+    setCreateError(null);
+    if (!newName.trim()) { setCreateError("Le nom du projet est obligatoire."); return; }
+    if (!newClientId) { setCreateError("Le client est obligatoire."); return; }
+    if (newPieces.length === 0) { setCreateError("Le projet doit contenir au moins une pièce."); return; }
+    const matches = detectDuplicates(newName);
+    if (matches.length > 0) { setDuplicateMatches(matches); return; }
     void performCreate();
   }
 
   async function performCreate() {
-    if (!staffUser) return;
+    if (!staffUser || !companyId) return;
     setIsSaving(true);
-    setError(null);
+    setCreateError(null);
     try {
-      const { error: insertError } = await supabase.from("projects").insert({
-        company_id: staffUser.company_id,
-        client_id: clientId || null,
-        name: name.trim(),
-        code: null,
-        status: "draft",
-      });
-      if (insertError) {
-        setError(insertError.message);
+      let inserted: { id: string; code: string | null } | null = null;
+      let lastError: { message?: string; code?: string } | null = null;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const finalCode = await generateProjectCode(companyId, newClientId);
+        const { data, error } = await supabase
+          .from("projects")
+          .insert({
+            company_id: companyId,
+            client_id: newClientId,
+            name: newName.trim(),
+            code: finalCode,
+            description: newNotes.trim() || null,
+            due_date: newDueDate || null,
+            status: "draft",
+          } as never)
+          .select("id, code")
+          .single();
+
+        if (!error && data) {
+          inserted = data as { id: string; code: string | null };
+          break;
+        }
+        lastError = error as { message?: string; code?: string } | null;
+        if (lastError?.code !== "23505") break;
+      }
+
+      if (!inserted) {
+        setCreateError(lastError?.message ?? "Erreur lors de la création.");
         return;
       }
-      setName("");
-      setClientId("");
-      setDuplicateMatches(null);
-      setIsCreateOpen(false);
+      const projectRow = inserted;
+      const projectCode = projectRow.code ?? "—";
+
+      const pieceRows = newPieces.map((p, i) => ({
+        company_id: companyId,
+        project_id: projectRow.id,
+        name: p.name.trim(),
+        code: generatePieceCode(projectCode, i),
+        sequence_order: i,
+        costing_status: "non_etudie",
+        production_status: "not_sent",
+      }));
+
+      const { error: piecesError } = await supabase
+        .from("pieces_tasks")
+        .insert(pieceRows);
+
+      if (piecesError) {
+        await supabase
+          .from("projects")
+          .delete()
+          .eq("id", projectRow.id)
+          .eq("company_id", companyId);
+        setCreateError(piecesError.message);
+        return;
+      }
+
+      setNewName(""); setNewClientId(""); setNewDueDate("");
+      setNewNotes(""); setNewPieces([]); setCodePreview(null);
+      setDuplicateMatches(null); setIsCreateOpen(false);
       await loadProjects();
+      await loadPieces(projectRow.id);
     } finally {
       setIsSaving(false);
     }
   }
 
-  function goToStudy(projectId: string) {
-    nav.goToSection("ingenierie_nomenclature", { projectId });
+  // -----------------------------------------------------------------------
+  // Actions PIÈCE (pas projet)
+  // -----------------------------------------------------------------------
+
+  /** Étudier : piece.non_etudie → piece.en_attente (déclenche l'entrée en étude) */
+  async function handleStudyPiece(piece: PieceWithStatus) {
+    if (!companyId) return;
+    setBusyPieceId(piece.id);
+    try {
+      // Passer la pièce en 'en_attente' (état "en étude" pour le chiffrage)
+      await supabase
+        .from("pieces_tasks")
+        .update({ costing_status: "en_attente" } as never)
+        .eq("id", piece.id)
+        .eq("company_id", companyId);
+
+      // Créer une nomenclature si elle n'existe pas encore
+      const { data: existingNom } = await supabase
+        .from("nomenclatures")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("project_id", piece.project_id)
+        .maybeSingle();
+      if (!existingNom) {
+        await supabase.from("nomenclatures").insert({
+          company_id: companyId,
+          project_id: piece.project_id,
+          name: "",
+          created_by: staffUser?.id,
+        } as never);
+      }
+
+      await loadPieces(piece.project_id);
+      await deriveProjectStatus(piece.project_id, companyId);
+      await loadProjects();
+    } finally {
+      setBusyPieceId(null);
+    }
   }
 
-  async function handleApproveStudy(projectId: string) {
-    await supabase
-      .from("projects")
-      .update({
-        status: "approved",
-        study_completed_at: new Date().toISOString(),
-      })
-      .eq("id", projectId);
-    await loadProjects();
+  /** Reprendre l'étude : piece.brouillon → piece.en_attente */
+  async function handleResumeStudy(piece: PieceWithStatus) {
+    if (!companyId) return;
+    setBusyPieceId(piece.id);
+    try {
+      await supabase
+        .from("pieces_tasks")
+        .update({ costing_status: "en_attente" } as never)
+        .eq("id", piece.id)
+        .eq("company_id", companyId);
+      await loadPieces(piece.project_id);
+      await deriveProjectStatus(piece.project_id, companyId);
+      await loadProjects();
+    } finally {
+      setBusyPieceId(null);
+    }
   }
 
-  /**
-   * Envoie UNE SEULE pièce en production.
-   * Si toutes les pièces du projet sont envoyées → projet = ready_for_production.
-   */
-  async function handleSendPieceToProduction(projectId: string, pieceId: string) {
-    setSendingPieceId(pieceId);
+  /** Envoyer la pièce seule en production */
+  async function handleSendPieceToProduction(piece: PieceWithStatus) {
+    if (!companyId) return;
+    setBusyPieceId(piece.id);
     try {
       await supabase
         .from("pieces_tasks")
@@ -204,88 +352,53 @@ export function ProjectsAdminPage() {
           production_status: "sent",
           sent_to_production_at: new Date().toISOString(),
         } as never)
-        .eq("id", pieceId);
-
-      // Rafraîchir la liste des pièces de ce projet
-      await loadPieces(projectId);
-
-      // Vérifier si toutes les pièces du projet sont envoyées
-      const { data: siblings } = await supabase
-        .from("pieces_tasks")
-        .select("production_status")
-        .eq("project_id", projectId);
-
-      const all = (siblings ?? []) as { production_status: string }[];
-      if (all.length > 0 && all.every((p) => p.production_status === "sent")) {
-        await supabase
-          .from("projects")
-          .update({
-            status: "ready_for_production",
-            sent_to_production_at: new Date().toISOString(),
-          } as never)
-          .eq("id", projectId);
-        await loadProjects();
-      }
+        .eq("id", piece.id)
+        .eq("company_id", companyId);
+      await loadPieces(piece.project_id);
+      await deriveProjectStatus(piece.project_id, companyId);
+      await loadProjects();
     } finally {
-      setSendingPieceId(null);
+      setBusyPieceId(null);
     }
   }
 
-  async function handleAddPiece(e: FormEvent) {
+  // -----------------------------------------------------------------------
+  // Modal ajouter pièces
+  // -----------------------------------------------------------------------
+  function openPieceForm() {
+    setPieceProjectId("");
+    setPieceDrafts([]);
+    setShowPieceForm(true);
+  }
+
+  async function handleAddPiecesToExisting(e: FormEvent) {
     e.preventDefault();
-    if (!staffUser || !pieceProjectId) return;
-    const currentPieces = piecesByProject[pieceProjectId] ?? [];
-    const totalMinutes =
-      Number(pieceEstimateHours || 0) * 60 + Number(pieceEstimateMinutesPart || 0);
-    await supabase.from("pieces_tasks").insert({
-      company_id: staffUser.company_id,
-      project_id: pieceProjectId,
-      name: pieceName.trim(),
-      phase: piecePhase || null,
-      estimated_time_minutes: totalMinutes > 0 ? totalMinutes : null,
-      material: pieceMaterial || null,
-      quantity: Number(pieceQuantity) || 1,
-      sequence_order: currentPieces.length,
-    });
-    setPieceName("");
-    setPiecePhase("");
-    setPieceEstimateHours("");
-    setPieceEstimateMinutesPart("");
-    setPieceMaterial("");
-    setPieceQuantity("1");
-    await loadPieces(pieceProjectId);
-  }
-
-  function handleFilesSelected(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    const names = files.map((f) => f.name.replace(/\.[^./\\]+$/, "").trim()).filter(Boolean);
-    setPendingImportNames((prev) => [...prev, ...names]);
-    e.target.value = "";
-  }
-
-  function removePendingImportName(index: number) {
-    setPendingImportNames((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  async function handleImportPendingPieces() {
-    if (!staffUser || !pieceProjectId || pendingImportNames.length === 0) return;
+    if (!companyId || !pieceProjectId || pieceDrafts.length === 0) return;
     setIsImportingPieces(true);
     try {
+      const { data: proj } = await supabase
+        .from("projects")
+        .select("code")
+        .eq("id", pieceProjectId)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      const projectCode = (proj as { code: string | null } | null)?.code ?? "PRJ";
       const currentPieces = piecesByProject[pieceProjectId] ?? [];
-      const totalMinutes =
-        Number(pieceEstimateHours || 0) * 60 + Number(pieceEstimateMinutesPart || 0);
-      const rows = pendingImportNames.map((n, i) => ({
-        company_id: staffUser.company_id,
+      const offset = currentPieces.length;
+
+      const rows = pieceDrafts.map((p, i) => ({
+        company_id: companyId,
         project_id: pieceProjectId,
-        name: n,
-        phase: piecePhase || null,
-        estimated_time_minutes: totalMinutes > 0 ? totalMinutes : null,
-        material: pieceMaterial || null,
-        quantity: Number(pieceQuantity) || 1,
-        sequence_order: currentPieces.length + i,
+        name: p.name.trim(),
+        code: generatePieceCode(projectCode, offset + i),
+        sequence_order: offset + i,
+        costing_status: "non_etudie",
+        production_status: "not_sent",
       }));
+
       await supabase.from("pieces_tasks").insert(rows);
-      setPendingImportNames([]);
+      setShowPieceForm(false);
+      setPieceDrafts([]);
       await loadPieces(pieceProjectId);
     } finally {
       setIsImportingPieces(false);
@@ -302,13 +415,18 @@ export function ProjectsAdminPage() {
   }
 
   async function archiveProject(projectId: string) {
+    if (!companyId) return;
     await supabase
       .from("projects")
       .update({ is_archived: true, archived_at: new Date().toISOString() })
-      .eq("id", projectId);
+      .eq("id", projectId)
+      .eq("company_id", companyId);
     await loadProjects();
   }
 
+  // -----------------------------------------------------------------------
+  // Filtrage
+  // -----------------------------------------------------------------------
   const searchedProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return projects;
@@ -327,6 +445,14 @@ export function ProjectsAdminPage() {
       ? searchedProjects.length
       : searchedProjects.filter((p) => matchesTab(p.status, tab)).length;
 
+  const existingPieceNamesForModal = useMemo(() => {
+    if (!pieceProjectId) return [];
+    return (piecesByProject[pieceProjectId] ?? []).map((p) => p.name);
+  }, [pieceProjectId, piecesByProject]);
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -340,7 +466,7 @@ export function ProjectsAdminPage() {
         </button>
         <button
           type="button"
-          onClick={() => setShowPieceForm(true)}
+          onClick={openPieceForm}
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
         >
           <Plus size={14} />
@@ -391,8 +517,12 @@ export function ProjectsAdminPage() {
             const client = clients.find((c) => c.id === p.client_id);
             const pieces = piecesByProject[p.id] ?? [];
             const isExpanded = expandedProjectId === p.id;
-            const canSendPieces = p.status === "approved" || p.status === "ready_for_production";
-            const sentCount = pieces.filter((x) => x.production_status === "sent").length;
+            const sentCount = pieces.filter((x) =>
+              ["sent", "in_preparation", "ready_to_start", "scheduled",
+               "in_progress", "partially_done", "completed"].includes(x.production_status),
+            ).length;
+            const validatedCount = pieces.filter((x) => x.costing_status === "valide").length;
+
             return (
               <li key={p.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
                 <button
@@ -407,9 +537,9 @@ export function ProjectsAdminPage() {
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[p.status] ?? "bg-slate-100 text-slate-500"}`}>
                         {t(STATUS_LABEL_KEYS[p.status] ?? p.status)}
                       </span>
-                      {canSendPieces && pieces.length > 0 && (
+                      {pieces.length > 0 && (
                         <span className="text-indigo-600">
-                          · {sentCount}/{pieces.length} envoyée(s)
+                          · {validatedCount}/{pieces.length} validée(s) · {sentCount}/{pieces.length} envoyée(s)
                         </span>
                       )}
                     </div>
@@ -417,46 +547,23 @@ export function ProjectsAdminPage() {
                   <span className="shrink-0 text-slate-400">{isExpanded ? "▲" : "▼"}</span>
                 </button>
 
-                {/* Actions au niveau projet (workflow étude) */}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(p.status === "draft" || p.status === "studying") && (
-                    <button
-                      onClick={() => goToStudy(p.id)}
-                      className="inline-flex items-center gap-1 rounded bg-amber-500 px-3 py-1 text-xs font-bold text-white hover:bg-amber-600"
-                    >
-                      <ClipboardCheck size={12} />
-                      {p.status === "draft" ? t("setup.studyProject") : t("setup.continueStudy")}
-                    </button>
-                  )}
-
-                  {p.status === "studying" && (
-                    <button
-                      onClick={() => void handleApproveStudy(p.id)}
-                      className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-xs font-bold text-white hover:bg-green-700"
-                    >
-                      <CheckCircle2 size={12} />
-                      {t("setup.approveStudy")}
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() => setReportProjectId(p.id)}
-                    className="rounded bg-slate-800 px-3 py-1 text-xs font-semibold text-white"
-                  >
-                    {t("setup.viewReport")}
-                  </button>
-
-                  {p.status === "completed" && (
+                {p.status === "completed" && (
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       onClick={() => void archiveProject(p.id)}
                       className="rounded bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
                     >
                       {t("setup.archiveAction")}
                     </button>
-                  )}
-                </div>
+                    <button
+                      onClick={() => setReportProjectId(p.id)}
+                      className="rounded bg-slate-800 px-3 py-1 text-xs font-semibold text-white"
+                    >
+                      {t("setup.viewReport")}
+                    </button>
+                  </div>
+                )}
 
-                {/* Détail : pièces du projet + envoi pièce par pièce */}
                 {isExpanded && (
                   <div className="mt-3 border-t border-slate-200 pt-3">
                     <p className="mb-2 text-xs font-semibold text-slate-500">
@@ -464,20 +571,23 @@ export function ProjectsAdminPage() {
                     </p>
                     <ul className="flex flex-col gap-1.5">
                       {pieces.map((piece) => {
-                        const isSent = piece.production_status === "sent";
-                        const isSending = sendingPieceId === piece.id;
-                        const showSendButton = canSendPieces && !isSent;
+                        const costing = COSTING_BADGE[piece.costing_status] ?? COSTING_BADGE.non_etudie;
+                        const prod = PROD_BADGE[piece.production_status] ?? PROD_BADGE.not_sent;
+                        const busy = busyPieceId === piece.id;
+                        const canStudy = piece.costing_status === "non_etudie";
+                        const canResume = piece.costing_status === "brouillon";
+                        const canSend = piece.costing_status === "valide" && piece.production_status === "not_sent";
+                        const isSent = piece.production_status !== "not_sent";
+
                         return (
                           <li
                             key={piece.id}
-                            className="flex items-center gap-2 rounded bg-white px-2.5 py-2 text-xs"
+                            className="flex flex-wrap items-center gap-2 rounded bg-white px-2.5 py-2 text-xs"
                           >
                             <Package size={13} className="shrink-0 text-slate-400" />
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="truncate font-semibold text-slate-700">
-                                  {piece.name}
-                                </span>
+                                <span className="truncate font-semibold text-slate-700">{piece.name}</span>
                                 <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">
                                   {piece.code ?? "—"}
                                 </span>
@@ -491,26 +601,49 @@ export function ProjectsAdminPage() {
                               </div>
                             </div>
 
-                            {isSent ? (
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${costing.cls}`}>
+                              {t(costing.labelKey)}
+                            </span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${prod.cls}`}>
+                              {t(prod.labelKey)}
+                            </span>
+
+                            {canStudy && (
+                              <button
+                                onClick={() => void handleStudyPiece(piece)}
+                                disabled={busy}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+                              >
+                                {busy ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />}
+                                {t("setup.studyProject")}
+                              </button>
+                            )}
+                            {canResume && (
+                              <button
+                                onClick={() => void handleResumeStudy(piece)}
+                                disabled={busy}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+                              >
+                                {busy ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                                {t("setup.continueStudy")}
+                              </button>
+                            )}
+                            {canSend && (
+                              <button
+                                onClick={() => void handleSendPieceToProduction(piece)}
+                                disabled={busy}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                              >
+                                {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+                                {t("setup.sendToProduction")}
+                              </button>
+                            )}
+                            {isSent && (
                               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
                                 <CheckCircle2 size={10} />
                                 {t("setup.pieceSentToProduction")}
                               </span>
-                            ) : showSendButton ? (
-                              <button
-                                type="button"
-                                disabled={isSending}
-                                onClick={() => void handleSendPieceToProduction(p.id, piece.id)}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                              >
-                                {isSending ? (
-                                  <Loader2 size={11} className="animate-spin" />
-                                ) : (
-                                  <Send size={11} />
-                                )}
-                                {t("setup.sendToProduction")}
-                              </button>
-                            ) : null}
+                            )}
                           </li>
                         );
                       })}
@@ -535,9 +668,9 @@ export function ProjectsAdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
           <form
             onSubmit={handleCreateAttempt}
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-xl"
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
               <h2 className="text-base font-bold text-slate-800">{t("setup.createProject")}</h2>
               <button
                 type="button"
@@ -547,52 +680,109 @@ export function ProjectsAdminPage() {
                 <X size={18} />
               </button>
             </div>
-            <AdminField label={t("setup.projectName")}>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={adminInputClass}
-                required
-                autoFocus
-              />
-            </AdminField>
-            <AdminField label={t("setup.client")}>
-              <select
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                className={adminInputClass}
-              >
-                <option value="">{t("setup.noClient")}</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code ? `${c.code} — ` : ""}
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </AdminField>
-            <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-              {t("setup.codeAutoNotice")}
-            </p>
-            {error && (
-              <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-                {error}
+
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AdminField label={`${t("setup.client")} *`}>
+                  <select
+                    value={newClientId}
+                    onChange={(e) => setNewClientId(e.target.value)}
+                    className={adminInputClass}
+                    required
+                  >
+                    <option value="">— Choisir un client —</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code ? `[${c.code}] ` : ""}
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </AdminField>
+
+                <AdminField label={t("setup.projectCode")}>
+                  <div className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 font-mono text-sm text-slate-600" dir="ltr">
+                    {isCodeLoading ? (
+                      <Loader2 size={13} className="animate-spin text-slate-400" />
+                    ) : (
+                      codePreview ?? "—"
+                    )}
+                  </div>
+                </AdminField>
               </div>
-            )}
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {isSaving ? t("setup.saving") : t("setup.createProject")}
-            </button>
+
+              <AdminField label={`${t("setup.projectName")} *`}>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className={adminInputClass}
+                  required
+                  autoFocus
+                />
+              </AdminField>
+
+              <AdminField label="Date de livraison">
+                <input
+                  type="date"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                  className={adminInputClass}
+                />
+              </AdminField>
+
+              <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <Tag size={13} className="text-slate-500" />
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Pièces du projet *
+                  </span>
+                </div>
+                <PiecesInput value={newPieces} onChange={setNewPieces} compact />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Au moins une pièce est requise pour créer le projet.
+                </p>
+              </div>
+
+              <AdminField label="Notes">
+                <textarea
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  rows={2}
+                  className={adminInputClass}
+                />
+              </AdminField>
+
+              {createError && (
+                <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                  {createError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSaving && <Loader2 size={13} className="animate-spin" />}
+                {isSaving ? t("setup.saving") : t("setup.createProject")}
+              </button>
+            </div>
           </form>
         </div>
       )}
 
       {/* Modal Doublon */}
       {duplicateMatches && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
             <div className="mb-3 flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
@@ -634,14 +824,11 @@ export function ProjectsAdminPage() {
         </div>
       )}
 
-      {/* Modal Nouvelle pièce */}
+      {/* Modal ajouter pièces à projet existant */}
       {showPieceForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
           <form
-            onSubmit={async (e) => {
-              await handleAddPiece(e);
-              setShowPieceForm(false);
-            }}
+            onSubmit={handleAddPiecesToExisting}
             className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
           >
             <div className="mb-4 flex items-center justify-between">
@@ -654,10 +841,16 @@ export function ProjectsAdminPage() {
                 <X size={18} />
               </button>
             </div>
-            <AdminField label={t("setup.projectName")}>
+
+            <AdminField label={`${t("setup.selectProject")} *`}>
               <select
                 value={pieceProjectId}
-                onChange={(e) => setPieceProjectId(e.target.value)}
+                onChange={(e) => {
+                  setPieceProjectId(e.target.value);
+                  if (e.target.value && !piecesByProject[e.target.value]) {
+                    void loadPieces(e.target.value);
+                  }
+                }}
                 className={adminInputClass}
                 required
               >
@@ -669,128 +862,22 @@ export function ProjectsAdminPage() {
                 ))}
               </select>
             </AdminField>
-            <AdminField label={t("setup.pieceName")}>
-              <div className="flex gap-2">
-                <input
-                  value={pieceName}
-                  onChange={(e) => setPieceName(e.target.value)}
-                  className={adminInputClass}
-                  required={pendingImportNames.length === 0}
-                />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={handleFilesSelected}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!pieceProjectId}
-                  title={t("setup.browseHint")}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  <FolderOpen size={14} />
-                  {t("setup.browseFiles")}
-                </button>
-              </div>
-            </AdminField>
-            {pendingImportNames.length > 0 && (
-              <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-                <p className="mb-2 text-xs font-bold text-indigo-700">
-                  {t("setup.piecesToImport", { count: pendingImportNames.length })}
-                </p>
-                <ul className="mb-2 max-h-32 space-y-1 overflow-y-auto">
-                  {pendingImportNames.map((n, i) => (
-                    <li
-                      key={`${n}-${i}`}
-                      className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1 text-xs text-slate-600"
-                    >
-                      <span className="truncate">{n}</span>
-                      <button
-                        type="button"
-                        onClick={() => removePendingImportName(i)}
-                        className="shrink-0 text-slate-400 hover:text-red-500"
-                      >
-                        <X size={12} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={() => void handleImportPendingPieces()}
-                  disabled={isImportingPieces}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {isImportingPieces && <Loader2 size={12} className="animate-spin" />}
-                  {t("setup.importPiecesButton", { count: pendingImportNames.length })}
-                </button>
-              </div>
-            )}
-            <AdminField label={t("setup.piecePhase")}>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={piecePhase}
-                onChange={(e) => setPiecePhase(e.target.value)}
-                className={adminInputClass}
-                placeholder="1"
+
+            <div className="mt-3">
+              <PiecesInput
+                value={pieceDrafts}
+                onChange={setPieceDrafts}
+                existingNames={existingPieceNamesForModal}
               />
-            </AdminField>
-            <AdminField label={t("setup.pieceCncEstimate")}>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  value={pieceEstimateHours}
-                  onChange={(e) => setPieceEstimateHours(e.target.value)}
-                  className={`${adminInputClass} text-center`}
-                  placeholder="0"
-                />
-                <span className="text-xs font-semibold text-slate-400">{t("setup.hoursShort")}</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  value={pieceEstimateMinutesPart}
-                  onChange={(e) => setPieceEstimateMinutesPart(e.target.value)}
-                  className={`${adminInputClass} text-center`}
-                  placeholder="0"
-                />
-                <span className="text-xs font-semibold text-slate-400">{t("kiosk.minutesShort")}</span>
-              </div>
-            </AdminField>
-            <AdminField label={t("setup.pieceMaterial")}>
-              <input
-                list="materials-list"
-                value={pieceMaterial}
-                onChange={(e) => setPieceMaterial(e.target.value)}
-                className={adminInputClass}
-                placeholder={t("setup.pieceMaterialPlaceholder")}
-              />
-            </AdminField>
-            <AdminField label={t("setup.pieceQuantity")}>
-              <input
-                type="number"
-                min="1"
-                value={pieceQuantity}
-                onChange={(e) => setPieceQuantity(e.target.value)}
-                className={adminInputClass}
-              />
-            </AdminField>
-            <datalist id="materials-list">
-              {COMMON_MATERIALS.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
+            </div>
+
             <button
               type="submit"
-              className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white"
+              disabled={isImportingPieces || !pieceProjectId || pieceDrafts.length === 0}
+              className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {t("common.add")}
+              {isImportingPieces && <Loader2 size={13} className="animate-spin" />}
+              {isImportingPieces ? t("setup.saving") : `Ajouter ${pieceDrafts.length} pièce(s)`}
             </button>
           </form>
         </div>

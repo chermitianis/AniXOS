@@ -1,12 +1,15 @@
 // ============================================================================
 // useActiveTask: القلب النابض لواجهة الكشك.
-// يدير: تعبئة السياق تلقائياً من المخطط عند الدخول، الاختيار اليدوي، وحتى
-// 3 أحداث نشطة بالتوازي (activeSessions) بدل جلسة واحدة فقط — نقرة أولى
-// تبدأ الحدث، نقرة ثانية على نفس البطاقة توقفه. تُستعاد الأحداث المفتوحة
-// تلقائياً بعد إعادة تحميل الصفحة أو إعادة تشغيل الجهاز (لا تُفقَد).
+// يدير: تعبئة السياق تلقائياً من المخطط، الاختيار اليدوي، وحتى 3 أحداث
+// نشطة بالتوازي.
+//
+// ⚠️ إضافة 2026-09-30 :
+//   - ofWorkPackageInterface : "cnc" | "classique" | null
+//     يُستخدم في KioskMainPage لفلترة الوقت التقديري (المطلوب: تقدير
+//     الحزمة النشطة فقط، وليس مجموع كل العمليات).
 // ============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchTodayPlanningForWorker,
   fetchPlanningById,
@@ -21,6 +24,7 @@ import {
   updatePiecePhase,
   openShiftPieceWork,
   switchShiftPiece,
+  fetchOfWorkPackageById,  // ✅ NEW
 } from "../api/kioskApi";
 import type { PlanningProjectOption } from "./useWorkerPlanning";
 import type {
@@ -33,9 +37,8 @@ import type {
 } from "../../../shared/types/database";
 
 export type ToggleResult = { ok: true } | { ok: false; reason: "max_active" };
+export type WpInterface = "cnc" | "classique";
 
-/** الحد الأقصى لرقم الـPhase: سقف عملي يمنع الأخطاء عبر الضغط المتكرر على
- * زر + (لا يوجد مسار إنتاج حقيقي يصل إلى 200 Phase على قطعة واحدة). */
 const MAX_PHASE = 200;
 
 interface ActiveTaskState {
@@ -43,7 +46,9 @@ interface ActiveTaskState {
   project: Project | null;
   pieceTask: PieceTask | null;
   planningId: string | null;
-  /** حتى 3 أحداث نشطة بالتوازي لهذا العامل — وليس حدثاً واحداً */
+  ofWorkPackageId: string | null;
+  /** ✅ NEW : interface de la WP active — pour filtrer l'estimation. */
+  ofWorkPackageInterface: WpInterface | null;
   activeSessions: WorkSession[];
   isLoadingContext: boolean;
   setMachine: (machine: Machine | null) => void;
@@ -63,11 +68,14 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
   const [project, setProject] = useState<Project | null>(null);
   const [pieceTask, setPieceTask] = useState<PieceTask | null>(null);
   const [planningId, setPlanningId] = useState<string | null>(null);
+  const [ofWorkPackageId, setOfWorkPackageId] = useState<string | null>(null);
+  const [ofWorkPackageInterface, setOfWorkPackageInterface] = useState<WpInterface | null>(null);
   const [activeSessions, setActiveSessions] = useState<WorkSession[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(true);
 
-  // تعبئة السياق تلقائياً من المخطط + استعادة أي أحداث مفتوحة سابقاً (إعادة
-  // تحميل الصفحة أو إعادة تشغيل الجهاز لا يجب أن تُفقِد الأحداث النشطة)
+  const ofWpRef = useRef<string | null>(null);
+  useEffect(() => { ofWpRef.current = ofWorkPackageId; }, [ofWorkPackageId]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -81,7 +89,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
       if (isMounted) setActiveSessions(openSessions);
 
-      // أولوية السياق: قطعة لها حدث مفتوح فعلاً أولى من أول مهمة في المخطط
       const openPieceId = openSessions.find((s) => s.piece_task_id)?.piece_task_id ?? null;
 
       if (openPieceId && isMounted) {
@@ -89,16 +96,34 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         const piece = await fetchPieceTaskById(openPieceId);
         if (isMounted && piece) {
           setPlanningId(openSession?.planning_id ?? null);
-          const planning = openSession?.planning_id ? await fetchPlanningById(openSession.planning_id) : null;
-          const machineId = openSession?.machine_id ?? planning?.machine_id ?? null;
-          const projectId = openSession?.project_id ?? planning?.project_id ?? piece.project_id;
+          const planningFromId = openSession?.planning_id ? await fetchPlanningById(openSession.planning_id) : null;
+          const machineId = openSession?.machine_id ?? planningFromId?.machine_id ?? null;
+          const projectId = openSession?.project_id ?? planningFromId?.project_id ?? piece.project_id;
           setMachine(machineId ? await fetchMachineById(machineId) : null);
           setPieceTask(piece);
           setProject(await fetchProjectById(projectId));
+
+          const wpId = openSession?.of_work_package_id ?? planningFromId?.of_work_package_id ?? null;
+          setOfWorkPackageId(wpId);
+          if (wpId) {
+            const wp = await fetchOfWorkPackageById(wpId);
+            setOfWorkPackageInterface(wp?.interface_type ?? null);
+          } else {
+            setOfWorkPackageInterface(null);
+          }
+
           await openShiftPieceWork(shiftId, workerId, piece.id, piece.project_id);
         }
       } else if (planning && isMounted) {
         setPlanningId(planning.id);
+        setOfWorkPackageId(planning.of_work_package_id ?? null);
+        if (planning.of_work_package_id) {
+          const wp = await fetchOfWorkPackageById(planning.of_work_package_id);
+          setOfWorkPackageInterface(wp?.interface_type ?? null);
+        } else {
+          setOfWorkPackageInterface(null);
+        }
+
         const [machineData, projectData, pieceData] = await Promise.all([
           planning.machine_id ? fetchMachineById(planning.machine_id) : Promise.resolve(null),
           planning.project_id ? fetchProjectById(planning.project_id) : Promise.resolve(null),
@@ -118,9 +143,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     }
 
     void loadInitialContext();
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [workerId, shiftId]);
 
   const selectPlanningOption = useCallback(
@@ -133,6 +156,14 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
       setProject(option.project);
       setPieceTask(piece);
       setPlanningId(matchingEntry?.id ?? null);
+      setOfWorkPackageId(matchingEntry?.of_work_package_id ?? null);
+
+      if (matchingEntry?.of_work_package_id) {
+        const wp = await fetchOfWorkPackageById(matchingEntry.of_work_package_id);
+        setOfWorkPackageInterface(wp?.interface_type ?? null);
+      } else {
+        setOfWorkPackageInterface(null);
+      }
 
       if (matchingEntry?.machine_id) {
         setMachine(await fetchMachineById(matchingEntry.machine_id));
@@ -144,7 +175,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         await switchShiftPiece(shiftId, workerId, previousPieceId, piece.id, piece.project_id);
       }
     },
-    [pieceTask, shiftId, workerId]
+    [pieceTask, shiftId, workerId],
   );
 
   const toggleProductionTask = useCallback(
@@ -157,6 +188,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           projectId: project?.id ?? null,
           pieceTaskId: pieceTask?.id ?? null,
           planningId,
+          ofWorkPackageId: ofWpRef.current,
           sessionType: "production",
           taskTypeId: taskType.id,
           stopReasonId: null,
@@ -168,7 +200,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         throw err;
       }
     },
-    [workerId, shiftId, machine, project, pieceTask, planningId]
+    [workerId, shiftId, machine, project, pieceTask, planningId],
   );
 
   const toggleStopReason = useCallback(
@@ -181,6 +213,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           projectId: project?.id ?? null,
           pieceTaskId: pieceTask?.id ?? null,
           planningId,
+          ofWorkPackageId: ofWpRef.current,
           sessionType: "downtime",
           taskTypeId: null,
           stopReasonId: reason.id,
@@ -193,36 +226,36 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         throw err;
       }
     },
-    [workerId, shiftId, machine, project, pieceTask, planningId]
+    [workerId, shiftId, machine, project, pieceTask, planningId],
   );
 
-  /** زر Terminer: القطعة انتهت بالكامل — تُغلق أحداثها المفتوحة فقط */
   const completePiece = useCallback(async () => {
     if (!pieceTask) return;
-    await markPieceTaskComplete(pieceTask.id, workerId, shiftId);
+    await markPieceTaskComplete(pieceTask.id, workerId, shiftId, ofWpRef.current);
     setPieceTask(null);
+    setOfWorkPackageId(null);
+    setOfWorkPackageInterface(null);
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
   }, [pieceTask, workerId, shiftId]);
 
-  /** زر À continuer: العمل لا يزال جارياً — تُغلق أحداث هذه القطعة فقط */
   const pausePiece = useCallback(async () => {
     if (!pieceTask) return;
     await pauseWorkOnPiece(pieceTask.id, workerId);
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
   }, [pieceTask, workerId]);
 
-  /** يعدّل رقم Phase القطعة الحالية ضمن الحدود [1, MAX_PHASE]. */
-  const changePhase = useCallback(async (delta: number) => {
-    if (!pieceTask) return;
-    const current = Number.parseInt(pieceTask.phase ?? "1", 10) || 1;
-    const next = Math.min(MAX_PHASE, Math.max(1, current + delta));
-    if (next === current) return; // لا حاجة لمزامنة إن لم يتغير شيء
-    setPieceTask((previous) => previous ? { ...previous, phase: String(next) } : previous);
-    await updatePiecePhase(pieceTask.id, next);
-  }, [pieceTask]);
+  const changePhase = useCallback(
+    async (delta: number) => {
+      if (!pieceTask) return;
+      const current = Number.parseInt(pieceTask.phase ?? "1", 10) || 1;
+      const next = Math.min(MAX_PHASE, Math.max(1, current + delta));
+      if (next === current) return;
+      setPieceTask((previous) => (previous ? { ...previous, phase: String(next) } : previous));
+      await updatePiecePhase(pieceTask.id, next);
+    },
+    [pieceTask],
+  );
 
-  /** إعادة تحميل الأحداث المفتوحة بعد تصحيح/إلغاء حدث من نافذة التدقيق
-   * (تُستدعى من خارج toggle، مثل SessionCorrectionModal) */
   const refreshActiveSessions = useCallback(async () => {
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
   }, [workerId]);
@@ -232,6 +265,8 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     project,
     pieceTask,
     planningId,
+    ofWorkPackageId,
+    ofWorkPackageInterface,
     activeSessions,
     isLoadingContext,
     setMachine,

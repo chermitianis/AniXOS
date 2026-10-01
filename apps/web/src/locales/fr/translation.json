@@ -157,7 +157,9 @@
     "logoutConfirmBody": "Vous avez encore des tâches actives sur une pièce. Voulez-vous vraiment vous déconnecter ? Ces événements seront arrêtés automatiquement.",
     "logoutConfirmStay": "Rester",
     "logoutConfirmProceed": "Se déconnecter quand même",
-    "quantity": "QUANTITÉ"
+    "quantity": "QUANTITÉ",
+      "workPackage": "Paquet",
+  "workPackageActive": "En cours"
   },
   "subscription": {
     "expiredTitle": "Période d'essai terminée",
@@ -735,7 +737,21 @@
     "statusSent": "Envoyé",
     "statusInPreparation": "En préparation",
     "statusReadyToStart": "Prêt à démarrer",
-    "statusScheduled": "Planifié"
+    "statusScheduled": "Planifié",
+    "costingNotStudied": "Non étudié",
+    "costingDraft": "Brouillon",
+    "costingPending": "En étude",
+    "costingValidated": "Validé",
+  
+    "prodNotSent": "Non envoyée",
+    "prodSent": "Envoyée",
+    "prodInPreparation": "En préparation",
+    "prodReadyToStart": "Prête à démarrer",
+    "prodScheduled": "Planifiée",
+    "prodInProgress": "En cours",
+    "prodPartiallyDone": "Partiellement terminée",
+    "prodCompleted": "Terminée",
+    "prodOnHold": "En attente"
   },
   "staffAuth": {
     "notLinked": "Ce compte n'est associé à aucun employé dans le système"
@@ -773,106 +789,269 @@
       "colUpdated": "Dernière mise à jour"
     }
   },
-  "production": {
-    "kpi": {
-      "waiting": "En attente",
-      "ready": "Prêtes",
-      "inProgress": "En cours",
-      "completed": "Terminées",
-      "late": "En retard"
-    },
-    "sections": {
-      "waiting": "Pièces en attente",
-      "inProgress": "Pièces en cours",
-      "completed": "Pièces terminées",
-      "orders": "Ordres de fabrication"
-    },
-    "actions": {
-      "preparer": "Préparer",
-      "viewAll": "Voir tout"
-    },
-    "empty": {
-      "waiting": "Aucune pièce en attente",
-      "inProgress": "Aucune pièce en cours",
-      "completed": "Aucune pièce terminée",
-      "orders": "Aucun ordre de fabrication"
-    },
-    "piecesDone": "terminées",
-    "preparation": {
-      "toPrepare": "Pièces à préparer",
-      "selectPiece": "Sélectionnez une pièce à gauche",
-      "emptyQueue": "Aucune pièce en attente",
-      "deadline": "Date limite",
-      "estimatedTime": "Temps estimé",
-      "estimatedCost": "Coût estimé",
-      "primaryOp": "Opération principale",
-      "badgeToDefine": "À définir",
-      "checkOps": "Gamme d'opérations",
-      "checkOpsHint": "Opérations chiffrées définies",
-      "checkDocs": "Dossier technique",
-      "checkDocsHint": "Plans, CAD, CAM attachés",
-      "checkPrimary": "Opération principale",
-      "checkPrimaryHint": "Interface Kiosk déterminée",
-      "operations": "Opérations & machines",
-      "noOperations": "Aucune opération définie pour cette pièce.",
-      "documents": "Documents techniques",
-      "noDocuments": "Aucun document attaché.",
-      "openDoc": "Ouvrir",
-      "chooseMachine": "— Machine —",
-      "definePrimaryOp": "Définir l'opération principale (détermine l'interface) :",
-      "prepareOf": "Préparer l'Ordre de Fabrication",
-      "ofCreated": "OF n°{{number}} créé — pièce prête à planifier.",
-      "ofExistsTitle": "Cette pièce a déjà un Ordre de Fabrication (n°{{number}})",
-      "ofExistsBody": "Un OF a déjà été préparé pour cette pièce. Vous pouvez le consulter ou le réactiver s'il a été annulé.",
-      "viewOf": "Consulter l'OF",
-      "reactivateOf": "Réactiver et recréer",
-      "confirmCancelOf": "Annuler l'OF existant et en créer un nouveau ?",
-      "ofAlreadyExists": "Cette pièce a déjà un OF.",
-      "ofError": "Impossible de créer l'OF."
-    },
-    "of": {
-      "statusDraft": "Brouillon",
-      "statusPrepared": "Préparé",
-      "statusScheduled": "Planifié",
-      "statusInProgress": "En cours",
-      "statusCompleted": "Terminé",
-      "statusCancelled": "Annulé",
-      "statusConfirmed": "Confirmé",
-      "filterAll": "Tous",
-      "emptyAll": "Aucun ordre de fabrication. Créez-en depuis « Préparation des dossiers ».",
-      "emptyFilter": "Aucun OF pour ce filtre.",
-      "preparedAt": "Préparé le",
-      "scheduledAt": "Planifié le",
-      "startedAt": "Démarré le",
-      "completedAt": "Terminé le",
-      "operations": "Opérations",
-      "noOps": "Aucune opération définie.",
-      "noMachine": "Machine non assignée",
-      "documents": "Documents techniques",
-      "actionSchedule": "Planifier",
-      "actionCancel": "Annuler",
-      "allDone": "Terminé",
-      "gotoPlanning": "Aller à la planification ({{count}} OF)",
-      "confirmCancel": "Confirmer l'annulation de cet OF ?"
-    },
-    "planning": {
-      "step1Title": "1. Choisir un OF à planifier",
-      "step2Title": "2. Choisir une machine",
-      "step3Title": "3. Opérateur, date et poste",
-      "noOfToSchedule": "Aucun OF en attente de planification.",
-      "noMachineForInterface": "Aucune machine compatible avec cette interface (CNC / Classique). Vérifiez la configuration des machines.",
-      "noWorkerForInterface": "Aucun opérateur compatible avec cette interface. Vérifiez la configuration des opérateurs.",
-      "noOperationsBlocked": "Ajoutez d'abord des opérations à cette pièce (dans le chiffrage) avant de la planifier.",
-      "duplicateAssignment": "Cette affectation existe déjà pour ce poste.",
-      "savedSuccess": "Affectation enregistrée — OF planifié.",
-      "confirmCancel": "Annuler cette affectation ?",
-      "cancelEntry": "Annuler cette affectation",
-      "confirmSchedule": "Confirmer la planification",
-      "existingPlanning": "Planning existant",
-      "allMachines": "Toutes les machines",
-      "noPlanningEntries": "Aucune affectation pour ces critères."
-    }
+ "production": {
+  "kpi": {
+    "waiting": "En attente",
+    "ready": "Prêtes",
+    "inProgress": "En cours",
+    "completed": "Terminées",
+    "late": "En retard"
   },
+  "sections": {
+    "waiting": "Pièces en attente",
+    "inProgress": "Pièces en cours",
+    "completed": "Pièces terminées",
+    "orders": "Ordres de fabrication"
+  },
+  "actions": {
+    "preparer": "Préparer",
+    "viewAll": "Voir tout"
+  },
+  "empty": {
+    "waiting": "Aucune pièce en attente",
+    "inProgress": "Aucune pièce en cours",
+    "completed": "Aucune pièce terminée",
+    "orders": "Aucun ordre de fabrication"
+  },
+  "piecesDone": "terminées",
+
+  "preparation": {
+    "toPrepare": "Pièces à préparer",
+    "selectPiece": "Sélectionnez une pièce à gauche",
+    "emptyQueue": "Aucune pièce en attente",
+    "deadline": "Date limite",
+    "estimatedTime": "Temps estimé",
+    "estimatedCost": "Coût estimé",
+    "primaryOp": "Opération principale",
+    "productionStatus": "Statut production",
+    "badgeToDefine": "À définir",
+    "checkOps": "Gamme d'opérations",
+    "checkOpsHint": "Opérations chiffrées définies",
+    "checkDocs": "Dossier technique",
+    "checkDocsHint": "Plans, CAD, CAM attachés",
+    "checkPrimary": "Opération principale",
+    "checkPrimaryHint": "Interface Kiosk déterminée",
+    "operations": "Opérations prévues",
+    "noOperations": "Aucune opération définie pour cette pièce.",
+    "documents": "Documents techniques",
+    "noDocuments": "Aucun document attaché.",
+    "openDoc": "Ouvrir",
+    "chooseMachine": "— Machine —",
+    "definePrimaryOp": "Définir l'opération principale (détermine l'interface) :",
+
+    "createOf": "Créer l'OF",
+    "creatingOf": "Création en cours...",
+    "needOpsFirst": "Ajoutez au moins une opération dans Nomenclature & Chiffrage avant de créer l'OF.",
+    "ofCreated": "OF {{number}} créé avec succès.",
+
+    "ofNumberTitle": "OF {{number}}",
+    "ofNumberTitleExisting": "Cette pièce a déjà un OF : {{number}}",
+    "ofInPreparationBody": "Complétez les informations du dessin technique, puis marquez l'OF prêt à planifier.",
+
+    "ofOperations": "Opérations figées de l'OF",
+    "workPackages": "Paquets de travail",
+
+    "technicalDrawing": "Dessin technique & notes",
+    "drawingUrl": "URL du fichier",
+    "drawingPathLocal": "Chemin local (optionnel)",
+    "drawingPathNetwork": "Chemin réseau (optionnel)",
+    "ofNotes": "Notes OF",
+    "drawingSaved": "Dessin technique enregistré.",
+
+    "ofReadyForPlanning": "OF marqué prêt à planifier.",
+    "markingReady": "Marquage...",
+    "readyToPlan": "Prêt à planifier",
+
+    "ofExistsTitle": "Cette pièce a déjà un Ordre de Fabrication (n°{{number}})",
+    "ofExistsBody": "Un OF a déjà été préparé pour cette pièce. Vous pouvez le consulter ou le réactiver s'il a été annulé.",
+    "viewOf": "Consulter l'OF",
+    "reactivateOf": "Réactiver et recréer",
+    "confirmCancelOf": "Annuler l'OF existant et en créer un nouveau ?",
+    "ofAlreadyExists": "Cette pièce a déjà un OF.",
+    "ofError": "Impossible de créer l'OF."
+  },
+
+  "of": {
+    "title": "Ordres de fabrication",
+    "subtitle": "Suivi des OF de la préparation à la clôture",
+
+    "statusDraft": "Brouillon",
+    "statusPreparing": "En préparation",
+    "statusReady": "Prêt à planifier",
+    "statusScheduled": "Planifié",
+    "statusInProgress": "En cours",
+    "statusCompleted": "Terminé",
+    "statusCancelled": "Annulé",
+
+    "tabAll": "Tous",
+    "tabPreparing": "En préparation",
+    "tabReady": "Prêts à planifier",
+    "tabScheduled": "Planifiés",
+    "tabInProgress": "En cours",
+    "tabCompleted": "Terminés",
+
+    "emptyAll": "Aucun ordre de fabrication. Créez-en depuis « Préparation des dossiers ».",
+    "emptyFilter": "Aucun OF pour ce filtre.",
+
+    "createdAt": "Créé le",
+    "preparedAt": "Préparé le",
+    "scheduledAt": "Planifié le",
+    "startedAt": "Démarré le",
+    "completedAt": "Terminé le",
+
+    "operations": "Opérations",
+    "noOps": "Aucune opération définie.",
+    "workPackages": "Paquets de travail",
+    "noWorkPackages": "Aucun paquet de travail.",
+
+    "noMachine": "Machine non assignée",
+    "documents": "Documents techniques",
+
+    "actionSchedule": "Planifier",
+    "actionCancel": "Annuler",
+    "actionView": "Consulter",
+    "actionDelete": "Supprimer",
+    "allDone": "Terminé",
+    "gotoPlanning": "Aller à la planification ({{count}} OF)",
+    "confirmCancel": "Confirmer l'annulation de cet OF ?",
+    "confirmDelete": "Confirmer la suppression de cet OF ? Cette action est irréversible.",
+    "actionContinuePreparation": "Continuer la préparation",
+    "noWorkPackages": "Aucun paquet de travail.",
+    "workPackages": "Paquets de travail"
+  },
+
+"planning": {
+  "title": "Planification",
+  "subtitle": "Répartir les OF prêts sur les machines, opérateurs et postes",
+
+  "step1Title": "1. Choisir un OF à planifier",
+  "step2Title": "2. Choisir une machine",
+  "step3Title": "3. Opérateur, date et poste",
+
+  "noOfToSchedule": "Aucun OF en attente de planification.",
+  "noMachineForInterface": "Aucune machine compatible avec cette interface (CNC / Classique). Vérifiez la configuration des machines.",
+  "noWorkerForInterface": "Aucun opérateur compatible avec cette interface. Vérifiez la configuration des opérateurs.",
+  "noOperationsBlocked": "Ajoutez d'abord des opérations à cette pièce (dans le chiffrage) avant de la planifier.",
+  "duplicateAssignment": "Cette affectation existe déjà pour ce poste.",
+  "savedSuccess": "Affectation enregistrée — OF planifié.",
+  "confirmCancel": "Annuler cette affectation ?",
+  "cancelEntry": "Annuler cette affectation",
+  "confirmSchedule": "Confirmer la planification",
+  "existingPlanning": "Planning existant",
+  "allMachines": "Toutes les machines",
+  "allWorkers": "Tous les opérateurs",
+  "noPlanningEntries": "Aucune affectation pour ces critères.",
+
+  "filterAllIfaces": "Toutes interfaces",
+  "machineCol": "Machine",
+  "thisWeek": "Cette semaine",
+  "closed": "Fermé",
+  "queue": "OF à planifier",
+  "queueEmpty": "Aucun OF à planifier.",
+  "noMachines": "Aucune machine compatible.",
+  "saving": "Enregistrement...",
+  "shift": "Poste",
+  "incompatibleMachine": "Machine incompatible avec {{iface}}.",
+  "notWorkingDay": "Ce jour n'est pas ouvré.",
+
+  "grid": {
+    "title": "Grille de planification",
+    "filterInterface": "Filtrer par interface",
+    "filterMachine": "Filtrer par machine",
+    "filterWorker": "Filtrer par opérateur",
+    "filterDay": "Filtrer par jour",
+    "shift": "Poste",
+    "shiftShort": "P",
+    "machine": "Machine",
+    "worker": "Opérateur",
+    "date": "Date",
+    "dropHere": "Déposer l'OF ici",
+    "assignedOf": "OF assignés"
+  },
+
+  "workSettings": {
+    "title": "Paramètres de travail",
+    "subtitle": "Configurez les postes, horaires et chemins de vos dessins techniques",
+
+    "cncSection": "Postes CNC",
+    "classiqueSection": "Postes Classique / Manuel",
+
+    "shiftsPerDay": "Nombre de postes par jour",
+    "shiftHours": "Durée d'un poste (heures)",
+    "shiftStartTime": "Heure de début du 1er poste",
+
+    "workingDays": "Jours travaillés",
+    "monday": "Lundi",
+    "tuesday": "Mardi",
+    "wednesday": "Mercredi",
+    "thursday": "Jeudi",
+    "friday": "Vendredi",
+    "saturday": "Samedi",
+    "sunday": "Dimanche",
+
+    "drawingSection": "Chemin des dessins techniques",
+    "drawingBasePath": "Répertoire de base (ex : D:\\Dessins\\)",
+    "drawingBasePathHint": "Utilisé pour générer automatiquement le chemin de chaque pièce",
+    "drawingPattern": "Modèle de chemin",
+    "drawingPatternHint": "Variables disponibles : {projectCode}, {pieceName}",
+    "drawingPreview": "Aperçu :",
+
+    "save": "Enregistrer les paramètres",
+    "saving": "Enregistrement...",
+    "saved": "Paramètres enregistrés.",
+    "resetToDefaults": "Réinitialiser aux valeurs par défaut",
+    "confirmReset": "Réinitialiser les paramètres aux valeurs par défaut ?",
+    "chooseWorker": "Choisir un opérateur",
+    "selectWorker": "Sélectionner un opérateur",
+    "workerBusy": "Occupé"
+  }
+}
+},
+
+"productionReports": {
+  "tabs": {
+    "pieces": "Rapports pièces",
+    "projects": "Rapports projets",
+    "daily": "Rapports journaliers"
+  },
+  "pieces": {
+    "count": "{{count}} pièce(s) terminée(s)",
+    "empty": "Aucune pièce terminée pour le moment",
+    "workPackages": "Détail par paquet",
+    "operations": "Opérations",
+    "estimated": "Estimé",
+    "actual": "Réel",
+    "sessions": "Sessions",
+    "workers": "Opérateurs",
+    "opStage": "Étape",
+    "opInterface": "Interface",
+    "opEstimated": "Estimation",
+    "opRate": "Taux/h",
+    "opSubtotal": "Sous-total"
+  },
+  "projects": {
+    "count": "{{count}} projet(s) terminé(s)",
+    "empty": "Aucun projet terminé pour le moment",
+    "colProject": "Projet",
+    "colClient": "Client",
+    "colPieces": "Pièces",
+    "colEstimated": "Estimé",
+    "colActual": "Réel",
+    "colCost": "Coût",
+    "colMargin": "Marge"
+  },
+  "daily": {
+    "from": "Du",
+    "to": "Au",
+    "empty": "Aucune session pour cette période",
+    "ongoing": "En cours",
+    "forceClosed": "Fermeture forcée",
+    "piecesShort": "pièces",
+    "eventsShort": "événements",
+    "events": "Journal des événements",
+    "noEvents": "Aucun événement enregistré"
+  }
+},
   "crm": {
     "title": "CRM — Prospects & Opportunités",
     "subtitle": "Gérez votre pipeline commercial de la prospection à la conversion",
@@ -1403,48 +1582,83 @@
     "integrations": "Intégrations",
     "myProfile": "Mon Profil"
   },
-  "costing": {
-    "operationsSection": "Étapes de production",
-    "materialsSection": "Matières & consommables",
-    "addOperation": "Ajouter une étape",
-    "addMaterial": "+ Ajouter une matière",
-    "noOperations": "Aucune étape ajoutée pour l'instant.",
-    "noMaterials": "Aucune matière ajoutée pour l'instant.",
-    "hours": "Heures",
-    "hourlyRate": "Taux / h",
-    "subtotal": "Sous-total",
-    "quantity": "Quantité",
-    "unit": "Unité",
-    "unitPrice": "Prix unitaire",
-    "materialName": "Nom de la matière",
-    "materialCode": "Code",
-    "materialPreset": "Modèle",
-    "materialPresetChoose": "Choisir un modèle",
-    "customLabelPlaceholder": "Nom libre de l'étape",
-    "activePiece": "Pièce active",
-    "grandTotal": "Total pièce",
-    "saveEstimate": "Enregistrer",
-    "validateEstimate": "Valider",
-    "lastSavedAt": "Dernier enregistrement",
-    "pivotBadge": "Pivot",
-    "cncPivotTitle": "Étape pivot — Usinage CNC",
-    "cncPivotHint": "Les heures et coûts CNC sont synchronisés automatiquement vers la fiche pièce (visible dans le Kiosque, les rapports et la planification).",
-    "stage": {
-      "usinage_cnc": "Usinage CNC",
-      "tournage_cnc": "Tournage CNC",
-      "fraisage_cnc": "Fraisage CNC",
-      "tournage_classique": "Tournage classique",
-      "fraisage_classique": "Fraisage classique",
-      "usinage_classique": "Usinage classique",
-      "rectification": "Rectification",
-      "ajustage": "Ajustage",
-      "taraudage": "Taraudage",
-      "stt": "STT (traitement thermique)",
-      "anodisation": "Anodisation",
-      "controle_qualite": "Contrôle qualité",
-      "autre": "Autre étape"
-    }
+"costing": {
+  "operationsSection": "Étapes de production",
+  "materialsSection": "Matières & consommables",
+  "addOperation": "Ajouter une étape",
+  "addMaterial": "+ Ajouter une matière",
+  "noOperations": "Aucune étape ajoutée pour l'instant.",
+  "noMaterials": "Aucune matière ajoutée pour l'instant.",
+  "hours": "Heures",
+  "hourlyRate": "Taux / h",
+  "subtotal": "Sous-total",
+  "quantity": "Quantité",
+  "unit": "Unité",
+  "unitPrice": "Prix unitaire",
+  "materialName": "Nom de la matière",
+  "materialCode": "Code",
+  "materialPreset": "Modèle",
+  "materialPresetChoose": "Choisir un modèle",
+  "customLabelPlaceholder": "Nom libre de l'étape",
+  "activePiece": "Pièce active",
+  "grandTotal": "Total pièce",
+  "saveEstimate": "Enregistrer",
+  "validateEstimate": "Valider",
+  "lastSavedAt": "Dernier enregistrement",
+  "pivotBadge": "Pivot",
+  "cncPivotTitle": "Étape pivot — Usinage CNC",
+  "cncPivotHint": "Les heures et coûts CNC sont synchronisés automatiquement vers la fiche pièce (visible dans le Kiosque, les rapports et la planification).",
+
+  "calcMode": "Mode de calcul",
+  "calcModeWeight": "Poids direct",
+  "calcModeRect": "Parallélépipède",
+  "calcModeCyl": "Cylindre",
+  "dimLength": "Long. (mm)",
+  "dimWidth": "Larg. (mm)",
+  "dimThickness": "Ép. (mm)",
+  "dimDiameter": "Ø (mm)",
+  "quantityPieces": "Qté pièces",
+  "density": "Masse volumique",
+  "pricePerKg": "Prix /kg",
+  "materialTotal": "Total Matière",
+  "weightPerPiece": "Poids/pièce",
+  "totalWeight": "Poids total",
+
+  "billingPieces": "Par pièce",
+  "sttType": "Type STT",
+  "sttTypeChoose": "Choisir un type",
+  "allStagesUsed": "Toutes les étapes disponibles sont déjà ajoutées.",
+
+  "stage": {
+    "usinage_cnc": "Usinage CNC",
+    "tournage_cnc": "Tournage CNC",
+    "fraisage_cnc": "Fraisage CNC",
+    "tournage_classique": "Tournage classique",
+    "fraisage_classique": "Fraisage classique",
+    "usinage_classique": "Usinage classique",
+    "rectification": "Rectification",
+    "ajustage": "Ajustage",
+    "taraudage": "Taraudage",
+    "stt": "STT (traitement thermique)",
+    "anodisation": "Anodisation",
+    "controle_qualite": "Contrôle qualité",
+    "autre": "Autre étape"
   },
+
+  "sttTypeLabel": {
+    "broni": "Broni",
+    "zingue_blanc": "Zingué blanc",
+    "zingue_jaune": "Zingué jaune",
+    "nickele": "Nickelé",
+    "chrome": "Chromé",
+    "chrome_dur": "Chromé dur",
+    "phosphatation": "Phosphatation",
+    "noir": "Noir (oxydation)",
+    "peinture": "Peinture",
+    "thermique": "Traitement thermique",
+    "autre": "Autre"
+  }
+},
   "odoo": {
     "title": "Odoo SaaS",
     "subtitle": "Synchronisez AniXOS avec votre ERP Odoo",
@@ -1579,5 +1793,20 @@
     "regenerating": "Génération…",
     "regenerateError": "Échec de la génération du code QR",
     "ownerOnlyNote": "Visible uniquement par le propriétaire du compte"
-  }
+  },
+
+  "materialsPrice": {
+  "title": "Prix des matières premières",
+  "subtitle": "Configurez le prix par kg de chaque matière pour votre entreprise. Ces prix sont utilisés automatiquement dans le chiffrage.",
+  "configured": "matières configurées",
+  "searchPlaceholder": "Rechercher une matière...",
+  "allCategories": "Toutes les catégories",
+  "empty": "Aucune matière trouvée",
+  "invalidValue": "Valeur invalide. Entrez un nombre positif.",
+  "colMaterial": "Matière",
+  "colCategory": "Catégorie",
+  "colDensity": "Densité (kg/dm³)",
+  "colDefault": "Prix par défaut",
+  "colCompany": "Votre prix (TND/kg)"
+}
 }

@@ -42,16 +42,27 @@ export function DossiersTechniquesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadDocs = useCallback(async (pieceId: string) => {
-    setIsLoading(true);
-    const { data } = await supabase
-      .from("piece_documents")
-      .select("*")
-      .eq("piece_task_id", pieceId)
-      .order("created_at", { ascending: false });
-    setDocs((data as PieceDocument[]) ?? []);
-    setIsLoading(false);
-  }, []);
+  const companyId = staffUser?.company_id ?? null;
+
+  const loadDocs = useCallback(
+    async (pieceId: string) => {
+      if (!companyId) {
+        setDocs([]);
+        return;
+      }
+      setIsLoading(true);
+      // RÈGLE DE SÉCURITÉ (C5) : filtre company_id explicite.
+      const { data } = await supabase
+        .from("piece_documents")
+        .select("*")
+        .eq("piece_task_id", pieceId)
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false });
+      setDocs((data as PieceDocument[]) ?? []);
+      setIsLoading(false);
+    },
+    [companyId],
+  );
 
   useEffect(() => {
     if (selectedPiece) void loadDocs(selectedPiece.id);
@@ -87,11 +98,18 @@ export function DossiersTechniquesPage() {
   }
 
   async function handleDelete(id: string) {
+    if (!companyId) return;
     if (!window.confirm(t("common.confirmDelete"))) return;
-    await supabase.from("piece_documents").delete().eq("id", id);
+    // RÈGLE DE SÉCURITÉ (C5) : filtre company_id explicite.
+    await supabase
+      .from("piece_documents")
+      .delete()
+      .eq("id", id)
+      .eq("company_id", companyId);
     if (selectedPiece) await loadDocs(selectedPiece.id);
   }
 
+  // ... reste du JSX identique à ta version actuelle (aucun changement visuel)
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
       <PiecePicker

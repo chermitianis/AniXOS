@@ -1,13 +1,12 @@
 // ============================================================================
 // kioskApi: طبقة وصول موحدة لبيانات الكشك (أونلاين أولاً، كاش أوفلاين تلقائياً)
 // كل دالة هنا: تحاول أونلاين → تُحدِّث الكاش المحلي عند النجاح → أو تقرأ من
-// الكاش مباشرة عند الانقطاع. الواجهة (React) لا تحتاج معرفة أي من الحالتين.
+// الكاش مباشرة عند الانقطاع.
 //
-// مفهومان منفصلان بنيوياً (لا يجب الخلط بينهما):
-//   - الحصة (WorkShift): دوام العامل الكامل، من تسجيل الدخول إلى تسجيل
-//     الخروج فقط. تُدار عبر startWorkerShift/endWorkerShift.
-//   - الحدث (WorkSession): مهمة إنتاجية أو سبب توقف داخل الحصة. يمكن أن
-//     يكون للعامل حتى 3 أحداث مفتوحة بالتوازي (toggleWorkerEvent).
+// إضافات 2026-09-30 :
+//   - of_work_package_id في work_sessions (لربط كل جلسة بحزمتها).
+//   - markPieceTaskComplete يُغلق of_work_package ويُحدّث OF عند الاكتمال.
+//   - fetchOfWorkPackageById لجلب id + interface_type + status.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -33,7 +32,6 @@ import type {
 
 export const MAX_ACTIVE_EVENTS_PER_WORKER = 3;
 
-/** يُرمى عند محاولة تشغيل حدث رابع — الواجهة تلتقطه لعرض رسالة واضحة */
 export class MaxActiveEventsError extends Error {
   constructor() {
     super("MAX_ACTIVE_EVENTS_REACHED");
@@ -42,11 +40,10 @@ export class MaxActiveEventsError extends Error {
 }
 
 // ------------------------------------------------------------------
-// أنواع المهام الإنتاجية (العمود الأزرق)
+// أنواع المهام / أسباب التوقف
 // ------------------------------------------------------------------
 export async function fetchTaskTypes(): Promise<TaskType[]> {
   const companyId = await resolveCompanyId();
-
   if (connectivityMonitor.getStatus() && companyId) {
     const { data, error } = await supabase
       .from("task_types")
@@ -54,25 +51,19 @@ export async function fetchTaskTypes(): Promise<TaskType[]> {
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("sort_order");
-
     if (!error && data) {
       const rows = data as TaskType[];
       await localDb.taskTypes.bulkPut(rows);
       return rows;
     }
   }
-
   return companyId
     ? localDb.taskTypes.where("company_id").equals(companyId).sortBy("sort_order")
     : [];
 }
 
-// ------------------------------------------------------------------
-// أسباب التوقف (العمود البرتقالي)
-// ------------------------------------------------------------------
 export async function fetchStopReasons(): Promise<StopReason[]> {
   const companyId = await resolveCompanyId();
-
   if (connectivityMonitor.getStatus() && companyId) {
     const { data, error } = await supabase
       .from("stop_reasons")
@@ -80,21 +71,19 @@ export async function fetchStopReasons(): Promise<StopReason[]> {
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("sort_order");
-
     if (!error && data) {
       const rows = data as StopReason[];
       await localDb.stopReasons.bulkPut(rows);
       return rows;
     }
   }
-
   return companyId
     ? localDb.stopReasons.where("company_id").equals(companyId).sortBy("sort_order")
     : [];
 }
 
 // ------------------------------------------------------------------
-// مهام المخطط لهذا العامل (لتعبئة السياق تلقائياً)
+// مهام المخطط
 // ------------------------------------------------------------------
 export async function fetchWorkerPlanningQueue(workerId: string): Promise<PlanningEntry[]> {
   const companyId = await resolveCompanyId();
@@ -108,7 +97,6 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
       .eq("worker_id", workerId)
       .lte("planned_date", today)
       .in("status", ["scheduled", "in_progress"])
-      // اليوم أولاً، ثم التخصيصات المتأخرة؛ لا نبدأ بمهمة قديمة إذا وُجدت مهمة اليوم.
       .order("planned_date", { ascending: false })
       .order("shift_number");
 
@@ -124,11 +112,13 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
     .equals(workerId)
     .filter((p) => p.planned_date <= today && (p.status === "scheduled" || p.status === "in_progress"))
     .toArray()
-    .then((rows) => rows.sort((a, b) => {
-      const dateOrder = b.planned_date.localeCompare(a.planned_date);
-      if (dateOrder !== 0) return dateOrder;
-      return String(a.shift_number ?? "").localeCompare(String(b.shift_number ?? ""));
-    }));
+    .then((rows) =>
+      rows.sort((a, b) => {
+        const dateOrder = b.planned_date.localeCompare(a.planned_date);
+        if (dateOrder !== 0) return dateOrder;
+        return String(a.shift_number ?? "").localeCompare(String(b.shift_number ?? ""));
+      }),
+    );
 }
 
 export async function fetchTodayPlanningForWorker(workerId: string): Promise<PlanningEntry | null> {
@@ -136,7 +126,6 @@ export async function fetchTodayPlanningForWorker(workerId: string): Promise<Pla
   return queue[0] ?? null;
 }
 
-/** يعيد سطر التخطيط عند الحاجة لاستعادة سياق جلسة إنتاج مفتوحة. */
 export async function fetchPlanningById(id: string): Promise<PlanningEntry | null> {
   if (connectivityMonitor.getStatus()) {
     const { data, error } = await supabase.from("planning").select("*").eq("id", id).maybeSingle();
@@ -149,9 +138,6 @@ export async function fetchPlanningById(id: string): Promise<PlanningEntry | nul
   return (await localDb.planning.get(id)) ?? null;
 }
 
-// ------------------------------------------------------------------
-// جلب آلة/مشروع/قطعة بمعرّفها
-// ------------------------------------------------------------------
 export async function fetchMachineById(id: string): Promise<Machine | null> {
   if (connectivityMonitor.getStatus()) {
     const { data, error } = await supabase.from("machines").select("*").eq("id", id).maybeSingle();
@@ -188,7 +174,6 @@ export async function fetchPieceTaskById(id: string): Promise<PieceTask | null> 
   return (await localDb.piecesTasks.get(id)) ?? null;
 }
 
-/** كل قطع مشروع معيّن، مرتبة حسب ترتيب المخطط؛ غير المكتملة أولاً */
 export async function fetchPiecesForProject(projectId: string): Promise<PieceTask[]> {
   if (connectivityMonitor.getStatus()) {
     const { data, error } = await supabase
@@ -225,10 +210,8 @@ export async function fetchActiveMachinesList(): Promise<Machine[]> {
 }
 
 // ============================================================================
-// الحصة (WorkShift) — دوام العامل الكامل، منفصل عن الأحداث
+// WorkShift (حصة العامل)
 // ============================================================================
-
-/** يُعاد إلى طبقة العرض عندما يملك العامل حصة مفتوحة على جهاز آخر. */
 export class WorkerAlreadyConnectedError extends Error {
   constructor() {
     super("WORKER_ALREADY_CONNECTED");
@@ -236,15 +219,10 @@ export class WorkerAlreadyConnectedError extends Error {
   }
 }
 
-/** تبدأ عند تسجيل دخول العامل فقط. تُستدعى مرة واحدة لكل دخول حقيقي؛ إعادة
- * تحميل الصفحة لا تُنشئ حصة جديدة لأن WorkerSessionContext يستعيد shift_id
- * المحفوظ محلياً بدل استدعاء هذه الدالة مجدداً. */
 export async function startWorkerShift(workerId: string, deviceId: string | null): Promise<WorkShift> {
   const companyId = await resolveCompanyId();
   if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
 
-  // فحص محلي مكمل: يمنع إنشاء حصة ثانية حتى عندما يكون الجهاز مؤقتاً بلا
-  // اتصال. القفل المركزي أدناه هو المرجع النهائي عند الاتصال.
   const localExisting = await localDb.workShifts
     .where("worker_id")
     .equals(workerId)
@@ -252,8 +230,6 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
     .first();
   if (localExisting) throw new WorkerAlreadyConnectedError();
 
-  // فحص أول: هل توجد أصلاً حصة مفتوحة لهذا العامل؟ (يمنع الإدراج المكرر عند
-  // نقرة مزدوجة على زر الدخول أو استدعاء مزدوج في وضع React StrictMode)
   if (connectivityMonitor.getStatus()) {
     const { data: existing, error: existingError } = await supabase
       .from("work_shifts")
@@ -262,11 +238,7 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
       .is("ended_at", null)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (existing) {
-      // لا نعيد استخدام الحصة: وجودها يعني أن العامل ما زال متصلاً من
-      // جهاز آخر. تسجيل الخروج الصريح فقط يحرر القفل المركزي.
-      throw new WorkerAlreadyConnectedError();
-    }
+    if (existing) throw new WorkerAlreadyConnectedError();
   }
 
   const now = new Date().toISOString();
@@ -285,10 +257,6 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("work_shifts").insert(shift as never);
     if (!error) return shift;
-
-    // تعافٍ ذاتي: إن كان الفشل بسبب انتهاك قيد "حصة واحدة مفتوحة لكل عامل"
-    // (23505) — فهذا يعني أن حصة أخرى فازت بالسباق للتو؛ نجلبها ونستخدمها
-    // بدل تكديس هذا الإدراج الفاشل في طابور سيفشل إلى الأبد.
     if (error.code === "23505") {
       const { data: winner } = await supabase
         .from("work_shifts")
@@ -306,13 +274,9 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
   return shift;
 }
 
-/** تنتهي فقط بتسجيل الخروج الصريح: تُغلق كل الأحداث المفتوحة أولاً (تُحسب
- * ضمن الوقت الفعلي)، ثم تُغلق الحصة نفسها. */
 export async function endWorkerShift(shiftId: string, workerId: string): Promise<void> {
   await closeAllOpenSessionsForWorker(workerId);
-
   const now = new Date().toISOString();
-
   await closeAllOpenShiftPieceWorkForShift(shiftId, now);
 
   const cached = await localDb.workShifts.get(shiftId);
@@ -341,11 +305,6 @@ export async function endWorkerShift(shiftId: string, workerId: string): Promise
   await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion (hors ligne)");
 }
 
-/** يبحث في السيرفر مباشرة (وليس الكاش المحلي) عن حصة مفتوحة لهذا العامل.
- * يُستخدم عند إعادة الدخول بعد فقدان بيانات الجهاز (متصفح مُفرَّغ، جهاز آخر)
- * حين لا توجد جلسة محفوظة محلياً على هذا الجهاز رغم وجود حصة حقيقية مفتوحة
- * في القاعدة — بدل رفض الدخول بحجة "متصل من جهاز آخر" رغم أن كلمة السر
- * الصحيحة أُدخلت للتو، نستأنف نفس الحصة بمعطياتها الأصلية دون أي فقد. */
 export async function fetchOpenShiftForWorker(workerId: string): Promise<WorkShift | null> {
   if (!connectivityMonitor.getStatus()) return null;
   const { data } = await supabase
@@ -357,10 +316,6 @@ export async function fetchOpenShiftForWorker(workerId: string): Promise<WorkShi
   return (data as WorkShift | null) ?? null;
 }
 
-/** يُعبّئ الكاش المحلي (Dexie) بالحالة الحقيقية من السيرفر لهذا العامل بعد
- * استئناف حصة كانت مفتوحة على جهاز/متصفح آخر أو بعد فقدان بيانات الجهاز.
- * بدون هذا، useActiveTask/fetchOpenSessionsForWorker يقرآن من كاش فارغ
- * محلياً فيظهر للعامل أنه بلا مهمة رغم استمرار حصته وأحداثه فعلياً. */
 export async function hydrateWorkerStateFromServer(workerId: string, shift: WorkShift): Promise<void> {
   await localDb.workShifts.put(shift);
 
@@ -384,7 +339,6 @@ export async function hydrateWorkerStateFromServer(workerId: string, shift: Work
   }
 }
 
-/** كل الأحداث المفتوحة حالياً لهذا العامل (حتى 3) — أساس عرض الأزرار النشطة */
 export async function fetchOpenSessionsForWorker(workerId: string): Promise<WorkSession[]> {
   return localDb.workSessions
     .where("worker_id")
@@ -394,25 +348,16 @@ export async function fetchOpenSessionsForWorker(workerId: string): Promise<Work
 }
 
 // ============================================================================
-// shift_piece_work: القطع/المشاريع التي اشتغل عليها العامل خلال الحصة —
-// البداية عند اختيار القطعة، والنهاية عند Terminer أو تبديل القطعة أو نهاية
-// الحصة (تسجيل الخروج دون Terminer) — الجدول الثاني في تقرير الحصة.
+// shift_piece_work
 // ============================================================================
-
-/** يفتح فترة اشتغال جديدة على قطعة ضمن الحصة، أو يعيد استخدام الفترة
- * المفتوحة أصلاً لنفس القطعة+الحصة إن وُجدت (idempotent — يحمي من التكرار
- * عند استعادة السياق بعد إعادة تحميل الصفحة). */
 export async function openShiftPieceWork(
   shiftId: string | null,
   workerId: string,
   pieceTaskId: string,
-  projectId: string | null
+  projectId: string | null,
 ): Promise<void> {
   if (!shiftId) return;
 
-  // فحص محلي أول (سريع)، ثم فحص القاعدة الفعلية إن كنا أونلاين — الكاش
-  // المحلي وحده لا يكفي لمنع السباق عند استدعاء الدالة مرتين بالتوازي
-  // (مثال: React StrictMode يُشغّل useEffect مرتين عند التركيب في التطوير).
   const existingOpen = await localDb.shiftPieceWork
     .where("[shift_id+piece_task_id]")
     .equals([shiftId, pieceTaskId])
@@ -453,9 +398,6 @@ export async function openShiftPieceWork(
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("shift_piece_work").insert(row as never);
     if (!error) return;
-
-    // تعافٍ ذاتي عند تعارض 23505: استدعاء موازٍ آخر فاز بالسباق للتو —
-    // نتراجع عن سطرنا المحلي ونتبنّى السطر الفائز بدل إعادة محاولة عقيمة.
     if (error.code === "23505") {
       const { data: winner } = await supabase
         .from("shift_piece_work")
@@ -472,9 +414,11 @@ export async function openShiftPieceWork(
   await enqueueSync("shift_piece_work", "insert", row as unknown as Record<string, unknown>);
 }
 
-/** يُغلق الفترة المفتوحة على قطعة معيّنة ضمن الحصة (عند Terminer أو عند
- * تبديل القطعة إلى أخرى دون الضغط على Terminer). */
-export async function closeShiftPieceWork(shiftId: string | null, pieceTaskId: string, endedAt?: string): Promise<void> {
+export async function closeShiftPieceWork(
+  shiftId: string | null,
+  pieceTaskId: string,
+  endedAt?: string,
+): Promise<void> {
   if (!shiftId) return;
 
   const openRow = await localDb.shiftPieceWork
@@ -487,14 +431,15 @@ export async function closeShiftPieceWork(shiftId: string | null, pieceTaskId: s
   const closedRow: ShiftPieceWork = { ...openRow, ended_at: endedAt ?? new Date().toISOString() };
   await localDb.shiftPieceWork.put(closedRow);
   if (connectivityMonitor.getStatus()) {
-    const { error } = await supabase.from("shift_piece_work").update({ ended_at: closedRow.ended_at }).eq("id", openRow.id);
+    const { error } = await supabase
+      .from("shift_piece_work")
+      .update({ ended_at: closedRow.ended_at })
+      .eq("id", openRow.id);
     if (!error) return;
   }
   await enqueueSync("shift_piece_work", "update", closedRow as unknown as Record<string, unknown>);
 }
 
-/** يُغلق كل فترات الاشتغال المفتوحة لحصة بأكملها — يُستدعى عند تسجيل الخروج
- * (نهاية الحصة دون الضغط على Terminer لآخر قطعة كانت قيد العمل). */
 export async function closeAllOpenShiftPieceWorkForShift(shiftId: string, endedAt: string): Promise<void> {
   const openRows = await localDb.shiftPieceWork
     .where("shift_id")
@@ -506,33 +451,22 @@ export async function closeAllOpenShiftPieceWorkForShift(shiftId: string, endedA
     const closedRow: ShiftPieceWork = { ...row, ended_at: endedAt };
     await localDb.shiftPieceWork.put(closedRow);
     if (connectivityMonitor.getStatus()) {
-      const { error } = await supabase.from("shift_piece_work").update({ ended_at: endedAt }).eq("id", row.id);
+      const { error } = await supabase
+        .from("shift_piece_work")
+        .update({ ended_at: endedAt })
+        .eq("id", row.id);
       if (!error) continue;
     }
     await enqueueSync("shift_piece_work", "update", closedRow as unknown as Record<string, unknown>);
   }
 }
 
-/**
- * يبدّل السياق من قطعة إلى أخرى ضمن نفس الحصة.
- *
- * عندما يختار العامل قطعة جديدة دون إنهاء القديمة بشكل صريح:
- *   1) تُغلق كل الأحداث (production + downtime المرتبطة بالقطعة) المفتوحة
- *      على القطعة السابقة لهذا العامل — يُحفظ وقتها المنجز.
- *   2) تُغلق فترة الاشتغال (`shift_piece_work`) على القطعة السابقة.
- *   3) يُعاد رقم Phase القطعة السابقة إلى 1 — لأن العمل عليها انتهى دون
- *      Terminer، فتُسلَّم للعامل التالي من البداية.
- *   4) تُفتح فترة اشتغال جديدة على القطعة الجديدة.
- *
- * ⚠️ التوقفات العامة (بدون piece_task_id) لا تُغلق — فهي غير مرتبطة بقطعة
- * معيّنة وتبقى مفتوحة عبر تبديل القطع (مثل "عطل كهربائي").
- */
 export async function switchShiftPiece(
   shiftId: string | null,
   workerId: string,
   previousPieceTaskId: string | null,
   newPieceTaskId: string,
-  newProjectId: string | null
+  newProjectId: string | null,
 ): Promise<void> {
   if (previousPieceTaskId && previousPieceTaskId !== newPieceTaskId) {
     await closeOpenSessionsForWorkerPiece(workerId, previousPieceTaskId);
@@ -543,7 +477,7 @@ export async function switchShiftPiece(
 }
 
 // ============================================================================
-// الحدث (WorkSession): toggle بحد 3 أحداث نشطة بالتوازي للعامل الواحد
+// WorkSession (الأحداث)
 // ============================================================================
 
 interface ToggleEventInput {
@@ -553,6 +487,8 @@ interface ToggleEventInput {
   projectId: string | null;
   pieceTaskId: string | null;
   planningId: string | null;
+  /** ✅ NEW : la work package à laquelle appartient cette session */
+  ofWorkPackageId: string | null;
   sessionType: SessionType;
   taskTypeId: string | null;
   stopReasonId: string | null;
@@ -567,12 +503,6 @@ function isSameButton(session: WorkSession, input: ToggleEventInput): boolean {
   return session.stop_reason_id === input.stopReasonId && session.piece_task_id === input.pieceTaskId;
 }
 
-/**
- * نقرة أولى = بدء الحدث، نقرة ثانية على نفس البطاقة = إيقافه — بدل النموذج
- * القديم الذي كان يُغلق أي حدث آخر مفتوح تلقائياً عند بدء حدث جديد.
- * يرمي MaxActiveEventsError إذا كان للعامل بالفعل 3 أحداث نشطة ولم يكن هذا
- * toggle-off لأحدها.
- */
 export async function toggleWorkerEvent(input: ToggleEventInput): Promise<WorkSession> {
   const openSessions = await fetchOpenSessionsForWorker(input.workerId);
   const existing = openSessions.find((s) => isSameButton(s, input));
@@ -602,6 +532,7 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     project_id: input.projectId,
     piece_task_id: input.pieceTaskId,
     planning_id: input.planningId,
+    of_work_package_id: input.ofWorkPackageId,
     session_type: input.sessionType,
     task_type_id: input.taskTypeId,
     stop_reason_id: input.stopReasonId,
@@ -638,9 +569,6 @@ async function closeSession(session: WorkSession): Promise<WorkSession> {
   return closedSession;
 }
 
-/** يُغلق كل الأحداث المفتوحة لعامل معيّن على قطعة محددة — يُستخدم عند
- * الضغط على Terminer/À continuer، وعند تبديل القطعة (switchShiftPiece)،
- * وليس عند تسجيل الخروج (شامل كل القطع). */
 export async function closeOpenSessionsForWorkerPiece(workerId: string, pieceTaskId: string): Promise<void> {
   const open = await fetchOpenSessionsForWorker(workerId);
   for (const s of open.filter((s) => s.piece_task_id === pieceTaskId)) {
@@ -648,8 +576,6 @@ export async function closeOpenSessionsForWorkerPiece(workerId: string, pieceTas
   }
 }
 
-/** يُغلق كل الأحداث المفتوحة لعامل معيّن مهما كانت القطعة — يُستخدم فقط عند
- * إنهاء الحصة بالكامل (تسجيل الخروج). */
 export async function closeAllOpenSessionsForWorker(workerId: string): Promise<void> {
   const open = await fetchOpenSessionsForWorker(workerId);
   for (const s of open) {
@@ -659,7 +585,11 @@ export async function closeAllOpenSessionsForWorker(workerId: string): Promise<v
 
 async function updatePieceTaskStatusIfPending(pieceTaskId: string): Promise<void> {
   if (connectivityMonitor.getStatus()) {
-    await supabase.from("pieces_tasks").update({ status: "in_progress" }).eq("id", pieceTaskId).eq("status", "pending");
+    await supabase
+      .from("pieces_tasks")
+      .update({ status: "in_progress" })
+      .eq("id", pieceTaskId)
+      .eq("status", "pending");
   }
   const cached = await localDb.piecesTasks.get(pieceTaskId);
   if (cached && cached.status === "pending") {
@@ -680,7 +610,7 @@ async function logActivity(
   workSessionId: string | null,
   machineId: string | null,
   eventType: string,
-  eventLabel: string
+  eventLabel: string,
 ): Promise<void> {
   const companyId = await resolveCompanyId();
   const entry = {
@@ -696,7 +626,6 @@ async function logActivity(
   };
 
   await localDb.activityLog.put(entry as never);
-
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("activity_log").insert(entry as never);
     if (!error) return;
@@ -704,62 +633,120 @@ async function logActivity(
   await enqueueSync("activity_log", "insert", entry);
 }
 
-// ------------------------------------------------------------------
+// ============================================================================
 // Terminer / À continuer
-// ------------------------------------------------------------------
+// ============================================================================
 
 /**
- * زر "Terminer": القطعة انتهت بالكامل. تُغلق كل الأحداث المفتوحة على هذه
- * القطعة تحديداً لهذا العامل (تُحسب ضمن الوقت الفعلي الإجمالي)، ثم تُعلَّم
- * القطعة "مكتملة" على مستويين:
- *   - `status = 'completed'`        → الحالة العامة (تُستخدم في المخطط والأرشيف).
- *   - `production_status = 'completed'` → حالة الإنتاج (تُستخدم في ProductionDashboard).
- * تحديث الحقلين معاً يضمن اتساق العرض بين Kiosk والإدارة دون انتظار Trigger.
- * يمنع الإكمال المكرر إن كانت مكتملة أصلاً.
+ * زر "Terminer" :
+ *   1. Ferme les sessions ouvertes sur la pièce.
+ *   2. Ferme le shift_piece_work.
+ *   3. Marque of_work_packages comme 'completed' (si ofWorkPackageId fourni).
+ *   4. Vérifie si toutes les WP de l'OF sont terminées :
+ *        - oui  → OF 'completed' + pièce 'completed'
+ *        - non  → pièce 'partially_done' (elle reste en cours)
  */
-export async function markPieceTaskComplete(pieceTaskId: string, workerId: string, shiftId: string | null): Promise<void> {
+export async function markPieceTaskComplete(
+  pieceTaskId: string,
+  workerId: string,
+  shiftId: string | null,
+  ofWorkPackageId: string | null,
+): Promise<void> {
   const cachedPiece = await localDb.piecesTasks.get(pieceTaskId);
-  if (cachedPiece?.status === "completed") {
-    return; // منع الإكمال المكرر
-  }
+  if (cachedPiece?.status === "completed") return;
 
+  // 1 + 2. Fermer sessions + shift_piece_work
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await closeShiftPieceWork(shiftId, pieceTaskId);
 
-  if (connectivityMonitor.getStatus()) {
-    const { error } = await supabase
-      .from("pieces_tasks")
-      .update({ status: "completed", production_status: "completed" })
-      .eq("id", pieceTaskId)
-      .neq("status", "completed");
-    if (!error) {
-      await localDb.piecesTasks.update(pieceTaskId, {
+  if (!connectivityMonitor.getStatus()) {
+    // Hors ligne : au minimum marquer la pièce localement
+    if (cachedPiece) {
+      await localDb.piecesTasks.put({ ...cachedPiece, status: "completed", production_status: "completed" });
+      await enqueueSync("pieces_tasks", "update", {
+        ...cachedPiece,
         status: "completed",
         production_status: "completed",
-      });
-      await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓");
-      return;
+      } as unknown as Record<string, unknown>);
     }
-  }
-
- 
-
-  if (!cachedPiece) {
-    console.error("تعذر إكمال القطعة أوفلاين: لا توجد نسخة محلية كافية منها");
+    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)");
     return;
   }
 
-  const updatedPiece = { ...cachedPiece, status: "completed" as const };
-  await localDb.piecesTasks.put(updatedPiece);
-  await enqueueSync("pieces_tasks", "update", updatedPiece as unknown as Record<string, unknown>);
-  await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)");
+  // 3. Marquer la WP comme terminée
+  if (ofWorkPackageId) {
+    await supabase
+      .from("of_work_packages")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        completed_by_worker_id: workerId,
+      })
+      .eq("id", ofWorkPackageId);
+  }
+
+  // 4. Vérifier l'état global de l'OF
+  let allWpDone = false;
+  if (ofWorkPackageId) {
+    const { data: wpRow } = await supabase
+      .from("of_work_packages")
+      .select("manufacturing_order_id")
+      .eq("id", ofWorkPackageId)
+      .maybeSingle();
+
+    const ofId = (wpRow as { manufacturing_order_id: string | null } | null)?.manufacturing_order_id ?? null;
+
+    if (ofId) {
+      const { data: siblings } = await supabase
+        .from("of_work_packages")
+        .select("status")
+        .eq("manufacturing_order_id", ofId);
+
+      const all = (siblings ?? []) as { status: string }[];
+      allWpDone = all.length > 0 && all.every((w) => w.status === "completed");
+
+      if (allWpDone) {
+        // L'OF entier est terminé
+        await supabase
+          .from("manufacturing_orders")
+          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .eq("id", ofId);
+      } else {
+        // Au moins une WP reste à faire → OF reste en cours
+        await supabase
+          .from("manufacturing_orders")
+          .update({ status: "in_progress" })
+          .eq("id", ofId);
+      }
+    }
+  }
+
+  // 5. Mettre à jour la pièce
+  await supabase
+  .from("pieces_tasks")
+  .update({
+    status: allWpDone ? "completed" : "in_progress",
+    production_status: allWpDone ? "completed" : "partially_done",
+    // ✅ Ajouter la date de completion
+    completed_at: allWpDone ? new Date().toISOString() : null,
+  })
+  .eq("id", pieceTaskId);
+
+  await localDb.piecesTasks.update(pieceTaskId, {
+    status: allWpDone ? "completed" : "in_progress",
+    production_status: allWpDone ? "completed" : "partially_done",
+    completed_at: allWpDone ? new Date().toISOString() : null,
+  });
+
+  await logActivity(
+    workerId,
+    null,
+    null,
+    allWpDone ? "piece_completed" : "package_completed",
+    allWpDone ? "Pièce terminée ✓" : "Paquet terminé — en attente des autres paquets",
+  );
 }
 
-/**
- * زر "À continuer": القطعة لا تزال قيد التنفيذ. تُغلق أحداث هذه القطعة
- * المفتوحة لهذا العامل (يُحفظ الوقت المنجَز)، وتبقى القطعة "in_progress"
- * لتُستأنف لاحقاً (بنفس العامل أو آخر) وتُجمَع كل الفترات في التقرير الموحد.
- */
 export async function pauseWorkOnPiece(pieceTaskId: string, workerId: string): Promise<void> {
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await updatePieceTaskStatusIfPending(pieceTaskId);
@@ -774,33 +761,25 @@ export async function updatePiecePhase(pieceTaskId: string, phase: number): Prom
     const { error } = await supabase.from("pieces_tasks").update({ phase: value }).eq("id", pieceTaskId);
     if (!error) return;
   }
-  if (cached) await enqueueSync("pieces_tasks", "update", { ...cached, phase: value } as unknown as Record<string, unknown>);
+  if (cached)
+    await enqueueSync("pieces_tasks", "update", { ...cached, phase: value } as unknown as Record<string, unknown>);
 }
 
-/** يُعيد رقم الـPhase إلى 1 محلياً وسحابياً — يُستخدم عند تبديل القطعة
- * (عمل العامل السابق لم يكتمل، فالقطعة تعود لحالتها الابتدائية للعامل
- * التالي). */
 export async function resetPiecePhase(pieceTaskId: string): Promise<void> {
   const cached = await localDb.piecesTasks.get(pieceTaskId);
   if (cached) await localDb.piecesTasks.put({ ...cached, phase: "1" });
   if (connectivityMonitor.getStatus()) {
-    const { error } = await supabase
-      .from("pieces_tasks")
-      .update({ phase: "1" })
-      .eq("id", pieceTaskId);
+    const { error } = await supabase.from("pieces_tasks").update({ phase: "1" }).eq("id", pieceTaskId);
     if (!error) return;
   }
   if (cached) {
-    await enqueueSync("pieces_tasks", "update", {
-      ...cached,
-      phase: "1",
-    } as unknown as Record<string, unknown>);
+    await enqueueSync("pieces_tasks", "update", { ...cached, phase: "1" } as unknown as Record<string, unknown>);
   }
 }
 
-// ------------------------------------------------------------------
-// سجل الأحداث والتصحيحات — بدون حذف فعلي أبداً، مع سجل تدقيق كامل// ------------------------------------------------------------------
-
+// ============================================================================
+// Corrections / audit
+// ============================================================================
 export interface CorrectionContext {
   reason: string;
   correctedByType: CorrectedByType;
@@ -808,21 +787,15 @@ export interface CorrectionContext {
   correctedByWorkerId?: string | null;
 }
 
-/**
- * يُعدّل توقيت/مدة حدث موجود. لا يحذف أي شيء أبداً: يُسجَّل التعديل في
- * work_session_corrections (من قام به، متى، القيمة القديمة والجديدة، السبب)
- * ثم تُحدَّث القيم الجديدة على السجل نفسه.
- */
 export async function correctWorkSession(
   session: WorkSession,
   durationSeconds: number,
-  context: CorrectionContext
+  context: CorrectionContext,
 ): Promise<void> {
   const newEndedAt = new Date(new Date(session.started_at).getTime() + durationSeconds * 1000).toISOString();
   const corrected: WorkSession = { ...session, ended_at: newEndedAt, duration_seconds: durationSeconds };
 
   await recordCorrection(session, corrected, "edit", context);
-
   await localDb.workSessions.put(corrected);
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("work_sessions").upsert(corrected as never);
@@ -831,11 +804,6 @@ export async function correctWorkSession(
   await enqueueSync("work_sessions", "update", corrected as unknown as Record<string, unknown>);
 }
 
-/**
- * "حذف" حدث من الحسابات النهائية — لا يُنفَّذ كحذف فعلي في القاعدة، بل
- * كإلغاء (voided_at) يُبقي السطر كاملاً في سجل التدقيق ويستبعده فقط من
- * التقارير (v_project_actuals/v_piece_task_actuals تستبعد voided_at is not null).
- */
 export async function voidWorkSession(session: WorkSession, context: CorrectionContext): Promise<void> {
   const now = new Date().toISOString();
   const voided: WorkSession = {
@@ -844,9 +812,7 @@ export async function voidWorkSession(session: WorkSession, context: CorrectionC
     voided_by_staff_id: context.correctedByStaffId ?? null,
     void_reason: context.reason,
   };
-
   await recordCorrection(session, voided, "void", context);
-
   await localDb.workSessions.put(voided);
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("work_sessions").upsert(voided as never);
@@ -859,7 +825,7 @@ async function recordCorrection(
   before: WorkSession,
   after: WorkSession,
   action: "edit" | "void",
-  context: CorrectionContext
+  context: CorrectionContext,
 ): Promise<void> {
   const companyId = await resolveCompanyId();
   const record = {
@@ -879,9 +845,7 @@ async function recordCorrection(
     new_duration_seconds: after.duration_seconds,
     created_at: new Date().toISOString(),
   };
-
   await localDb.workSessionCorrections.put(record as never);
-
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("work_session_corrections").insert(record as never);
     if (!error) return;
@@ -889,7 +853,6 @@ async function recordCorrection(
   await enqueueSync("work_session_corrections", "insert", record);
 }
 
-/** سجل تصحيحات حدث معيّن — لعرض "من/متى/القيمة القديمة والجديدة/السبب" */
 export async function fetchWorkSessionCorrections(workSessionId: string) {
   if (connectivityMonitor.getStatus()) {
     const { data, error } = await supabase
@@ -902,7 +865,11 @@ export async function fetchWorkSessionCorrections(workSessionId: string) {
       return data;
     }
   }
-  return localDb.workSessionCorrections.where("work_session_id").equals(workSessionId).reverse().sortBy("created_at");
+  return localDb.workSessionCorrections
+    .where("work_session_id")
+    .equals(workSessionId)
+    .reverse()
+    .sortBy("created_at");
 }
 
 export async function fetchWorkerActivityToday(workerId: string) {
@@ -915,23 +882,22 @@ export async function fetchWorkerActivityToday(workerId: string) {
     .sortBy("event_time");
 }
 
-/** جلسات اليوم للعامل (شاملة الملغاة، لعرضها مشطوبة في سجل الأحداث) */
 export async function fetchWorkerSessionsToday(workerId: string): Promise<WorkSession[]> {
   const today = new Date().toISOString().slice(0, 10);
   const sessions = await localDb.workSessions.where("worker_id").equals(workerId).toArray();
   return sessions.filter((s) => s.started_at.startsWith(today));
 }
 
-// ------------------------------------------------------------------
-// Passation — مرتبطة بالقطعة والمشروع والحصة والعامل، وليست رسائل عامة
-// ------------------------------------------------------------------
+// ============================================================================
+// Piece handoffs / reclamations
+// ============================================================================
 export async function createPieceHandoff(
   pieceTaskId: string,
   projectId: string | null,
   shiftId: string | null,
   workerId: string,
   message: string,
-  toWorkerId: string | null = null
+  toWorkerId: string | null = null,
 ): Promise<PieceHandoff> {
   const companyId = await resolveCompanyId();
   if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
@@ -959,7 +925,11 @@ export async function createPieceHandoff(
 
 export async function fetchPieceHandoffs(pieceTaskId: string): Promise<PieceHandoff[]> {
   if (connectivityMonitor.getStatus()) {
-    const { data, error } = await supabase.from("piece_handoffs").select("*").eq("piece_task_id", pieceTaskId).order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("piece_handoffs")
+      .select("*")
+      .eq("piece_task_id", pieceTaskId)
+      .order("created_at", { ascending: false });
     if (!error && data) {
       const rows = data as PieceHandoff[];
       await localDb.pieceHandoffs.bulkPut(rows);
@@ -977,13 +947,10 @@ export async function markPieceHandoffRead(handoff: PieceHandoff): Promise<void>
   }
 }
 
-// ------------------------------------------------------------------
-// Réclamation — إبلاغ العامل للإدارة بمشكلة أو طلب (قسم Maintenance et Besoins)
-// ------------------------------------------------------------------
 export async function createReclamation(
   workerId: string,
   machineId: string | null,
-  message: string
+  message: string,
 ): Promise<WorkshopReclamation> {
   const companyId = await resolveCompanyId();
   if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
@@ -1010,9 +977,9 @@ export async function createReclamation(
   return reclamation;
 }
 
-// ------------------------------------------------------------------
-// المخطط الكامل لكل آلة — زر "Planning" في واجهة الكشك
-// ------------------------------------------------------------------
+// ============================================================================
+// Planning overview + opérations estimées
+// ============================================================================
 export interface MachinePlanningRow {
   planning_id: string;
   machine_id: string;
@@ -1037,9 +1004,6 @@ export interface MachinePlanningRow {
   notes: string | null;
 }
 
-/** يجلب مخطط كل الآلات ليوم واحد محدد (افتراضياً اليوم) — يحتاج اتصالاً
- * بالإنترنت. يتيح للعامل التنقل بين الأمس/اليوم/الغد أو أي تاريخ مستقبلي
- * وضعه المسؤول، عبر تمرير قيمة date مختلفة */
 export async function fetchMachinePlanningOverview(date?: string): Promise<MachinePlanningRow[]> {
   if (!connectivityMonitor.getStatus()) return [];
   const targetDate = date ?? new Date().toISOString().slice(0, 10);
@@ -1050,14 +1014,8 @@ export async function fetchMachinePlanningOverview(date?: string): Promise<Machi
     .order("machine_name");
   if (error || !data) return [];
   return data as MachinePlanningRow[];
-
-  if (error || !data) return [];
-  return data as MachinePlanningRow[];
 }
 
-// ------------------------------------------------------------------
-// العمليات المُقدَّرة لقطعة (للعرض على Kiosk)
-// ------------------------------------------------------------------
 export interface PieceOperationEstimate {
   id: string;
   stage: string;
@@ -1069,13 +1027,8 @@ export interface PieceOperationEstimate {
   machine_id: string | null;
 }
 
-/**
- * يجلب عمليات قطعة مع تقديرات الوقت والتكلفة — تُستخدم لعرض "الوقت
- * التقديري" على بطاقات المهام في Kiosk (لكل عملية، وليس فقط للقطعة).
- * offline-first.
- */
 export async function fetchPieceOperationsWithEstimate(
-  pieceTaskId: string
+  pieceTaskId: string,
 ): Promise<PieceOperationEstimate[]> {
   const companyId = await resolveCompanyId();
   if (!companyId) return [];
@@ -1087,11 +1040,25 @@ export async function fetchPieceOperationsWithEstimate(
       .eq("company_id", companyId)
       .eq("piece_task_id", pieceTaskId)
       .order("sequence_order");
-
     if (!error && data) {
       return data as PieceOperationEstimate[];
     }
   }
 
   return [];
+}
+
+// ------------------------------------------------------------------
+// Work Package par ID — pour filtrer le temps estimé par interface
+// ------------------------------------------------------------------
+export async function fetchOfWorkPackageById(
+  id: string,
+): Promise<{ id: string; interface_type: "cnc" | "classique"; status: string } | null> {
+  if (!connectivityMonitor.getStatus()) return null;
+  const { data } = await supabase
+    .from("of_work_packages")
+    .select("id, interface_type, status")
+    .eq("id", id)
+    .maybeSingle();
+  return (data as { id: string; interface_type: "cnc" | "classique"; status: string } | null) ?? null;
 }

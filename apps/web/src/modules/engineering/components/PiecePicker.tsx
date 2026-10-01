@@ -29,19 +29,40 @@ export function PiecePicker({
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  const companyId = staffUser?.company_id ?? null;
+
   useEffect(() => {
+    if (!companyId) {
+      setPieces([]);
+      setIsLoading(false);
+      return;
+    }
+
     let mounted = true;
     void (async () => {
       setIsLoading(true);
-      const [{ data: projectsData }, { data: piecesData }, { data: clientsData }] =
-        await Promise.all([
-          supabase.from("projects").select("id, name, code, client_id").eq("is_archived", false),
-          supabase
-            .from("pieces_tasks")
-            .select("*")
-            .order("created_at", { ascending: false }),
-          supabase.from("clients").select("id, name"),
-        ]);
+
+      // RÈGLE DE SÉCURITÉ (C5) : company_id explicite sur les 3 requêtes.
+      const [
+        { data: projectsData },
+        { data: piecesData },
+        { data: clientsData },
+      ] = await Promise.all([
+        supabase
+          .from("projects")
+          .select("id, name, code, client_id")
+          .eq("company_id", companyId)
+          .eq("is_archived", false),
+        supabase
+          .from("pieces_tasks")
+          .select("*")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("clients")
+          .select("id, name")
+          .eq("company_id", companyId),
+      ]);
 
       const projects = (projectsData ?? []) as Pick<Project, "id" | "name" | "code" | "client_id">[];
       const clients = (clientsData ?? []) as { id: string; name: string }[];
@@ -68,10 +89,11 @@ export function PiecePicker({
         setIsLoading(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
-  }, [staffUser?.company_id, filterCostingStatus]);
+  }, [companyId, filterCostingStatus]);
 
   const filtered = pieces.filter((p) => {
     if (!search.trim()) return true;
