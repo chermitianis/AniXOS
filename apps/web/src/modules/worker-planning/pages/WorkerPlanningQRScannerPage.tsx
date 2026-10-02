@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import jsQR from "jsqr";
+const jsQR = (await import("jsqr")).default;
 import { AlertCircle, Loader2, QrCode, X, Delete, ArrowLeft } from "lucide-react";
 import { usePlanningSession } from "../context/PlanningSessionContext";
 
