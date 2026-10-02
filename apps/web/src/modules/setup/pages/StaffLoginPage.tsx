@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Mail, Lock, LogIn } from "lucide-react";
+import { Mail, Lock, LogIn, ArrowLeft } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { LanguageSwitcher } from "../../../shared/components/LanguageSwitcher";
 
 interface StaffLoginPageProps {
   onSwitchToCreateCompany: () => void;
+  /** Optionnel : retour à la landing page (depuis l'écran de connexion). */
+  onBackToLanding?: () => void;
 }
 
-export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps) {
+export function StaffLoginPage({ onSwitchToCreateCompany, onBackToLanding }: StaffLoginPageProps) {
   const { t } = useTranslation();
   const { signIn } = useStaffAuth();
   const [email, setEmail] = useState("");
@@ -30,7 +32,20 @@ export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps)
       <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-blue-500/20 blur-3xl" />
 
       <div className="relative w-full max-w-sm">
-        <div className="mb-4 flex justify-center">
+        {/* Barre supérieure : retour + langue */}
+        <div className="mb-4 flex items-center justify-between">
+          {onBackToLanding ? (
+            <button
+              type="button"
+              onClick={onBackToLanding}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeft size={14} />
+              {t("landing.nav.home", { defaultValue: "Accueil" })}
+            </button>
+          ) : (
+            <span />
+          )}
           <LanguageSwitcher variant="full" />
         </div>
 
@@ -81,7 +96,11 @@ export function StaffLoginPage({ onSwitchToCreateCompany }: StaffLoginPageProps)
             {isSubmitting ? t("auth.loggingIn") : t("auth.login")}
           </button>
 
-          <button type="button" onClick={onSwitchToCreateCompany} className="w-full text-center text-sm font-medium text-slate-500 hover:text-indigo-600">
+          <button
+            type="button"
+            onClick={onSwitchToCreateCompany}
+            className="w-full text-center text-sm font-medium text-slate-500 hover:text-indigo-600"
+          >
             {t("setup.newCompany")}
           </button>
         </form>

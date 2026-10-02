@@ -14,6 +14,7 @@ import { AdminHomePage } from "../modules/setup/pages/AdminHomePage";
 import { SubscriptionPage } from "../modules/subscription/pages/SubscriptionPage";
 import { DeveloperPanelPage } from "../modules/developer/pages/DeveloperPanelPage";
 import { SubscriptionGate } from "./SubscriptionGate";
+import { LandingPage } from "../modules/landing/pages/LandingPage";
 
 export function AppRouter() {
   const deviceMode = getLocalDeviceMode();
@@ -38,7 +39,7 @@ export function AppRouter() {
 function StaffFlowRouter() {
   const { t } = useTranslation();
   const { session, isLoading, signOut } = useStaffAuth();
-  const [authView, setAuthView] = useState<"login" | "create">("login");
+  const [authView, setAuthView] = useState<"landing" | "login" | "create">("landing");
   const [, forceRerender] = useState(0);
   const [showSubscription, setShowSubscription] = useState(false);
   const [showDeveloperPanel, setShowDeveloperPanel] = useState(false);
@@ -59,14 +60,31 @@ function StaffFlowRouter() {
     );
   }
 
+  // ⚠️ Landing page affichée quand :
+  //   - pas de session (non connecté)
+  //   - authView === "landing" (par défaut après déconnexion)
   if (!session) {
+    if (authView === "landing") {
+      return (
+        <LandingPage
+          onLogin={() => setAuthView("login")}
+          onCreateAccount={() => setAuthView("create")}
+          onPlanning={() => {
+            window.location.href = "/planning";
+          }}
+        />
+      );
+    }
     return authView === "create" ? (
       <CreateAccountPage
         onCreated={() => forceRerender((n) => n + 1)}
         onSwitchToLogin={() => setAuthView("login")}
       />
     ) : (
-      <StaffLoginPage onSwitchToCreateCompany={() => setAuthView("create")} />
+      <StaffLoginPage
+        onSwitchToCreateCompany={() => setAuthView("create")}
+        onBackToLanding={() => setAuthView("landing")}
+      />
     );
   }
 
@@ -85,17 +103,14 @@ function StaffFlowRouter() {
     );
   }
 
-  // Panneau développeur (state-based, avant SubscriptionGate car il n'y est pas soumis)
   if (showDeveloperPanel) {
     return <DeveloperPanelPage onBack={() => setShowDeveloperPanel(false)} />;
   }
 
-  // Page d'abonnement dédiée
   if (showSubscription) {
     return <SubscriptionPage onBack={() => setShowSubscription(false)} />;
   }
 
-  // Page de gestion des bases de données (multi-database)
   if (showDatabasesManager) {
     return <DatabasesManagerPage onBack={() => setShowDatabasesManager(false)} />;
   }

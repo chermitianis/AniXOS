@@ -1799,6 +1799,15 @@
     "appTitle": "Planning opérateur",
     "scanTitle": "Scanner le code QR",
     "scanHint": "Dirigez la caméra vers le code QR fourni par votre entreprise",
+    "pinTitle": "Entrez votre code PIN",
+"pinSubtitle": "Code à 4 chiffres fourni par votre responsable",
+"pinInvalid": "Code PIN incorrect",
+"pinNotSet": "Aucun code PIN n'est configuré. Contactez votre responsable.",
+"pinTooManyAttempts": "Trop de tentatives. Réessayez dans 30 secondes.",
+"pinLocked": "Verrouillé pendant {{seconds}} secondes",
+"pinClear": "Effacer",
+"pinHint": "3 tentatives maximum",
+"backToScan": "Rescanner",
     "scanButton": "Scanner mon code QR",
     "cameraError": "Impossible d'accéder à la caméra. Vérifiez les autorisations de votre navigateur.",
     "verifying": "Vérification en cours…",
@@ -1842,5 +1851,106 @@
   "colDensity": "Densité (kg/dm³)",
   "colDefault": "Prix par défaut",
   "colCompany": "Votre prix (TND/kg)"
+
+},
+
+"landing": {
+  "nav": {
+    "home": "Accueil",
+    "features": "Fonctionnalités",
+    "pricing": "Tarifs",
+    "about": "À propos",
+    "contact": "Contact",
+    "planning": "Suivi Planning",
+    "login": "Connexion",
+    "trial": "Essai gratuit"
+  },
+  "hero": {
+    "tagline": "La plateforme cloud pour l'industrie mécanique",
+    "title1": "Gérez votre production CNC",
+    "title2": "plus simplement avec",
+    "subtitle": "Une solution complète pour les entreprises de fabrication de pièces mécaniques, basée sur des machines CNC. Suivez, organisez et optimisez toute votre production depuis une seule plateforme cloud.",
+    "ctaPrimary": "Commencer maintenant",
+    "ctaSecondary": "Voir la vidéo",
+    "trialBadge": "Essai gratuit pendant 14 jours",
+    "noCard": "Aucune carte bancaire requise",
+    "sticker": "Fini les papiers !",
+    "imageAlt": "Opérateur CNC dans un atelier"
+  },
+  "advantages": {
+    "cloud": "100% Cloud",
+    "cloudDesc": "Accédez à vos données de n'importe où, sur tous vos appareils.",
+    "secure": "Sécurisé",
+    "secureDesc": "Vos données sont protégées avec les meilleurs standards.",
+    "simple": "Simple à utiliser",
+    "simpleDesc": "Une interface intuitive pour les équipes de production.",
+    "gain": "Gain de productivité",
+    "gainDesc": "Moins de temps perdu, plus de résultats.",
+    "support": "Support réactif",
+    "supportDesc": "Notre équipe vous accompagne à chaque étape."
+  },
+  "solution": {
+    "tagline": "Tout ce dont vous avez besoin",
+    "title": "Une solution complète pour votre atelier",
+    "subtitle": "AniXOS centralise tous vos processus de production pour une gestion plus efficace et plus rentable de votre activité.",
+    "bullet1": "Suivi des temps et des projets",
+    "bullet2": "Gestion des machines et des opérateurs",
+    "bullet3": "Rapports et analyses détaillées",
+    "bullet4": "Accès multi-utilisateurs avec des rôles personnalisés",
+    "bullet5": "Intégration facile et évolutive",
+    "cta": "Découvrir toutes les fonctionnalités"
+  },
+  "features": {
+    "machines": "Gestion des machines CNC",
+    "machinesDesc": "Suivi en temps réel : états, maintenance et disponibilité.",
+    "workers": "Suivi des opérateurs",
+    "workersDesc": "Temps de travail, productivité, évaluation des performances.",
+    "projects": "Gestion des projets",
+    "projectsDesc": "De la planification à la livraison, tout est sous contrôle.",
+    "reports": "Rapports & Analyses",
+    "reportsDesc": "Des données fiables pour mieux décider.",
+    "stock": "Stock & Outillages",
+    "stockDesc": "Gérez vos outils et consommables en toute simplicité.",
+    "multiSite": "Accès multi-sites",
+    "multiSiteDesc": "Vos équipes connectées, partout et tout le temps."
+  },
+  "pricing": {
+    "tagline": "Nos offres",
+    "title": "Choisissez le plan qui vous correspond",
+    "subtitle": "Des formules flexibles adaptées à la taille de votre entreprise et à vos besoins.",
+    "monthly": "Mensuel",
+    "yearly": "Annuel",
+    "starter": "Starter",
+    "starterDesc": "Idéal pour les petites entreprises",
+    "proDesc": "Pour les entreprises en croissance",
+    "enterprise": "Entreprise",
+    "enterpriseDesc": "Pour les grands groupes",
+    "perMonth": "/mois",
+    "billedYearly": "(facturé annuellement)",
+    "custom": "Sur devis",
+    "popular": "Le plus populaire",
+    "f_upTo5": "Jusqu'à 5 utilisateurs",
+    "f_upTo20": "Jusqu'à 20 utilisateurs",
+    "f_1site": "1 site de production",
+    "f_multipleSites": "Plusieurs sites",
+    "f_multipleSites2": "Plusieurs sites et usines",
+    "f_basicReports": "Fonctionnalités de base",
+    "f_allFeatures": "Toutes les fonctionnalités",
+    "f_unlimited": "Utilisateurs illimités",
+    "f_support": "Support prioritaire",
+    "f_custom": "Personnalisation avancée",
+    "choosePlan": "Choisir ce plan",
+    "contactUs": "Nous contacter"
+  },
+  "stats": {
+    "companies": "Entreprises nous font confiance",
+    "machines": "Machines connectées",
+    "satisfaction": "Satisfaction client",
+    "cta": "Essayer gratuitement"
+  },
+  "footer": {
+    "tagline": "Votre production, notre mission.",
+    "copyright": "AniXOS © {{year}} — Tous droits réservés"
+  }
 }
 }

@@ -11,24 +11,20 @@ import {
 interface PlanningSessionState {
   session: PlanningSession | null;
   isVerifying: boolean;
-  loginWithToken: (rawToken: string) => Promise<VerifyResult>;
+  loginWithToken: (rawToken: string, pin: string) => Promise<VerifyResult>;
   logout: () => void;
 }
 
 const PlanningSessionContext = createContext<PlanningSessionState | undefined>(undefined);
 
-/** Session légère et 100% locale (pas de Supabase Auth) : le "login" n'est
- * qu'une vérification du token scanné auprès de l'Edge Function, puis un
- * enregistrement dans localStorage pour que l'opérateur n'ait plus jamais à
- * rescanner sur ce téléphone — jusqu'à une régénération du QR côté serveur. */
 export function PlanningSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<PlanningSession | null>(() => loadPlanningSession());
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const loginWithToken = useCallback(async (rawToken: string) => {
+  const loginWithToken = useCallback(async (rawToken: string, pin: string) => {
     setIsVerifying(true);
     try {
-      const result = await verifyPlanningToken(rawToken);
+      const result = await verifyPlanningToken(rawToken, pin);
       if (result.ok) {
         savePlanningSession(result.session);
         setSession(result.session);

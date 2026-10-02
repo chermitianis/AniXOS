@@ -3,8 +3,9 @@ import { parsePlanningQrToken } from "../../../shared/utils/planningQrToken";
 
 // ============================================================================
 // Client de la PWA Planning opérateur (/planning). Aucune session Supabase
-// Auth ici : l'app ne connaît que { companyId, secret } (venant du QR),
-// revérifiés par l'Edge Function `worker-planning-access` à chaque appel.
+// Auth ici : l'app ne connaît que { companyId, secret, workerId, workerName }
+// (venant du QR + PIN vérifié), revérifiés par l'Edge Function
+// `worker-planning-access` à chaque appel.
 // Lecture seule stricte — cette API n'écrit jamais rien.
 // ============================================================================
 
@@ -12,6 +13,10 @@ export interface PlanningSession {
   companyId: string;
   secret: string;
   companyName: string;
+  /** Identifiant de l'opérateur authentifié par son PIN (2FA). */
+  workerId: string;
+  workerName: string;
+  interfaceType: string;
 }
 
 export interface PlanningRow {
@@ -62,25 +67,51 @@ export function clearPlanningSession() {
 
 export type VerifyResult =
   | { ok: true; session: PlanningSession }
-  | { ok: false; error: "invalid_token" | "subscription_required" | "network_error" };
+  | {
+      ok: false;
+      error:
+        | "invalid_token"
+        | "invalid_pin"
+        | "pin_not_set"
+        | "subscription_required"
+        | "network_error";
+    };
 
-export async function verifyPlanningToken(rawToken: string): Promise<VerifyResult> {
+export async function verifyPlanningToken(
+  rawToken: string,
+  pin: string,
+): Promise<VerifyResult> {
   const parsed = parsePlanningQrToken(rawToken);
   if (!parsed) return { ok: false, error: "invalid_token" };
 
   try {
     const { data, error } = await supabase.functions.invoke("worker-planning-access", {
-      body: { action: "verify", company_id: parsed.companyId, secret: parsed.secret },
+      body: {
+        action: "verify",
+        company_id: parsed.companyId,
+        secret: parsed.secret,
+        pin,
+      },
     });
 
     if (error || !data?.success) {
-      const errCode = data?.error === "subscription_required" ? "subscription_required" : "invalid_token";
-      return { ok: false, error: errCode };
+      const rawErr = data?.error;
+      if (rawErr === "subscription_required") return { ok: false, error: "subscription_required" };
+      if (rawErr === "invalid_pin") return { ok: false, error: "invalid_pin" };
+      if (rawErr === "pin_not_set") return { ok: false, error: "pin_not_set" };
+      return { ok: false, error: "invalid_token" };
     }
 
     return {
       ok: true,
-      session: { companyId: parsed.companyId, secret: parsed.secret, companyName: data.company_name ?? "" },
+      session: {
+        companyId: parsed.companyId,
+        secret: parsed.secret,
+        companyName: data.company_name ?? "",
+        workerId: data.worker_id ?? "",
+        workerName: data.worker_name ?? "",
+        interfaceType: data.interface_type ?? "both",
+      },
     };
   } catch {
     return { ok: false, error: "network_error" };
@@ -111,14 +142,14 @@ function writeCache(companyId: string, date: string, rows: PlanningRow[], fetche
   try {
     localStorage.setItem(cacheKey(companyId, date), JSON.stringify({ rows, fetchedAt }));
   } catch {
-    /* quota dépassé ou navigation privée — tant pis, pas de cache pour cette date */
+    /* quota dépassé ou navigation privée */
   }
 }
 
-/** Lit le planning d'une date pour la company de la session en cours.
- * En cas d'échec réseau, retombe sur la dernière copie mise en cache
- * localement pour cette même date (mode hors-ligne de la PWA). */
-export async function fetchPlanningForDate(session: PlanningSession, date: string): Promise<FetchPlanningResult> {
+export async function fetchPlanningForDate(
+  session: PlanningSession,
+  date: string,
+): Promise<FetchPlanningResult> {
   try {
     const { data, error } = await supabase.functions.invoke("worker-planning-access", {
       body: { action: "fetch", company_id: session.companyId, secret: session.secret, date },

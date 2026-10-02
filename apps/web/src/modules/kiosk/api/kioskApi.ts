@@ -4,12 +4,11 @@
 // الكاش مباشرة عند الانقطاع.
 //
 // إضافات 2026-10-02 :
-//   - Correction: planning.status utilise 'done' (contrainte DB), pas 'completed'.
+//   - Correction: planning.status utilise 'done' (contrainte DB).
 //   - fetchConsumedSecondsForPiece: temps consommé pour calcul du temps restant.
 //   - fetchWorkerPlanningQueue: tri par sequence_order.
-//   - fetchAllProjectsForWorker: liste complète des projets (pièce d'urgence).
-//   - searchPiecesInCompany: recherche rapide par nom/code (pièce d'urgence).
-//   - createEmergencyPieceTask: création pièce + planning manuel par l'opérateur.
+//   - fetchAllProjectsForWorker / searchPiecesInCompany / createEmergencyPieceTask.
+//   - fetchDayPlanningForKiosk: vue planning complète (jour) pour le Kiosk.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -17,6 +16,7 @@ import { localDb } from "../../../lib/localDb";
 import { connectivityMonitor } from "../../../lib/connectivity";
 import { enqueueSync } from "../../../lib/syncQueue";
 import { resolveCompanyId } from "../../../lib/companyContext";
+import { getStageInterface } from "../../nomenclature/lib/costingConstants";
 import type {
   TaskType,
   StopReason,
@@ -642,14 +642,6 @@ async function logActivity(
 // Terminer / À continuer
 // ============================================================================
 
-/**
- * زر "Terminer" :
- *   1. Ferme les sessions ouvertes sur la pièce.
- *   2. Ferme le shift_piece_work.
- *   3. Marque la WP active comme 'completed'.
- *   4. Vérifie si TOUTES les WPs de l'OF sont terminées.
- *   5. Ferme les planning entries liées.
- */
 export async function markPieceTaskComplete(
   pieceTaskId: string,
   workerId: string,
@@ -1053,9 +1045,6 @@ export async function fetchPieceOperationsWithEstimate(
   return [];
 }
 
-// ------------------------------------------------------------------
-// Work Package par ID — pour filtrer le temps estimé par interface
-// ------------------------------------------------------------------
 export async function fetchOfWorkPackageById(
   id: string,
 ): Promise<{ id: string; interface_type: "cnc" | "classique"; status: string } | null> {
@@ -1068,9 +1057,6 @@ export async function fetchOfWorkPackageById(
   return (data as { id: string; interface_type: "cnc" | "classique"; status: string } | null) ?? null;
 }
 
-// ------------------------------------------------------------------
-// Temps consommé sur une pièce (production + downtime)
-// ------------------------------------------------------------------
 export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
   const nowMs = Date.now();
 
@@ -1122,11 +1108,6 @@ export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise
 // Pièce d'urgence — ajout manuel par l'opérateur
 // ============================================================================
 
-/**
- * Récupère TOUS les projets actifs de la compagnie (pour le sélecteur
- * d'addition d'urgence). L'opérateur peut choisir n'importe quel projet,
- * même s'il ne lui a pas été planifié.
- */
 export async function fetchAllProjectsForWorker(): Promise<Project[]> {
   const companyId = await resolveCompanyId();
   if (!companyId) return [];
@@ -1146,10 +1127,6 @@ export async function fetchAllProjectsForWorker(): Promise<Project[]> {
   return localDb.projects.where("company_id").equals(companyId).sortBy("name");
 }
 
-/**
- * Recherche rapide de pièces par nom ou code (max 30 résultats).
- * Utilisé dans le modal d'addition d'urgence pour la "recherche soudaine".
- */
 export async function searchPiecesInCompany(query: string): Promise<PieceTask[]> {
   const companyId = await resolveCompanyId();
   if (!companyId) return [];
@@ -1196,13 +1173,6 @@ interface CreateEmergencyPieceInput {
   machineId: string | null;
 }
 
-/**
- * Crée une pièce d'urgence + son entrée planning pour ce worker
- * (aujourd'hui, shift 1).
- *
- * Retourne l'ID de la pièce + l'ID du planning créé, pour permettre
- * la sélection automatique par le Kiosk.
- */
 export async function createEmergencyPieceTask(
   input: CreateEmergencyPieceInput,
 ): Promise<{ pieceTaskId: string; planningId: string }> {
@@ -1215,7 +1185,6 @@ export async function createEmergencyPieceTask(
   let pieceTaskId = input.existingPieceTaskId ?? null;
 
   if (!pieceTaskId) {
-    // Création d'une nouvelle pièce
     pieceTaskId = crypto.randomUUID();
     const newPiece: PieceTask = {
       id: pieceTaskId,
@@ -1261,7 +1230,6 @@ export async function createEmergencyPieceTask(
       await enqueueSync("pieces_tasks", "insert", newPiece as unknown as Record<string, unknown>);
     }
   } else {
-    // Mise à jour de la note technique si fournie
     if (input.technicalNotes) {
       const cached = await localDb.piecesTasks.get(pieceTaskId);
       if (cached) {
@@ -1276,7 +1244,6 @@ export async function createEmergencyPieceTask(
     }
   }
 
-  // Créer le planning
   const planningId = crypto.randomUUID();
   const newPlanning = {
     id: planningId,
@@ -1313,4 +1280,234 @@ export async function createEmergencyPieceTask(
   }
 
   return { pieceTaskId, planningId };
+}
+
+// ============================================================================
+// Kiosk Planning Viewer — vue jour par jour pour l'opérateur (lecture seule)
+// ============================================================================
+
+export interface KioskPlanningCard {
+  planning_id: string;
+  machine_id: string;
+  machine_name: string;
+  machine_code: string | null;
+  machine_interface: string | null;
+  worker_id: string;
+  worker_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  project_code: string | null;
+  piece_task_id: string | null;
+  piece_name: string | null;
+  piece_code: string | null;
+  quantity: number | null;
+  material: string | null;
+  client_name: string | null;
+  shift_number: number;
+  sequence_order: number;
+  status: string;
+  estimated_time_minutes: number | null;
+  of_work_package_id: string | null;
+  wp_interface: "cnc" | "classique" | null;
+  wp_label: string | null;
+  order_number: string | null;
+  product_name: string | null;
+  cell_worker_id: string | null;
+  cell_worker_name: string | null;
+}
+
+function parseShiftNumberForKiosk(raw: string | null): number {
+  if (!raw) return 1;
+  const n = parseInt(raw, 10);
+  if (!Number.isNaN(n)) return n;
+  const m = raw.match(/poste_(\d+)/);
+  if (m) return parseInt(m[1], 10) || 1;
+  return 1;
+}
+
+export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlanningCard[]> {
+  const companyId = await resolveCompanyId();
+  if (!companyId) return [];
+  if (!connectivityMonitor.getStatus()) return [];
+
+  // 1. Planning + joins
+  const { data, error } = await supabase
+    .from("planning")
+    .select(
+      "id, machine_id, worker_id, project_id, piece_task_id, shift_number, sequence_order, status, of_work_package_id, " +
+        "machines(id, name, code, interface_type), " +
+        "workers(id, full_name), " +
+        "projects(id, name, code, clients(name)), " +
+        "pieces_tasks(id, name, code, quantity, material), " +
+        "of_work_packages(id, interface_type, label), " +
+        "manufacturing_orders(id, order_number, product_name)",
+    )
+    .eq("company_id", companyId)
+    .eq("planned_date", date)
+    .in("status", ["scheduled", "in_progress"])
+    .order("shift_number")
+    .order("sequence_order");
+
+  if (error || !data) {
+    console.error("[KioskPlanningViewer] load error:", error);
+    return [];
+  }
+
+  // 2. Cell workers pour la même date
+  const { data: cwData } = await supabase
+    .from("planning_cell_workers")
+    .select("machine_id, shift_number, worker_id")
+    .eq("company_id", companyId)
+    .eq("planned_date", date);
+
+  const cellWorkersMap = new Map<string, string>();
+  const cellWorkerIds = new Set<string>();
+  for (const cw of (cwData ?? []) as Array<{
+    machine_id: string;
+    shift_number: string;
+    worker_id: string;
+  }>) {
+    const key = `${cw.machine_id}__${parseShiftNumberForKiosk(cw.shift_number)}`;
+    cellWorkersMap.set(key, cw.worker_id);
+    cellWorkerIds.add(cw.worker_id);
+  }
+
+  // 3. Noms des cell workers
+  const workersMap = new Map<string, string>();
+  for (const r of data as unknown as Array<{ workers: { id?: string; full_name?: string } | null }>) {
+    if (r.workers?.id && r.workers.full_name) {
+      workersMap.set(r.workers.id, r.workers.full_name);
+    }
+  }
+  const missingWorkerIds = Array.from(cellWorkerIds).filter((id) => !workersMap.has(id));
+  if (missingWorkerIds.length > 0) {
+    const { data: workersData } = await supabase
+      .from("workers")
+      .select("id, full_name")
+      .in("id", missingWorkerIds);
+    for (const w of (workersData ?? []) as Array<{ id: string; full_name: string }>) {
+      workersMap.set(w.id, w.full_name);
+    }
+  }
+
+  // 4. Opérations de chiffrage pour toutes les pièces du jour
+  const pieceIds = Array.from(
+    new Set(
+      (data as unknown as Array<{ piece_task_id: string | null }>)
+        .map((r) => r.piece_task_id)
+        .filter((x): x is string => !!x),
+    ),
+  );
+
+  const opsByPiece = new Map<string, Array<{ stage: string; estimated_hours: number }>>();
+  if (pieceIds.length > 0) {
+    const { data: opsData } = await supabase
+      .from("piece_costing_operations")
+      .select("piece_task_id, stage, estimated_hours")
+      .eq("company_id", companyId)
+      .in("piece_task_id", pieceIds);
+
+    for (const op of (opsData ?? []) as Array<{
+      piece_task_id: string | null;
+      stage: string;
+      estimated_hours: number;
+    }>) {
+      if (!op.piece_task_id) continue;
+      const arr = opsByPiece.get(op.piece_task_id) ?? [];
+      arr.push({ stage: op.stage, estimated_hours: op.estimated_hours });
+      opsByPiece.set(op.piece_task_id, arr);
+    }
+  }
+
+  // 5. Construire les cartes
+  const rows = data as unknown as Array<{
+    id: string;
+    machine_id: string | null;
+    worker_id: string;
+    project_id: string | null;
+    piece_task_id: string | null;
+    shift_number: string | null;
+    sequence_order: number | null;
+    status: string;
+    of_work_package_id: string | null;
+    machines: { id?: string; name?: string; code?: string | null; interface_type?: string } | null;
+    workers: { id?: string; full_name?: string } | null;
+    projects: {
+      id?: string;
+      name?: string;
+      code?: string | null;
+      clients?: { name?: string } | null;
+    } | null;
+    pieces_tasks: {
+      id?: string;
+      name?: string;
+      code?: string | null;
+      quantity?: number;
+      material?: string | null;
+    } | null;
+    of_work_packages: { id?: string; interface_type?: string; label?: string | null } | null;
+    manufacturing_orders: {
+      id?: string;
+      order_number?: string;
+      product_name?: string;
+    } | null;
+  }>;
+
+  const cards: KioskPlanningCard[] = rows.map((r) => {
+    const machineId = r.machine_id ?? r.machines?.id ?? "";
+    const shiftN = parseShiftNumberForKiosk(r.shift_number);
+    const cellKey = `${machineId}__${shiftN}`;
+    const cellWorkerId = cellWorkersMap.get(cellKey) ?? null;
+    const cellWorkerName = cellWorkerId ? workersMap.get(cellWorkerId) ?? null : null;
+
+    const wpInterface =
+      (r.of_work_packages?.interface_type as "cnc" | "classique" | undefined) ?? null;
+
+    let estimatedMin: number | null = null;
+    if (r.piece_task_id) {
+      const ops = opsByPiece.get(r.piece_task_id);
+      if (ops && ops.length > 0) {
+        const filtered = wpInterface
+          ? ops.filter((op) => getStageInterface(op.stage) === wpInterface)
+          : ops;
+        const total = filtered.reduce(
+          (sum, op) => sum + Math.round(op.estimated_hours * 60),
+          0,
+        );
+        estimatedMin = total > 0 ? total : null;
+      }
+    }
+
+    return {
+      planning_id: r.id,
+      machine_id: machineId,
+      machine_name: r.machines?.name ?? "",
+      machine_code: r.machines?.code ?? null,
+      machine_interface: r.machines?.interface_type ?? null,
+      worker_id: r.worker_id,
+      worker_name: r.workers?.full_name ?? null,
+      project_id: r.project_id,
+      project_name: r.projects?.name ?? null,
+      project_code: r.projects?.code ?? null,
+      piece_task_id: r.piece_task_id,
+      piece_name: r.pieces_tasks?.name ?? null,
+      piece_code: r.pieces_tasks?.code ?? null,
+      quantity: r.pieces_tasks?.quantity ?? null,
+      material: r.pieces_tasks?.material ?? null,
+      client_name: r.projects?.clients?.name ?? null,
+      shift_number: shiftN,
+      sequence_order: r.sequence_order ?? 1,
+      status: r.status,
+      estimated_time_minutes: estimatedMin,
+      of_work_package_id: r.of_work_package_id,
+      wp_interface: wpInterface,
+      wp_label: r.of_work_packages?.label ?? null,
+      order_number: r.manufacturing_orders?.order_number ?? null,
+      product_name: r.manufacturing_orders?.product_name ?? null,
+      cell_worker_id: cellWorkerId,
+      cell_worker_name: cellWorkerName,
+    };
+  });
+
+  return cards;
 }
