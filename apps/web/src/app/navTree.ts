@@ -115,7 +115,7 @@ export const NAV_TREE: NavGroup[] = [
     labelKey: "navGroup.production",
     label: "Production",
     items: [
-      L("production_dashboard", "Tableau de bord", {
+      L("production_dashboard", "Suivi OF", {
         page: "production_dashboard", perm: "production", icon: Gauge,
       }),
       L("production_preparation", "Préparation des dossiers", {

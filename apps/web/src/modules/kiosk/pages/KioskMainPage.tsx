@@ -12,6 +12,7 @@ import { StopReasonsGrid } from "../components/StopReasonsGrid";
 import { SidePanel } from "../components/SidePanel";
 import { FooterBar } from "../components/FooterBar";
 import { ProjectPieceSelectorModal } from "../components/ProjectPieceSelectorModal";
+import { AddEmergencyPieceModal } from "../components/AddEmergencyPieceModal";
 import { SessionCorrectionModal } from "../components/SessionCorrectionModal";
 import { LogoutConfirmModal } from "../components/LogoutConfirmModal";
 import { startCredentialsSync } from "../../../lib/credentialsSync";
@@ -39,6 +40,7 @@ interface KioskWorkspaceProps {
 function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspaceProps) {
   const { t } = useTranslation();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
   const [correctionSession, setCorrectionSession] = useState<WorkSession | null>(null);
   const [showMaxActiveWarning, setShowMaxActiveWarning] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -64,7 +66,8 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     project,
     pieceTask,
     ofWorkPackageId,
-    ofWorkPackageInterface,  // ✅ NEW
+    ofWorkPackageInterface,
+    consumedSeconds,
     activeSessions,
     selectPlanningOption,
     toggleProductionTask,
@@ -115,6 +118,14 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     void reloadPlanning();
   }
 
+  /** ✅ NEW : après création d'une pièce d'urgence, on recharge le planning
+   *  et on ouvre le sélecteur pour permettre à l'opérateur de la choisir. */
+  async function handleEmergencyPieceCreated(_pieceTaskId: string, _planningId: string) {
+    await reloadPlanning();
+    // Ouvre le sélecteur pour que l'opérateur retrouve sa pièce dans la liste.
+    setIsSelectorOpen(true);
+  }
+
   async function handleLogoutRequest() {
     if (await hasOpenPieceEvents()) {
       setIsLogoutConfirmOpen(true);
@@ -146,10 +157,12 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         pieceTask={pieceTask}
         ofWorkPackageId={ofWorkPackageId}
         estimatedTotalMinutes={estimatedTotalMinutes || null}
+        consumedSeconds={consumedSeconds}
         onOpenSelector={() => setIsSelectorOpen(true)}
         onCompletePiece={() => void handleCompletePiece()}
         onPausePiece={() => void handlePausePiece()}
         onChangePhase={(delta) => void changePhase(delta)}
+        onAddEmergencyPiece={() => setIsEmergencyOpen(true)}
       />
 
       {showMaxActiveWarning && (
@@ -195,6 +208,19 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
           loadPiecesForOption={loadPiecesForOption}
           onSelect={(option, piece) => void handleSelectFromModal(option, piece)}
           onClose={() => setIsSelectorOpen(false)}
+        />
+      )}
+
+      {/* ✅ NEW : Modal d'ajout d'une pièce d'urgence */}
+      {isEmergencyOpen && (
+        <AddEmergencyPieceModal
+          workerId={worker.id}
+          shiftId={worker.shift_id}
+          machineId={machine?.id ?? null}
+          onCreated={(pieceTaskId, planningId) =>
+            void handleEmergencyPieceCreated(pieceTaskId, planningId)
+          }
+          onClose={() => setIsEmergencyOpen(false)}
         />
       )}
 

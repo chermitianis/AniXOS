@@ -65,6 +65,7 @@
     "projectCode": "CODE PROJET",
     "piece": "PIÈCE",
     "estimation": "ESTIMATION",
+    "remainingTime": "TEMPS RESTANT",
     "change": "Changer",
     "noMachine": "Non définie",
     "noActiveProject": "Aucun projet actif",
@@ -158,8 +159,36 @@
     "logoutConfirmStay": "Rester",
     "logoutConfirmProceed": "Se déconnecter quand même",
     "quantity": "QUANTITÉ",
-      "workPackage": "Paquet",
-  "workPackageActive": "En cours"
+    "workPackage": "Paquet",
+    "workPackageActive": "En cours",
+
+    "addEmergency": {
+  "button": "Pièce urgente",
+  "buttonHint": "Ajouter une pièce hors planning (urgence)",
+  "title": "Ajouter une pièce urgente",
+  "searchPieceLabel": "Recherche rapide d'une pièce existante",
+  "searchPiecePlaceholder": "Tapez au moins 2 caractères (nom ou code)...",
+  "pieceSelected": "Pièce existante sélectionnée",
+  "orManual": "OU saisie manuelle",
+  "pieceNameLabel": "Nom de la pièce",
+  "pieceNamePlaceholder": "Ex. : Bride de fixation",
+  "quickOpen": "Fichier",
+  "quickOpenHint": "Prendre le nom d'un fichier local comme nom de pièce",
+  "projectLabel": "Projet",
+  "projectSearchPlaceholder": "Rechercher un projet...",
+  "noProjects": "Aucun projet disponible",
+  "projectCodeLabel": "Code projet",
+  "quantityLabel": "Quantité",
+  "notesLabel": "Description de la tâche (optionnel)",
+  "notesPlaceholder": "Ex. : réparation d'urgence, remplacement d'une pièce cassée...",
+  "notesHint": "Cette description apparaîtra dans le rapport de la pièce.",
+  "submit": "Créer la pièce",
+  "errors": {
+    "noProject": "Veuillez sélectionner un projet",
+    "noPieceName": "Veuillez saisir ou sélectionner un nom de pièce",
+    "invalidQuantity": "La quantité doit être au moins 1"
+  }
+}
   },
   "subscription": {
     "expiredTitle": "Période d'essai terminée",
@@ -239,7 +268,7 @@
     "crm_prospects": "Prospects",
     "crm_clients": "Clients",
     "crm_devis": "Devis",
-    "production_dashboard": "Tableau de bord",
+    "production_dashboard": "Suivi OF",
     "production_preparation": "Préparation des dossiers",
     "production_ordres": "Ordres de fabrication",
     "production_planification": "Planification",
@@ -742,7 +771,7 @@
     "costingDraft": "Brouillon",
     "costingPending": "En étude",
     "costingValidated": "Validé",
-  
+
     "prodNotSent": "Non envoyée",
     "prodSent": "Envoyée",
     "prodInPreparation": "En préparation",
@@ -967,7 +996,11 @@
     "date": "Date",
     "dropHere": "Déposer l'OF ici",
     "assignedOf": "OF assignés"
+
   },
+
+      "changeWorker": "Changer l'opérateur",
+    "workerAssigned": "Affecté",
 
   "workSettings": {
     "title": "Paramètres de travail",
@@ -1004,6 +1037,7 @@
     "chooseWorker": "Choisir un opérateur",
     "selectWorker": "Sélectionner un opérateur",
     "workerBusy": "Occupé"
+
   }
 }
 },

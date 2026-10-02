@@ -3,10 +3,13 @@
 // كل دالة هنا: تحاول أونلاين → تُحدِّث الكاش المحلي عند النجاح → أو تقرأ من
 // الكاش مباشرة عند الانقطاع.
 //
-// إضافات 2026-09-30 :
-//   - of_work_package_id في work_sessions (لربط كل جلسة بحزمتها).
-//   - markPieceTaskComplete يُغلق of_work_package ويُحدّث OF عند الاكتمال.
-//   - fetchOfWorkPackageById لجلب id + interface_type + status.
+// إضافات 2026-10-02 :
+//   - Correction: planning.status utilise 'done' (contrainte DB), pas 'completed'.
+//   - fetchConsumedSecondsForPiece: temps consommé pour calcul du temps restant.
+//   - fetchWorkerPlanningQueue: tri par sequence_order.
+//   - fetchAllProjectsForWorker: liste complète des projets (pièce d'urgence).
+//   - searchPiecesInCompany: recherche rapide par nom/code (pièce d'urgence).
+//   - createEmergencyPieceTask: création pièce + planning manuel par l'opérateur.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -98,7 +101,8 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
       .lte("planned_date", today)
       .in("status", ["scheduled", "in_progress"])
       .order("planned_date", { ascending: false })
-      .order("shift_number");
+      .order("shift_number")
+      .order("sequence_order", { ascending: true });
 
     if (!error && data) {
       const rows = data as PlanningEntry[];
@@ -116,7 +120,9 @@ export async function fetchWorkerPlanningQueue(workerId: string): Promise<Planni
       rows.sort((a, b) => {
         const dateOrder = b.planned_date.localeCompare(a.planned_date);
         if (dateOrder !== 0) return dateOrder;
-        return String(a.shift_number ?? "").localeCompare(String(b.shift_number ?? ""));
+        const shiftOrder = String(a.shift_number ?? "").localeCompare(String(b.shift_number ?? ""));
+        if (shiftOrder !== 0) return shiftOrder;
+        return (a.sequence_order ?? 1) - (b.sequence_order ?? 1);
       }),
     );
 }
@@ -487,7 +493,6 @@ interface ToggleEventInput {
   projectId: string | null;
   pieceTaskId: string | null;
   planningId: string | null;
-  /** ✅ NEW : la work package à laquelle appartient cette session */
   ofWorkPackageId: string | null;
   sessionType: SessionType;
   taskTypeId: string | null;
@@ -641,10 +646,9 @@ async function logActivity(
  * زر "Terminer" :
  *   1. Ferme les sessions ouvertes sur la pièce.
  *   2. Ferme le shift_piece_work.
- *   3. Marque of_work_packages comme 'completed' (si ofWorkPackageId fourni).
- *   4. Vérifie si toutes les WP de l'OF sont terminées :
- *        - oui  → OF 'completed' + pièce 'completed'
- *        - non  → pièce 'partially_done' (elle reste en cours)
+ *   3. Marque la WP active comme 'completed'.
+ *   4. Vérifie si TOUTES les WPs de l'OF sont terminées.
+ *   5. Ferme les planning entries liées.
  */
 export async function markPieceTaskComplete(
   pieceTaskId: string,
@@ -655,12 +659,10 @@ export async function markPieceTaskComplete(
   const cachedPiece = await localDb.piecesTasks.get(pieceTaskId);
   if (cachedPiece?.status === "completed") return;
 
-  // 1 + 2. Fermer sessions + shift_piece_work
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await closeShiftPieceWork(shiftId, pieceTaskId);
 
   if (!connectivityMonitor.getStatus()) {
-    // Hors ligne : au minimum marquer la pièce localement
     if (cachedPiece) {
       await localDb.piecesTasks.put({ ...cachedPiece, status: "completed", production_status: "completed" });
       await enqueueSync("pieces_tasks", "update", {
@@ -673,46 +675,43 @@ export async function markPieceTaskComplete(
     return;
   }
 
-  // 3. Marquer la WP comme terminée
+  const nowIso = new Date().toISOString();
+
   if (ofWorkPackageId) {
     await supabase
       .from("of_work_packages")
       .update({
         status: "completed",
-        completed_at: new Date().toISOString(),
+        completed_at: nowIso,
         completed_by_worker_id: workerId,
       })
       .eq("id", ofWorkPackageId);
   }
 
-  // 4. Vérifier l'état global de l'OF
   let allWpDone = false;
+  let ofId: string | null = null;
   if (ofWorkPackageId) {
     const { data: wpRow } = await supabase
       .from("of_work_packages")
       .select("manufacturing_order_id")
       .eq("id", ofWorkPackageId)
       .maybeSingle();
-
-    const ofId = (wpRow as { manufacturing_order_id: string | null } | null)?.manufacturing_order_id ?? null;
+    ofId = (wpRow as { manufacturing_order_id: string | null } | null)?.manufacturing_order_id ?? null;
 
     if (ofId) {
       const { data: siblings } = await supabase
         .from("of_work_packages")
         .select("status")
         .eq("manufacturing_order_id", ofId);
-
       const all = (siblings ?? []) as { status: string }[];
       allWpDone = all.length > 0 && all.every((w) => w.status === "completed");
 
       if (allWpDone) {
-        // L'OF entier est terminé
         await supabase
           .from("manufacturing_orders")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .update({ status: "completed", completed_at: nowIso })
           .eq("id", ofId);
       } else {
-        // Au moins une WP reste à faire → OF reste en cours
         await supabase
           .from("manufacturing_orders")
           .update({ status: "in_progress" })
@@ -721,22 +720,28 @@ export async function markPieceTaskComplete(
     }
   }
 
-  // 5. Mettre à jour la pièce
   await supabase
-  .from("pieces_tasks")
-  .update({
-    status: allWpDone ? "completed" : "in_progress",
-    production_status: allWpDone ? "completed" : "partially_done",
-    // ✅ Ajouter la date de completion
-    completed_at: allWpDone ? new Date().toISOString() : null,
-  })
-  .eq("id", pieceTaskId);
+    .from("pieces_tasks")
+    .update({
+      status: allWpDone ? "completed" : "in_progress",
+      production_status: allWpDone ? "completed" : "partially_done",
+      completed_at: allWpDone ? nowIso : null,
+    })
+    .eq("id", pieceTaskId);
 
   await localDb.piecesTasks.update(pieceTaskId, {
     status: allWpDone ? "completed" : "in_progress",
     production_status: allWpDone ? "completed" : "partially_done",
-    completed_at: allWpDone ? new Date().toISOString() : null,
+    completed_at: allWpDone ? nowIso : null,
   });
+
+  await supabase
+    .from("planning")
+    .update({ status: "done" })
+    .eq("piece_task_id", pieceTaskId)
+    .eq("worker_id", workerId)
+    .eq("company_id", (await resolveCompanyId()) ?? "")
+    .in("status", ["scheduled", "in_progress"]);
 
   await logActivity(
     workerId,
@@ -1061,4 +1066,251 @@ export async function fetchOfWorkPackageById(
     .eq("id", id)
     .maybeSingle();
   return (data as { id: string; interface_type: "cnc" | "classique"; status: string } | null) ?? null;
+}
+
+// ------------------------------------------------------------------
+// Temps consommé sur une pièce (production + downtime)
+// ------------------------------------------------------------------
+export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
+  const nowMs = Date.now();
+
+  if (connectivityMonitor.getStatus()) {
+    const { data, error } = await supabase
+      .from("work_sessions")
+      .select("started_at, ended_at, duration_seconds, voided_at")
+      .eq("piece_task_id", pieceTaskId)
+      .is("voided_at", null);
+
+    if (!error && data) {
+      const rows = data as Array<{
+        started_at: string;
+        ended_at: string | null;
+        duration_seconds: number | null;
+        voided_at: string | null;
+      }>;
+      let total = 0;
+      for (const r of rows) {
+        if (r.voided_at) continue;
+        if (r.ended_at) {
+          total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
+        } else {
+          total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
+        }
+      }
+      return total;
+    }
+  }
+
+  const localRows = await localDb.workSessions
+    .where("piece_task_id")
+    .equals(pieceTaskId)
+    .toArray();
+
+  let total = 0;
+  for (const r of localRows) {
+    if (r.voided_at) continue;
+    if (r.ended_at) {
+      total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
+    } else {
+      total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
+    }
+  }
+  return total;
+}
+
+// ============================================================================
+// Pièce d'urgence — ajout manuel par l'opérateur
+// ============================================================================
+
+/**
+ * Récupère TOUS les projets actifs de la compagnie (pour le sélecteur
+ * d'addition d'urgence). L'opérateur peut choisir n'importe quel projet,
+ * même s'il ne lui a pas été planifié.
+ */
+export async function fetchAllProjectsForWorker(): Promise<Project[]> {
+  const companyId = await resolveCompanyId();
+  if (!companyId) return [];
+
+  if (connectivityMonitor.getStatus()) {
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("name");
+    if (!error && data) {
+      const rows = data as Project[];
+      await localDb.projects.bulkPut(rows);
+      return rows;
+    }
+  }
+  return localDb.projects.where("company_id").equals(companyId).sortBy("name");
+}
+
+/**
+ * Recherche rapide de pièces par nom ou code (max 30 résultats).
+ * Utilisé dans le modal d'addition d'urgence pour la "recherche soudaine".
+ */
+export async function searchPiecesInCompany(query: string): Promise<PieceTask[]> {
+  const companyId = await resolveCompanyId();
+  if (!companyId) return [];
+
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  if (connectivityMonitor.getStatus()) {
+    const { data, error } = await supabase
+      .from("pieces_tasks")
+      .select("*")
+      .eq("company_id", companyId)
+      .or(`name.ilike.%${q}%,code.ilike.%${q}%`)
+      .neq("status", "cancelled")
+      .limit(30);
+    if (!error && data) {
+      const rows = data as PieceTask[];
+      await localDb.piecesTasks.bulkPut(rows);
+      return rows;
+    }
+  }
+
+  const all = await localDb.piecesTasks.where("company_id").equals(companyId).toArray();
+  const lower = q.toLowerCase();
+  return all
+    .filter(
+      (p) =>
+        p.name.toLowerCase().includes(lower) ||
+        (p.code ?? "").toLowerCase().includes(lower),
+    )
+    .filter((p) => p.status !== "cancelled")
+    .slice(0, 30);
+}
+
+interface CreateEmergencyPieceInput {
+  workerId: string;
+  shiftId: string | null;
+  projectId: string;
+  pieceName: string;
+  pieceCode: string | null;
+  quantity: number;
+  technicalNotes: string | null;
+  existingPieceTaskId?: string | null;
+  machineId: string | null;
+}
+
+/**
+ * Crée une pièce d'urgence + son entrée planning pour ce worker
+ * (aujourd'hui, shift 1).
+ *
+ * Retourne l'ID de la pièce + l'ID du planning créé, pour permettre
+ * la sélection automatique par le Kiosk.
+ */
+export async function createEmergencyPieceTask(
+  input: CreateEmergencyPieceInput,
+): Promise<{ pieceTaskId: string; planningId: string }> {
+  const companyId = await resolveCompanyId();
+  if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
+
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+
+  let pieceTaskId = input.existingPieceTaskId ?? null;
+
+  if (!pieceTaskId) {
+    // Création d'une nouvelle pièce
+    pieceTaskId = crypto.randomUUID();
+    const newPiece: PieceTask = {
+      id: pieceTaskId,
+      company_id: companyId,
+      project_id: input.projectId,
+      name: input.pieceName,
+      code: input.pieceCode,
+      quantity: input.quantity,
+      phase: "1",
+      status: "in_progress",
+      production_status: "in_progress",
+      costing_status: "non_etudie",
+      technical_status: "en_attente",
+      technical_notes: input.technicalNotes,
+      sequence_order: 0,
+      created_at: now,
+      updated_at: now,
+      completed_at: null,
+      manufacturing_order_id: null,
+      nomenclature_id: null,
+      estimated_minutes: null,
+      estimated_time_minutes: null,
+      cnc_estimated_hours: null,
+      cnc_estimated_cost: null,
+      scheduled_at: null,
+      sent_to_production_at: null,
+      technical_validated_at: null,
+      material: null,
+      drawing_url: null,
+      primary_operation_type: null,
+    };
+
+    await localDb.piecesTasks.put(newPiece);
+
+    if (connectivityMonitor.getStatus()) {
+      const { error: pieceErr } = await supabase
+        .from("pieces_tasks")
+        .insert(newPiece as never);
+      if (pieceErr) {
+        await enqueueSync("pieces_tasks", "insert", newPiece as unknown as Record<string, unknown>);
+      }
+    } else {
+      await enqueueSync("pieces_tasks", "insert", newPiece as unknown as Record<string, unknown>);
+    }
+  } else {
+    // Mise à jour de la note technique si fournie
+    if (input.technicalNotes) {
+      const cached = await localDb.piecesTasks.get(pieceTaskId);
+      if (cached) {
+        await localDb.piecesTasks.put({ ...cached, technical_notes: input.technicalNotes });
+      }
+      if (connectivityMonitor.getStatus()) {
+        await supabase
+          .from("pieces_tasks")
+          .update({ technical_notes: input.technicalNotes } as never)
+          .eq("id", pieceTaskId);
+      }
+    }
+  }
+
+  // Créer le planning
+  const planningId = crypto.randomUUID();
+  const newPlanning = {
+    id: planningId,
+    company_id: companyId,
+    worker_id: input.workerId,
+    machine_id: input.machineId,
+    project_id: input.projectId,
+    piece_task_id: pieceTaskId,
+    of_work_package_id: null,
+    manufacturing_order_id: null,
+    planned_date: today,
+    shift_number: "1",
+    shift_start: null,
+    shift_end: null,
+    status: "scheduled",
+    sequence_order: 1,
+    notes: "[URGENT] Ajout manuel par opérateur",
+    created_by: null,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+  };
+
+  await localDb.planning.put(newPlanning as never);
+
+  if (connectivityMonitor.getStatus()) {
+    const { error: planErr } = await supabase.from("planning").insert(newPlanning as never);
+    if (planErr) {
+      await enqueueSync("planning", "insert", newPlanning as unknown as Record<string, unknown>);
+    }
+  } else {
+    await enqueueSync("planning", "insert", newPlanning as unknown as Record<string, unknown>);
+  }
+
+  return { pieceTaskId, planningId };
 }

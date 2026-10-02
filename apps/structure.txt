@@ -150,7 +150,21 @@ apps
 │   │   │   │       └── NomenclaturePage.tsx
 │   │   │   ├── planning
 │   │   │   ├── procurement
+│   │   │   ├── production
+│   │   │   │   └── api
+│   │   │   │       ├── manufacturingOrdersApi.ts
+│   │   │   │       └── projectsStatusApi.ts
+│   │   │   ├── production-reports
+│   │   │   │   ├── api
+│   │   │   │   │   └── productionReportsApi.ts
+│   │   │   │   └── pages
+│   │   │   │       ├── DailyShiftsTab.tsx
+│   │   │   │       ├── PiecesReportsTab.tsx
+│   │   │   │       ├── ProductionReportsPage.tsx
+│   │   │   │       └── ProjectCompletionTab.tsx
 │   │   │   ├── reports
+│   │   │   │   ├── api
+│   │   │   │   │   └── reportsApi.ts
 │   │   │   │   ├── components
 │   │   │   │   │   ├── ChartCard.tsx
 │   │   │   │   │   ├── EmptyState.tsx
@@ -172,10 +186,13 @@ apps
 │   │   │   │   │   ├── PlanningQrSecurityCard.tsx
 │   │   │   │   │   └── SettingsGate.tsx
 │   │   │   │   ├── hooks
+│   │   │   │   │   ├── odoo.zip
 │   │   │   │   │   └── useOdooConfig.ts
 │   │   │   │   ├── pages
+│   │   │   │   │   ├── CompanyWorkSettingsPage.tsx
 │   │   │   │   │   ├── DatabasePage.tsx
 │   │   │   │   │   ├── DeviceSettingsPage.tsx
+│   │   │   │   │   ├── MaterialPricesPage.tsx
 │   │   │   │   │   ├── MyProfilePage.tsx
 │   │   │   │   │   ├── RolesAdminPage.tsx
 │   │   │   │   │   ├── SettingsPage.tsx
@@ -233,6 +250,8 @@ apps
 │   │   │           ├── WorkerPlanningHomePage.tsx
 │   │   │           └── WorkerPlanningQRScannerPage.tsx
 │   │   ├── shared
+│   │   │   ├── api
+│   │   │   │   └── companyWorkSettingsApi.ts
 │   │   │   ├── components
 │   │   │   │   ├── AppLogo.tsx
 │   │   │   │   ├── LanguageSwitcher.tsx
@@ -246,6 +265,7 @@ apps
 │   │   │   └── utils
 │   │   │       ├── codes.ts
 │   │   │       ├── interfaceFilter.ts
+│   │   │       ├── of.ts
 │   │   │       └── planningQrToken.ts
 │   │   ├── styles
 │   │   ├── types

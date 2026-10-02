@@ -5,8 +5,12 @@
 //
 // ⚠️ إضافة 2026-09-30 :
 //   - ofWorkPackageInterface : "cnc" | "classique" | null
-//     يُستخدم في KioskMainPage لفلترة الوقت التقديري (المطلوب: تقدير
-//     الحزمة النشطة فقط، وليس مجموع كل العمليات).
+//     يُستخدم في KioskMainPage لفلترة الوقت التقديري.
+//
+// ⚠️ إضافة 2026-10-02 :
+//   - consumedSeconds : الوقت المستهلك على القطعة (production + downtime)
+//     من work_sessions، لحساب "الوقت المتبقي" في ContextBar.
+//     يُحدّث كل 30 ثانية تلقائياً أثناء وجود قطعة نشطة.
 // ============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -24,7 +28,8 @@ import {
   updatePiecePhase,
   openShiftPieceWork,
   switchShiftPiece,
-  fetchOfWorkPackageById,  // ✅ NEW
+  fetchOfWorkPackageById,
+  fetchConsumedSecondsForPiece,  // ✅ NEW
 } from "../api/kioskApi";
 import type { PlanningProjectOption } from "./useWorkerPlanning";
 import type {
@@ -40,6 +45,7 @@ export type ToggleResult = { ok: true } | { ok: false; reason: "max_active" };
 export type WpInterface = "cnc" | "classique";
 
 const MAX_PHASE = 200;
+const CONSUMED_REFRESH_INTERVAL_MS = 30_000; // 30s
 
 interface ActiveTaskState {
   machine: Machine | null;
@@ -47,8 +53,10 @@ interface ActiveTaskState {
   pieceTask: PieceTask | null;
   planningId: string | null;
   ofWorkPackageId: string | null;
-  /** ✅ NEW : interface de la WP active — pour filtrer l'estimation. */
+  /** ✅ interface de la WP active — pour filtrer l'estimation. */
   ofWorkPackageInterface: WpInterface | null;
+  /** ✅ NEW : temps consommé (secondes) sur la pièce active. */
+  consumedSeconds: number;
   activeSessions: WorkSession[];
   isLoadingContext: boolean;
   setMachine: (machine: Machine | null) => void;
@@ -61,6 +69,8 @@ interface ActiveTaskState {
   pausePiece: () => Promise<void>;
   changePhase: (delta: number) => Promise<void>;
   refreshActiveSessions: () => Promise<void>;
+  /** ✅ NEW : force le recalcul de consumedSeconds. */
+  refreshConsumedSeconds: () => Promise<void>;
 }
 
 export function useActiveTask(workerId: string, shiftId: string | null): ActiveTaskState {
@@ -70,11 +80,41 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
   const [planningId, setPlanningId] = useState<string | null>(null);
   const [ofWorkPackageId, setOfWorkPackageId] = useState<string | null>(null);
   const [ofWorkPackageInterface, setOfWorkPackageInterface] = useState<WpInterface | null>(null);
+  const [consumedSeconds, setConsumedSeconds] = useState<number>(0);  // ✅ NEW
   const [activeSessions, setActiveSessions] = useState<WorkSession[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(true);
 
   const ofWpRef = useRef<string | null>(null);
   useEffect(() => { ofWpRef.current = ofWorkPackageId; }, [ofWorkPackageId]);
+
+  // Réf. sur l'id de la pièce active — pour éviter les dépendances cycliques
+  const pieceIdRef = useRef<string | null>(null);
+  useEffect(() => { pieceIdRef.current = pieceTask?.id ?? null; }, [pieceTask?.id]);
+
+  // ✅ NEW : recalcul de consumedSeconds pour la pièce active
+  const refreshConsumedSeconds = useCallback(async () => {
+    const pid = pieceIdRef.current;
+    if (!pid) {
+      setConsumedSeconds(0);
+      return;
+    }
+    const seconds = await fetchConsumedSecondsForPiece(pid);
+    setConsumedSeconds(seconds);
+  }, []);
+
+  // ✅ NEW : rafraîchit consumedSeconds à chaque changement de pièce
+  useEffect(() => {
+    void refreshConsumedSeconds();
+  }, [pieceTask?.id, refreshConsumedSeconds]);
+
+  // ✅ NEW : polling toutes les 30s pendant qu'une pièce est active
+  useEffect(() => {
+    if (!pieceTask?.id) return;
+    const interval = setInterval(() => {
+      void refreshConsumedSeconds();
+    }, CONSUMED_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [pieceTask?.id, refreshConsumedSeconds]);
 
   useEffect(() => {
     let isMounted = true;
@@ -194,13 +234,15 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           stopReasonId: null,
         });
         setActiveSessions(await fetchOpenSessionsForWorker(workerId));
+        // ✅ recalcul du temps consommé (une session vient de démarrer/terminer)
+        await refreshConsumedSeconds();
         return { ok: true };
       } catch (err) {
         if (err instanceof MaxActiveEventsError) return { ok: false, reason: "max_active" };
         throw err;
       }
     },
-    [workerId, shiftId, machine, project, pieceTask, planningId],
+    [workerId, shiftId, machine, project, pieceTask, planningId, refreshConsumedSeconds],
   );
 
   const toggleStopReason = useCallback(
@@ -220,13 +262,15 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           note,
         });
         setActiveSessions(await fetchOpenSessionsForWorker(workerId));
+        // ✅ recalcul du temps consommé
+        await refreshConsumedSeconds();
         return { ok: true };
       } catch (err) {
         if (err instanceof MaxActiveEventsError) return { ok: false, reason: "max_active" };
         throw err;
       }
     },
-    [workerId, shiftId, machine, project, pieceTask, planningId],
+    [workerId, shiftId, machine, project, pieceTask, planningId, refreshConsumedSeconds],
   );
 
   const completePiece = useCallback(async () => {
@@ -235,6 +279,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     setPieceTask(null);
     setOfWorkPackageId(null);
     setOfWorkPackageInterface(null);
+    setConsumedSeconds(0);  // ✅ reset
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
   }, [pieceTask, workerId, shiftId]);
 
@@ -242,7 +287,9 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     if (!pieceTask) return;
     await pauseWorkOnPiece(pieceTask.id, workerId);
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
-  }, [pieceTask, workerId]);
+    // ✅ recalcul après pause (sessions fermées)
+    await refreshConsumedSeconds();
+  }, [pieceTask, workerId, refreshConsumedSeconds]);
 
   const changePhase = useCallback(
     async (delta: number) => {
@@ -267,6 +314,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     planningId,
     ofWorkPackageId,
     ofWorkPackageInterface,
+    consumedSeconds,  // ✅ NEW
     activeSessions,
     isLoadingContext,
     setMachine,
@@ -279,5 +327,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     pausePiece,
     changePhase,
     refreshActiveSessions,
+    refreshConsumedSeconds,  // ✅ NEW
   };
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers,
+  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers, Plus,
 } from "lucide-react";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
 import type { Machine, Project, PieceTask } from "../../../shared/types/database";
@@ -14,14 +14,18 @@ interface ContextBarProps {
   machine: Machine | null;
   project: Project | null;
   pieceTask: PieceTask | null;
-  /** ✅ NEW : la work package actuellement sélectionnée (CNC / Classique). */
+  /** ✅ la work package actuellement sélectionnée (CNC / Classique). */
   ofWorkPackageId?: string | null;
   /** Temps total estimé pour la pièce (depuis piece_costing_operations). */
   estimatedTotalMinutes?: number | null;
+  /** ✅ NEW : temps consommé (secondes) depuis la 1ère ouverture de la pièce. */
+  consumedSeconds?: number | null;
   onOpenSelector: () => void;
   onCompletePiece: () => void;
   onPausePiece: () => void;
   onChangePhase: (delta: number) => void;
+  /** ✅ NEW : ouvre le modal d'addition d'une pièce d'urgence. */
+  onAddEmergencyPiece: () => void;
 }
 
 function Field({
@@ -78,13 +82,6 @@ function DecisionButtons({
       <div className="ms-auto flex items-center gap-2">
         <button
           type="button"
-          onClick={() => setPendingAction("pause")}
-          className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-white shadow-md shadow-amber-200 transition-transform active:scale-95 hover:bg-amber-600"
-        >
-          <PauseCircle size={18} /> {t("kiosk.inProgress")}
-        </button>
-        <button
-          type="button"
           onClick={() => setPendingAction("finish")}
           className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-md shadow-emerald-200 transition-transform active:scale-95 hover:bg-emerald-700"
         >
@@ -134,9 +131,10 @@ function DecisionButtons({
 
 /** Formate un nombre de minutes en "Xh YYmin" — retourne "—" si 0/null. */
 function formatMinutes(min: number | null | undefined): string {
-  if (!min || min <= 0) return "—";
-  const h = Math.floor(min / 60);
-  const m = min % 60;
+  if (min === null || min === undefined) return "—";
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
   if (h === 0) return `${m} min`;
   if (m === 0) return `${h} h`;
   return `${h} h ${m.toString().padStart(2, "0")}`;
@@ -149,10 +147,12 @@ export function ContextBar({
   pieceTask,
   ofWorkPackageId,
   estimatedTotalMinutes,
+  consumedSeconds,
   onOpenSelector,
   onCompletePiece,
   onPausePiece,
   onChangePhase,
+  onAddEmergencyPiece,
 }: ContextBarProps) {
   const { t } = useTranslation();
   const [isToolsOpen, setIsToolsOpen] = useState(false);
@@ -165,7 +165,11 @@ export function ContextBar({
     pieceTask?.estimated_time_minutes ??
     0;
 
-  // Nom court de la work package (juste pour indiquer qu'une WP est active)
+  // ✅ Temps restant = estimation − temps consommé (en minutes)
+  const consumedMin = consumedSeconds != null ? Math.round(consumedSeconds / 60) : 0;
+  const remainingMin = estimatedMin > 0 ? estimatedMin - consumedMin : null;
+  const isOverrun = remainingMin !== null && remainingMin <= 0;
+
   const wpActive = Boolean(ofWorkPackageId);
 
   return (
@@ -228,7 +232,35 @@ export function ContextBar({
         value={formatMinutes(estimatedMin)}
       />
 
-      {/* ✅ Nouveau : indicateur de work package active */}
+      {/* ✅ Temps restant (vert si > 0, rouge si dépassé) */}
+      {remainingMin !== null && (
+        <div
+          className={`flex min-w-[130px] flex-col rounded-xl border px-3 py-2 shadow-sm transition-colors ${
+            isOverrun
+              ? "border-red-300 bg-red-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
+          <span
+            className={`text-[10px] font-bold uppercase tracking-wider ${
+              isOverrun ? "text-red-600" : "text-emerald-600"
+            }`}
+          >
+            {t("kiosk.remainingTime")}
+          </span>
+          <span
+            className={`mt-0.5 truncate text-sm font-extrabold ${
+              isOverrun ? "text-red-700" : "text-emerald-700"
+            }`}
+          >
+            {isOverrun
+              ? `+${formatMinutes(Math.abs(remainingMin))}`
+              : formatMinutes(remainingMin)}
+          </span>
+        </div>
+      )}
+
+      {/* ✅ Indicateur de work package active */}
       {wpActive && (
         <div className="flex min-w-[110px] flex-col rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 shadow-sm">
           <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
@@ -240,6 +272,17 @@ export function ContextBar({
           </span>
         </div>
       )}
+
+      {/* ✅ NEW : Bouton "+ Pièce d'urgence" */}
+      <button
+        type="button"
+        onClick={onAddEmergencyPiece}
+        className="flex items-center gap-1.5 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50 px-3 py-2.5 text-xs font-black text-amber-700 transition hover:border-amber-500 hover:bg-amber-100 active:scale-95"
+        title={t("kiosk.addEmergency.buttonHint")}
+      >
+        <Plus size={16} />
+        {t("kiosk.addEmergency.button")}
+      </button>
 
       {pieceTask && (
         <button
