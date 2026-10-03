@@ -19,6 +19,9 @@ import {
   QrCode,
 } from "lucide-react";
 import { AppLogo } from "../../../shared/components/AppLogo";
+import { supabase } from "../../../lib/supabaseClient";
+import { BillingToggle, type BillingCycle } from "../../subscription/components/BillingToggle";
+import { PlanCard, PLAN_ICONS, type PlanDefinition } from "../../subscription/components/PlanCard";
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -26,16 +29,134 @@ interface LandingPageProps {
   onPlanning: () => void;
 }
 
+interface PlatformSettings {
+  currency: string;
+  trial_days: number;
+  standard_monthly_price: number;
+  standard_yearly_price: number;
+  premium_monthly_price: number;
+  premium_yearly_price: number;
+  standard_max_databases: number;
+  standard_max_staff: number;
+  premium_max_databases: number;
+  premium_max_staff: number;
+}
+
 /**
  * Page d'accueil publique d'AniXOS.
  * Affichée à la racine "/" quand aucune session ni device mode n'existe.
- * Affiche la vitrine, puis redirige vers Login / CreateAccount / Planning.
+ * Les tarifs sont chargés dynamiquement depuis `platform_settings` (RPC
+ * `get_platform_settings`) — même source que la page Subscription.
  */
 export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPageProps) {
   const { t, i18n } = useTranslation();
-  const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
+
+  const [billing, setBilling] = useState<BillingCycle>("monthly");
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
 
   const isRtl = i18n.language === "ar";
+
+  // Charge les paramètres de tarification (même RPC que SubscriptionPage)
+  useEffect(() => {
+    let isMounted = true;
+    void (async () => {
+      const { data } = await supabase.rpc("get_platform_settings");
+      if (isMounted) {
+        if (data && data.length > 0) {
+          setPlatformSettings(data[0] as PlatformSettings);
+        }
+        setPricingLoading(false);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const currency = platformSettings?.currency ?? "TND";
+
+  const plans: PlanDefinition[] = platformSettings
+    ? [
+        {
+          id: "trial",
+          name: t("subscription.planTrial"),
+          icon: PLAN_ICONS.trial,
+          iconBg: "bg-slate-100 text-slate-600",
+          priceMonthly: 0,
+          priceYearly: 0,
+          ctaLabel: t("landing.pricing.choosePlan", { defaultValue: "Choisir ce plan" }),
+          onCta: onCreateAccount,
+          features: [
+            { label: t("subscription.featuresMaxDatabases", { count: 1 }), included: true },
+            { label: t("subscription.featuresMaxStaff", { count: 10 }), included: true },
+            { label: t("subscription.featuresPwaWorker"), included: true },
+            { label: t("subscription.featuresEmailSupport"), included: false },
+            { label: t("subscription.featuresQRCode"), included: false },
+            { label: t("subscription.featuresExportImport"), included: false },
+          ],
+        },
+        {
+          id: "standard",
+          name: t("subscription.planStandard"),
+          icon: PLAN_ICONS.standard,
+          iconBg: "bg-indigo-100 text-indigo-600",
+          priceMonthly: platformSettings.standard_monthly_price,
+          priceYearly: platformSettings.standard_yearly_price,
+          isPopular: true,
+          ctaLabel: t("landing.pricing.choosePlan", { defaultValue: "Choisir ce plan" }),
+          onCta: onCreateAccount,
+          features: [
+            {
+              label: t("subscription.featuresMaxDatabases", {
+                count: platformSettings.standard_max_databases,
+              }),
+              included: true,
+              highlight: true,
+            },
+            {
+              label: t("subscription.featuresMaxStaff", {
+                count: platformSettings.standard_max_staff,
+              }),
+              included: true,
+            },
+            { label: t("subscription.featuresPwaWorker"), included: true },
+            { label: t("subscription.featuresEmailSupport"), included: true },
+            { label: t("subscription.featuresQRCode"), included: false },
+            { label: t("subscription.featuresExportImport"), included: true },
+          ],
+        },
+        {
+          id: "premium",
+          name: t("subscription.planPremium"),
+          icon: PLAN_ICONS.premium,
+          iconBg: "bg-amber-100 text-amber-600",
+          priceMonthly: platformSettings.premium_monthly_price,
+          priceYearly: platformSettings.premium_yearly_price,
+          ctaLabel: t("landing.pricing.choosePlan", { defaultValue: "Choisir ce plan" }),
+          onCta: onCreateAccount,
+          features: [
+            {
+              label: t("subscription.featuresMaxDatabases", {
+                count: platformSettings.premium_max_databases,
+              }),
+              included: true,
+              highlight: true,
+            },
+            {
+              label: t("subscription.featuresMaxStaff", {
+                count: platformSettings.premium_max_staff,
+              }),
+              included: true,
+            },
+            { label: t("subscription.featuresPwaWorker"), included: true },
+            { label: t("subscription.featuresPrioritySupport"), included: true },
+            { label: t("subscription.featuresQRCode"), included: true, highlight: true },
+            { label: t("subscription.featuresExportImport"), included: true },
+          ],
+        },
+      ]
+    : [];
 
   return (
     <div className="min-h-screen bg-white text-slate-800" dir={isRtl ? "rtl" : "ltr"}>
@@ -91,18 +212,11 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
         </div>
       </header>
 
-           {/* ==================== HERO ==================== */}
-           <section
-        id="accueil"
-        className="relative isolate overflow-hidden bg-slate-900"
-      >
-        {/* Rotation automatique des images de fond */}
+      {/* ==================== HERO ==================== */}
+      <section id="accueil" className="relative isolate overflow-hidden bg-slate-900">
         <HeroBackground />
-
-        {/* Overlay dégradé pour lisibilité du texte */}
         <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/70 to-transparent" />
 
-        {/* Contenu */}
         <div className="relative mx-auto flex min-h-[560px] max-w-7xl items-center px-4 py-16 sm:px-6 lg:min-h-[680px] lg:px-8 lg:py-24">
           <div className="max-w-xl text-white">
             <p className="mb-5 text-xs font-black uppercase tracking-[0.18em] text-orange-400">
@@ -115,7 +229,10 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
               {t("landing.hero.title1", { defaultValue: "Gérez votre production CNC" })}{" "}
               <br />
               {t("landing.hero.title2", { defaultValue: "plus simplement avec" })}{" "}
-              <span className="text-orange-500">AniXOS</span>
+              <span>
+                <span className="text-white">Ani</span>
+                <span className="text-orange-500">XOS</span>
+              </span>
             </h1>
 
             <p className="mb-8 max-w-lg text-base text-slate-300 sm:text-lg">
@@ -134,7 +251,9 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
                 {t("landing.hero.ctaPrimary", { defaultValue: "Commencer maintenant" })}
                 <ArrowRight
                   size={16}
-                  className={`transition ${isRtl ? "rotate-180 group-hover:-translate-x-1" : "group-hover:translate-x-1"}`}
+                  className={`transition ${
+                    isRtl ? "rotate-180 group-hover:-translate-x-1" : "group-hover:translate-x-1"
+                  }`}
                 />
               </button>
               <a
@@ -162,14 +281,16 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
 
           {/* Badge "Fini les papiers !" */}
           <div
-            className={`pointer-events-none absolute top-24 ${isRtl ? "left-1/4" : "right-1/4"} rotate-6 rounded-lg bg-white px-3 py-1.5 text-xs font-black text-slate-800 shadow-xl`}
+            className={`pointer-events-none absolute top-24 ${
+              isRtl ? "left-1/4" : "right-1/4"
+            } rotate-6 rounded-lg bg-white px-3 py-1.5 text-xs font-black text-slate-800 shadow-xl`}
           >
             {t("landing.hero.sticker", { defaultValue: "Fini les papiers !" })}
           </div>
         </div>
       </section>
 
-      {/* ==================== AVANTAGES (Bande) ==================== */}
+      {/* ==================== AVANTAGES ==================== */}
       <section className="border-b border-slate-100 bg-white">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-5 lg:px-8">
           <AdvantageItem
@@ -213,7 +334,6 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
       {/* ==================== SOLUTION COMPLÈTE ==================== */}
       <section id="fonctionnalites" className="bg-slate-50">
         <div className="mx-auto grid max-w-7xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[minmax(0,1fr)_2fr] lg:gap-16 lg:px-8 lg:py-24">
-          {/* Colonne gauche : présentation */}
           <div>
             <p className="mb-4 text-xs font-black uppercase tracking-[0.18em] text-orange-500">
               {t("landing.solution.tagline", { defaultValue: "Tout ce dont vous avez besoin" })}
@@ -256,7 +376,6 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
             </button>
           </div>
 
-          {/* Colonne droite : grille de 6 features */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <FeatureCard
               icon={<Monitor size={22} />}
@@ -325,93 +444,22 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
               </p>
             </div>
 
-            <div className="flex items-center gap-3 lg:justify-end">
-              <button
-                type="button"
-                onClick={() => setBillingCycle("monthly")}
-                className={`rounded-full px-4 py-1.5 text-xs font-bold transition ${
-                  billingCycle === "monthly" ? "bg-white text-slate-900" : "text-slate-300 hover:text-white"
-                }`}
-              >
-                {t("landing.pricing.monthly", { defaultValue: "Mensuel" })}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBillingCycle("yearly")}
-                className={`relative rounded-full px-4 py-1.5 text-xs font-bold transition ${
-                  billingCycle === "yearly" ? "bg-white text-slate-900" : "text-slate-300 hover:text-white"
-                }`}
-              >
-                {t("landing.pricing.yearly", { defaultValue: "Annuel" })}
-                <span className="absolute -top-2 -right-6 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-black text-white">
-                  -20%
-                </span>
-              </button>
+            <div className="flex items-center justify-end">
+              <BillingToggle value={billing} onChange={setBilling} />
             </div>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-3">
-            <PricingCard
-              name={t("landing.pricing.starter", { defaultValue: "Starter" })}
-              subtitle={t("landing.pricing.starterDesc", {
-                defaultValue: "Idéal pour les petites entreprises",
-              })}
-              price={billingCycle === "monthly" ? "29 €" : "23 €"}
-              unit={t("landing.pricing.perMonth", { defaultValue: "/mois" })}
-              billingNote={
-                billingCycle === "yearly"
-                  ? t("landing.pricing.billedYearly", { defaultValue: "(facturé annuellement)" })
-                  : undefined
-              }
-              features={[
-                t("landing.pricing.f_upTo5", { defaultValue: "Jusqu'à 5 utilisateurs" }),
-                t("landing.pricing.f_1site", { defaultValue: "1 site de production" }),
-                t("landing.pricing.f_basicReports", { defaultValue: "Fonctionnalités de base" }),
-              ]}
-              cta={t("landing.pricing.choosePlan", { defaultValue: "Choisir ce plan" })}
-              onCta={onCreateAccount}
-            />
-            <PricingCard
-              highlight
-              badge={t("landing.pricing.popular", { defaultValue: "Le plus populaire" })}
-              name="Pro"
-              subtitle={t("landing.pricing.proDesc", {
-                defaultValue: "Pour les entreprises en croissance",
-              })}
-              price={billingCycle === "monthly" ? "69 €" : "55 €"}
-              unit={t("landing.pricing.perMonth", { defaultValue: "/mois" })}
-              billingNote={
-                billingCycle === "yearly"
-                  ? t("landing.pricing.billedYearly", { defaultValue: "(facturé annuellement)" })
-                  : undefined
-              }
-              features={[
-                t("landing.pricing.f_upTo20", { defaultValue: "Jusqu'à 20 utilisateurs" }),
-                t("landing.pricing.f_multipleSites", { defaultValue: "Plusieurs sites" }),
-                t("landing.pricing.f_allFeatures", { defaultValue: "Toutes les fonctionnalités" }),
-              ]}
-              cta={t("landing.pricing.choosePlan", { defaultValue: "Choisir ce plan" })}
-              onCta={onCreateAccount}
-            />
-            <PricingCard
-              name={t("landing.pricing.enterprise", { defaultValue: "Entreprise" })}
-              subtitle={t("landing.pricing.enterpriseDesc", {
-                defaultValue: "Pour les grands groupes",
-              })}
-              price={t("landing.pricing.custom", { defaultValue: "Sur devis" })}
-              unit=""
-              features={[
-                t("landing.pricing.f_unlimited", { defaultValue: "Utilisateurs illimités" }),
-                t("landing.pricing.f_multipleSites2", { defaultValue: "Plusieurs sites et usines" }),
-                t("landing.pricing.f_support", { defaultValue: "Support prioritaire" }),
-                t("landing.pricing.f_custom", { defaultValue: "Personnalisation avancée" }),
-              ]}
-              cta={t("landing.pricing.contactUs", { defaultValue: "Nous contacter" })}
-              onCta={() => {
-                window.location.href = "mailto:contact@anixos.app";
-              }}
-            />
-          </div>
+          {pricingLoading ? (
+            <div className="flex items-center justify-center py-16 text-sm text-slate-400">
+              {t("common.loading")}
+            </div>
+          ) : (
+            <div className="grid gap-5 lg:grid-cols-3">
+              {plans.map((plan) => (
+                <PlanCard key={plan.id} plan={plan} billing={billing} currency={currency} />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -419,9 +467,18 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
       <section className="bg-slate-950 text-white">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 py-10 sm:px-6 lg:flex-row lg:px-8">
           <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-3 lg:w-auto lg:gap-12">
-            <StatItem value="+500" label={t("landing.stats.companies", { defaultValue: "Entreprises nous font confiance" })} />
-            <StatItem value="+1 200" label={t("landing.stats.machines", { defaultValue: "Machines connectées" })} />
-            <StatItem value="+98%" label={t("landing.stats.satisfaction", { defaultValue: "Satisfaction client" })} />
+            <StatItem
+              value="+500"
+              label={t("landing.stats.companies", { defaultValue: "Entreprises nous font confiance" })}
+            />
+            <StatItem
+              value="+1 200"
+              label={t("landing.stats.machines", { defaultValue: "Machines connectées" })}
+            />
+            <StatItem
+              value="+98%"
+              label={t("landing.stats.satisfaction", { defaultValue: "Satisfaction client" })}
+            />
           </div>
 
           <button
@@ -430,7 +487,10 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
             className="group inline-flex items-center gap-2 rounded-full bg-orange-500 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-500/30 transition hover:bg-orange-600"
           >
             {t("landing.stats.cta", { defaultValue: "Essayer gratuitement" })}
-            <ArrowRight size={16} className={`transition ${isRtl ? "rotate-180" : "group-hover:translate-x-1"}`} />
+            <ArrowRight
+              size={16}
+              className={`transition ${isRtl ? "rotate-180" : "group-hover:translate-x-1"}`}
+            />
           </button>
         </div>
       </section>
@@ -460,7 +520,15 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
 // Sous-composants
 // ============================================================
 
-function AdvantageItem({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+function AdvantageItem({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-500">
@@ -474,7 +542,15 @@ function AdvantageItem({ icon, title, body }: { icon: React.ReactNode; title: st
   );
 }
 
-function FeatureCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+function FeatureCard({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-orange-200 hover:shadow-md">
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
@@ -482,78 +558,6 @@ function FeatureCard({ icon, title, body }: { icon: React.ReactNode; title: stri
       </div>
       <div className="mb-1.5 text-sm font-black text-slate-800">{title}</div>
       <div className="text-xs text-slate-500">{body}</div>
-    </div>
-  );
-}
-
-interface PricingCardProps {
-  name: string;
-  subtitle: string;
-  price: string;
-  unit: string;
-  billingNote?: string;
-  features: string[];
-  cta: string;
-  onCta: () => void;
-  highlight?: boolean;
-  badge?: string;
-}
-
-function PricingCard({
-  name,
-  subtitle,
-  price,
-  unit,
-  billingNote,
-  features,
-  cta,
-  onCta,
-  highlight,
-  badge,
-}: PricingCardProps) {
-  return (
-    <div
-      className={`relative rounded-2xl border p-6 transition ${
-        highlight
-          ? "border-orange-500 bg-slate-800/80 shadow-2xl shadow-orange-500/10 ring-1 ring-orange-500/30"
-          : "border-slate-700 bg-slate-800/40"
-      }`}
-    >
-      {badge && (
-        <span className="absolute -top-3 start-6 rounded-full bg-orange-500 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white">
-          {badge}
-        </span>
-      )}
-      <div className="mb-1 text-lg font-black">{name}</div>
-      <div className="mb-5 text-xs text-slate-400">{subtitle}</div>
-
-      <div className="mb-1 flex items-baseline gap-1">
-        <span className="text-3xl font-black">{price}</span>
-        {unit && <span className="text-sm text-slate-400">{unit}</span>}
-      </div>
-      {billingNote && <div className="mb-5 text-[10px] italic text-slate-500">{billingNote}</div>}
-      {!billingNote && <div className="mb-5" />}
-
-      <ul className="mb-6 space-y-2 text-sm">
-        {features.map((f) => (
-          <li key={f} className="flex items-start gap-2">
-            <Check size={14} className="mt-1 shrink-0 text-orange-500" />
-            <span className="text-slate-300">{f}</span>
-          </li>
-        ))}
-      </ul>
-
-      <button
-        type="button"
-        onClick={onCta}
-        className={`w-full rounded-xl py-3 text-sm font-bold transition ${
-          highlight
-            ? "bg-orange-500 text-white hover:bg-orange-600"
-            : "border border-slate-600 text-white hover:bg-slate-700"
-        }`}
-      >
-        {cta}
-      </button>
     </div>
   );
 }
@@ -576,71 +580,68 @@ function StatItem({ value, label }: { value: string; label: string }) {
 //   2. Ajoutez un objet { src, alt } dans le tableau ci-dessous.
 //   3. C'est tout !
 //
-// La rotation automatique est de 6 secondes (constante ci-dessous).
-// Si une seule image est présente, aucune rotation ne se produit.
+// La rotation automatique est de 6 secondes. Si une seule image est
+// présente, aucune rotation ne se produit.
 
 const HERO_IMAGES = [
-    {
-      src: "/images/hero-main.png",
-      alt: "AniXOS — La plateforme cloud pour l'industrie mécanique",
-    },
-    // Ajoutez d'autres images ici (exemple) :
-    // {
-    //   src: "/images/hero-2.png",
-    //   alt: "Opérateur CNC dans un atelier moderne",
-    // },
-    // {
-    //   src: "/images/hero-3.png",
-    //   alt: "Machine CNC de précision",
-    // },
-  ];
-  
-  const HERO_ROTATION_MS = 6000; // Durée entre deux images (ms)
-  
-  function HeroBackground() {
-    const [current, setCurrent] = useState(0);
-    const hasMultiple = HERO_IMAGES.length > 1;
-  
-    useEffect(() => {
-      if (!hasMultiple) return;
-      const timer = setInterval(() => {
-        setCurrent((c) => (c + 1) % HERO_IMAGES.length);
-      }, HERO_ROTATION_MS);
-      return () => clearInterval(timer);
-    }, [hasMultiple]);
-  
-    return (
-      <>
-        {HERO_IMAGES.map((img, idx) => (
-          <img
-            key={img.src}
-            src={img.src}
-            alt={img.alt}
-            loading={idx === 0 ? "eager" : "lazy"}
-            className={`absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-[1500ms] ease-in-out ${
-              idx === current ? "opacity-100" : "opacity-0"
-            }`}
-          />
-        ))}
-  
-        {/* Indicateurs : affichés UNIQUEMENT s'il y a plusieurs images */}
-        {hasMultiple && (
-          <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 gap-2">
-            {HERO_IMAGES.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setCurrent(idx)}
-                aria-label={`Image ${idx + 1}`}
-                className={`h-2 rounded-full transition-all ${
-                  idx === current
-                    ? "w-8 bg-orange-500"
-                    : "w-2 bg-white/40 hover:bg-white/70"
-                }`}
-              />
-            ))}
-          </div>
-        )}
-      </>
-    );
-  }
+  {
+    src: "/images/hero-main.png",
+    alt: "AniXOS — La plateforme cloud pour l'industrie mécanique",
+  },
+  // Ajoutez d'autres images ici (exemple) :
+  // {
+  //   src: "/images/hero-2.png",
+  //   alt: "Opérateur CNC dans un atelier moderne",
+  // },
+  // {
+  //   src: "/images/hero-3.png",
+  //   alt: "Machine CNC de précision",
+  // },
+];
+
+const HERO_ROTATION_MS = 6000; // Durée entre deux images (ms)
+
+function HeroBackground() {
+  const [current, setCurrent] = useState(0);
+  const hasMultiple = HERO_IMAGES.length > 1;
+
+  useEffect(() => {
+    if (!hasMultiple) return;
+    const timer = setInterval(() => {
+      setCurrent((c) => (c + 1) % HERO_IMAGES.length);
+    }, HERO_ROTATION_MS);
+    return () => clearInterval(timer);
+  }, [hasMultiple]);
+
+  return (
+    <>
+      {HERO_IMAGES.map((img, idx) => (
+        <img
+          key={img.src}
+          src={img.src}
+          alt={img.alt}
+          loading={idx === 0 ? "eager" : "lazy"}
+          className={`absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-[1500ms] ease-in-out ${
+            idx === current ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      ))}
+
+      {hasMultiple && (
+        <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 gap-2">
+          {HERO_IMAGES.map((_, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => setCurrent(idx)}
+              aria-label={`Image ${idx + 1}`}
+              className={`h-2 rounded-full transition-all ${
+                idx === current ? "w-8 bg-orange-500" : "w-2 bg-white/40 hover:bg-white/70"
+              }`}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
