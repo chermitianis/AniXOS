@@ -196,14 +196,77 @@ export function useOdooConfig() {
     [],
   );
 
+  // -------------------------------------------------------------------
+  // Synchronisation manuelle (pull depuis Odoo)
+  // -------------------------------------------------------------------
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncNow = useCallback(async (): Promise<Result & { totalSynced?: number }> => {
+    setIsSyncing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return { success: false, error: "Session expirée" };
+
+      const { data, error: fnError } = await supabase.functions.invoke("sync-odoo-pull", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (fnError) return { success: false, error: fnError.message };
+      if (!data?.success) return { success: false, error: data?.message ?? "Erreur de synchronisation" };
+
+      await reload();
+      return { success: true, totalSynced: data.totalSynced };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Erreur inconnue",
+      };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [reload]);
+
+  const [isPushing, setIsPushing] = useState(false);
+
+  const pushNow = useCallback(async (): Promise<Result & { sent?: number }> => {
+    setIsPushing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return { success: false, error: "Session expirée" };
+
+      const { data, error: fnError } = await supabase.functions.invoke("sync-odoo-push", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (fnError) return { success: false, error: fnError.message };
+      if (!data?.success) return { success: false, error: data?.message ?? "Erreur d'envoi" };
+
+      await reload();
+      return { success: true, sent: data.sent };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Erreur inconnue",
+      };
+    } finally {
+      setIsPushing(false);
+    }
+  }, [reload]);
+
   return {
     config,
     isLoading,
     isSaving,
+    isSyncing,
+    isPushing,
     error,
     saveConfig,
     toggleActive,
     testConnection,
+    syncNow,
+    pushNow,
     reload,
   };
 }
