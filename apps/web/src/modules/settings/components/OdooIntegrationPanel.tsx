@@ -89,7 +89,10 @@ const ODOO_GREEN_BG = "#f0fdf4";
 
 export function OdooIntegrationPanel() {
   const { t } = useTranslation();
-  const { config, isLoading, isSaving, saveConfig, toggleActive, testConnection } = useOdooConfig();
+  const {
+    config, isLoading, isSaving, isSyncing, isPushing,
+    saveConfig, toggleActive, testConnection, syncNow, pushNow,
+  } = useOdooConfig();
 
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -231,6 +234,19 @@ export function OdooIntegrationPanel() {
     setIsFormOpen((v) => !v);
   }
 
+  async function handleSyncNow() {
+    setTestResult(null);
+    const result = await syncNow();
+    if (!result.success) {
+      setTestResult({ ok: false, message: result.error ?? t("odoo.syncError") });
+    } else {
+      setTestResult({
+        ok: true,
+        message: t("odoo.syncSuccess", { count: result.totalSynced ?? 0 }),
+      });
+    }
+  }
+
   // ⚡ toggle visual : ON si actif OU formulaire ouvert (brouillon)
   const toggleVisualOn = isActive || isFormOpen;
 
@@ -348,11 +364,35 @@ export function OdooIntegrationPanel() {
               <span className="opacity-70">·</span>
               <span className="opacity-80">{t("odoo.sourceOfTruthHint")}</span>
             </div>
-            {config?.last_sync_at && (
-              <span className="text-[11px] opacity-70">
-                {t("odoo.lastSync")} : {new Date(config.last_sync_at).toLocaleString()}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {config?.last_sync_at && (
+                <span className="text-[11px] opacity-70">
+                  {t("odoo.lastSync")} : {new Date(config.last_sync_at).toLocaleString()}
+                  {config.last_sync_status === "failed" && (
+                    <span className="ms-1 font-bold text-red-600">· {t("odoo.lastSyncFailed")}</span>
+                  )}
+                </span>
+              )}
+              {(config?.sync_direction === "pull" || config?.sync_direction === "bidirectional") && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleSyncNow();
+                  }}
+                  disabled={isSyncing}
+                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold text-white shadow-sm disabled:opacity-50"
+                  style={{ background: ODOO_PRIMARY }}
+                >
+                  {isSyncing ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={11} />
+                  )}
+                  {t("odoo.syncNow")}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -668,9 +708,12 @@ export function OdooIntegrationPanel() {
             </div>
             <button
               type="button"
-              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm"
+              onClick={() => void pushNow()}
+              disabled={isPushing}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm disabled:opacity-50"
               style={{ background: ODOO_PRIMARY }}
             >
+              {isPushing && <Loader2 size={12} className="animate-spin" />}
               {t("odoo.pushReports.button")}
             </button>
           </div>
