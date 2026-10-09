@@ -20,9 +20,9 @@ interface ReclamationRow {
 }
 
 const STATUS_STYLES: Record<ReclamationRow["status"], string> = {
-  nouveau: "bg-red-100 text-red-700",
-  en_cours: "bg-amber-100 text-amber-700",
-  resolu: "bg-green-100 text-green-700",
+  nouveau: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  en_cours: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  resolu: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300",
 };
 
 function timeAgo(iso: string, locale: string): string {
@@ -35,6 +35,14 @@ function timeAgo(iso: string, locale: string): string {
   return new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
 }
 
+interface ReclamationsBellProps {
+  /**
+   * إذا كان true → الجرس معروض داخل Sidebar داكن (Deep Navy).
+   * الألوان تتغيّر تلقائياً لتبقى قابلة للقراءة.
+   */
+  dark?: boolean;
+}
+
 /**
  * جرس التنبيهات: أفضل موضع عملي لرسائل réclamation القادمة من العمال —
  * مرئي من أي شاشة إدارية. العدّاد الأحمر = عدد الرسائل غير المقروءة
@@ -43,7 +51,7 @@ function timeAgo(iso: string, locale: string): string {
  * فتح رسالة يعرضها في نافذة عائمة كاملة فوق الواجهة (مع زر إغلاق أعلاها)
  * ويُعلّمها فوراً كمقروءة، فتختفي من القائمة والعدّاد.
  */
-export function ReclamationsBell() {
+export function ReclamationsBell({ dark = false }: ReclamationsBellProps) {
   const { t, i18n } = useTranslation();
   const { staffUser } = useStaffAuth();
   const [items, setItems] = useState<ReclamationRow[]>([]);
@@ -142,6 +150,11 @@ export function ReclamationsBell() {
 
   const unreadCount = items.length;
 
+  // ألوان الزر حسب السياق
+  const buttonColorClass = dark
+    ? "text-[var(--sidebar-text-secondary)] hover:bg-white/10 hover:text-white"
+    : "text-slate-500 hover:bg-slate-100 hover:text-slate-800";
+
   return (
     <>
       <button
@@ -149,7 +162,7 @@ export function ReclamationsBell() {
         type="button"
         onClick={toggleList}
         title={t("setup.reclamationsBellTitle")}
-        className="relative rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+        className={`relative rounded-lg p-2 transition-colors ${buttonColorClass}`}
       >
         <Bell size={18} />
         {unreadCount > 0 && (
@@ -166,27 +179,38 @@ export function ReclamationsBell() {
           <div
             ref={panelRef}
             style={{ position: "fixed", top: listPosition.top, insetInlineEnd: listPosition.end }}
-            className="z-[70] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-slate-200 bg-white shadow-2xl"
+            className="z-[70] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl"
           >
-            <div className="border-b border-slate-100 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-700">{t("setup.reclamationsBellTitle")}</h3>
+            <div className="border-b border-[var(--border-subtle)] px-4 py-3">
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">{t("setup.reclamationsBellTitle")}</h3>
             </div>
             <div className="max-h-96 overflow-y-auto">
               {items.length === 0 ? (
-                <p className="px-4 py-6 text-center text-sm text-slate-400">{t("setup.reclamationsEmpty")}</p>
+                <p className="px-4 py-6 text-center text-sm text-[var(--text-tertiary)]">
+                  {t("setup.reclamationsEmpty")}
+                </p>
               ) : (
-                <ul className="divide-y divide-slate-100">
-                  {items.map((r) => (
-                    <li key={r.id}>
+                <ul>
+                  {items.map((r, idx) => (
+                    <li
+                      key={r.id}
+                      style={{ borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none" }}
+                    >
                       <button
                         onClick={() => void openMessage(r)}
-                        className="flex w-full flex-col items-start gap-1 px-4 py-3 text-start transition-colors hover:bg-slate-50"
+                        className="flex w-full flex-col items-start gap-1 px-4 py-3 text-start transition-colors hover:bg-[var(--bg-card-hover)]"
                       >
                         <div className="flex w-full items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-slate-700">{r.worker_name}</span>
-                          <span className="shrink-0 text-[11px] text-slate-400" dir="ltr">{timeAgo(r.created_at, i18n.language)}</span>
+                          <span className="text-sm font-semibold text-[var(--text-primary)]">
+                            {r.worker_name}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]" dir="ltr">
+                            {timeAgo(r.created_at, i18n.language)}
+                          </span>
                         </div>
-                        <p className="line-clamp-1 text-xs text-slate-500">{r.message}</p>
+                        <p className="line-clamp-1 text-xs text-[var(--text-secondary)]">
+                          {r.message}
+                        </p>
                       </button>
                     </li>
                   ))}
@@ -197,16 +221,24 @@ export function ReclamationsBell() {
           document.body
         )}
 
-      {/* نافذة عائمة كاملة لعرض الرسالة المفتوحة — فوق كامل الواجهة، بزر إغلاق أعلاها */}
+      {/* نافذة عائمة كاملة لعرض الرسالة المفتوحة */}
       {openItem &&
         createPortal(
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" onClick={() => setOpenItem(null)}>
-            <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                <h3 className="text-base font-bold text-slate-800">{t("setup.reclamationsBellTitle")}</h3>
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setOpenItem(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
+                <h3 className="text-base font-bold text-[var(--text-primary)]">
+                  {t("setup.reclamationsBellTitle")}
+                </h3>
                 <button
                   onClick={() => setOpenItem(null)}
-                  className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  className="rounded-lg p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]"
                   aria-label={t("common.close")}
                 >
                   <X size={18} />
@@ -215,8 +247,12 @@ export function ReclamationsBell() {
 
               <div className="px-5 py-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-700">{openItem.worker_name}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLES[openItem.status]}`}>
+                  <span className="text-sm font-bold text-[var(--text-primary)]">
+                    {openItem.worker_name}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLES[openItem.status]}`}
+                  >
                     {t(
                       openItem.status === "nouveau"
                         ? "setup.reclamationStatusNew"
@@ -227,23 +263,30 @@ export function ReclamationsBell() {
                   </span>
                 </div>
                 {openItem.machine_name && (
-                  <div className="mb-2 flex items-center gap-1.5 text-xs text-slate-400">
+                  <div className="mb-2 flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
                     <Wrench size={12} /> {openItem.machine_name}
                   </div>
                 )}
-                <p className="mb-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{openItem.message}</p>
-                <span className="text-[11px] text-slate-400" dir="ltr">
-                  {new Date(openItem.created_at).toLocaleString(i18n.language, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                <p className="mb-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">
+                  {openItem.message}
+                </p>
+                <span className="text-[11px] text-[var(--text-tertiary)]" dir="ltr">
+                  {new Date(openItem.created_at).toLocaleString(i18n.language, {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
               </div>
 
               {openItem.status !== "resolu" && (
-                <div className="flex gap-2 border-t border-slate-100 px-5 py-4">
+                <div className="flex gap-2 border-t border-[var(--border-subtle)] px-5 py-4">
                   {openItem.status === "nouveau" && (
                     <button
                       disabled={updatingId === openItem.id}
                       onClick={() => void updateStatus(openItem.id, "en_cours")}
-                      className="flex-1 rounded-lg bg-amber-50 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-40"
+                      className="flex-1 rounded-lg bg-amber-50 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25"
                     >
                       {t("setup.markInProgress")}
                     </button>
@@ -251,7 +294,7 @@ export function ReclamationsBell() {
                   <button
                     disabled={updatingId === openItem.id}
                     onClick={() => void updateStatus(openItem.id, "resolu")}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-50 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 disabled:opacity-40"
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-50 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 disabled:opacity-40 dark:bg-green-500/15 dark:text-green-300 dark:hover:bg-green-500/25"
                   >
                     <CheckCircle2 size={14} /> {t("setup.markResolved")}
                   </button>
