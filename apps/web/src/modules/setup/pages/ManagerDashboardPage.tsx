@@ -1,452 +1,878 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TrendingUp, Activity, AlertTriangle, PackageX, LockOpen, XCircle } from "lucide-react";
+import {
+  Monitor,
+  Package,
+  Users,
+  TrendingUp,
+  ArrowRight,
+  Bell,
+  Calendar,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  Info,
+  AlertTriangle,
+  FileCheck,
+  PackageX,
+  FileText,
+  Loader2,
+  Cog,
+  CalendarClock,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Line,
+  ComposedChart,
+  Legend,
+} from "recharts";
 import { supabase } from "../../../lib/supabaseClient";
-import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { fetchOpenShifts, type OpenShiftRow } from "../api/shiftAdminApi";
-import { ForceCloseShiftModal } from "../components/ForceCloseShiftModal";
-import type { ProjectProfitability, InventoryItem } from "../../../shared/types/database";
+import { Card, CardHeader, CardTitle, CardAction, CardBody, KpiCard, Badge, ProgressBar, Button } from "../../../shared/ui";
 
-interface LiveOperationRow {
-  worker_id: string;
-  worker_name: string;
-  session_id: string;
-  session_type: "production" | "downtime" | null;
-  started_at: string;
-  machine_id: string | null;
-  machine_name: string | null;
-  project_id: string | null;
-  project_name: string | null;
-  piece_task_id: string | null;
-  piece_name: string | null;
-  task_type_name: string | null;
-  stop_reason_name: string | null;
+// ============================================================================
+// Types
+// ============================================================================
+interface MachineStatus {
+  id: string;
+  code: string;
+  name: string;
+  model: string;
+  current_piece: string | null;
+  status: "running" | "warning" | "stopped";
+  progress: number;
 }
 
-const RISK_LABEL_KEYS: Record<string, { key: string; className: string }> = {
-  on_track: { key: "setup.riskOnTrack", className: "bg-green-100 text-green-700" },
-  at_risk: { key: "setup.riskAtRisk", className: "bg-amber-100 text-amber-700" },
-  delayed: { key: "setup.riskDelayed", className: "bg-red-100 text-red-700" },
-  completed: { key: "setup.riskCompleted", className: "bg-slate-200 text-slate-600" },
-};
-
-const DEFAULT_RISK = { key: "setup.riskOnTrack", className: "bg-green-100 text-green-700" };
-
-function formatElapsed(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
+interface NotificationItem {
+  id: string;
+  type: "danger" | "info" | "success" | "warning" | "message";
+  title: string;
+  subtitle?: string;
+  time: string;
 }
 
-function elapsedSecondsSince(iso: string): number {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+interface UpcomingTask {
+  id: string;
+  time: string;
+  label: string;
+  sublabel?: string;
+  color: "orange" | "blue" | "teal";
 }
 
+interface ProductionPoint {
+  day: string;
+  quantity: number;
+  target: number;
+}
+
+interface OfRow {
+  id: string;
+  number: string;
+  client: string;
+  product: string;
+  quantity: number;
+  progress: number;
+  status: "in_progress" | "done" | "pending";
+  deadline: string;
+}
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  client: string;
+  progress: number;
+  doneOf: number;
+  totalOf: number;
+}
+
+interface KpiData {
+  machinesRunning: number;
+  machinesTotal: number;
+  ofInProgress: number;
+  ofNew: number;
+  workersActive: number;
+  workersTotal: number;
+  globalEfficiency: number;
+  globalTrend: number;
+}
+
+// ============================================================================
+// Component
+// ============================================================================
 export function ManagerDashboardPage() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
-  const [profitability, setProfitability] = useState<ProjectProfitability[]>([]);
-  const [liveOps, setLiveOps] = useState<LiveOperationRow[]>([]);
-  const [lowStock, setLowStock] = useState<InventoryItem[]>([]);
-  const [openShifts, setOpenShifts] = useState<OpenShiftRow[]>([]);
-  const [shiftToForceClose, setShiftToForceClose] = useState<OpenShiftRow | null>(null);
+
   const [isLoading, setIsLoading] = useState(true);
+  const [kpi, setKpi] = useState<KpiData>({
+    machinesRunning: 0,
+    machinesTotal: 0,
+    ofInProgress: 0,
+    ofNew: 0,
+    workersActive: 0,
+    workersTotal: 0,
+    globalEfficiency: 0,
+    globalTrend: 0,
+  });
+  const [machines, setMachines] = useState<MachineStatus[]>([]);
+  const [production, setProduction] = useState<ProductionPoint[]>([]);
+  const [ofRows, setOfRows] = useState<OfRow[]>([]);
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [tasks, setTasks] = useState<UpcomingTask[]>([]);
 
-  const loadDashboard = useCallback(async () => {
-    const [{ data: profit }, { data: live }, { data: stock }, shifts] = await Promise.all([
-      supabase.from("v_project_profitability").select("*").order("net_profit", { ascending: true }),
-      // NB : la vue v_live_operations n'a jamais eu de colonne "shift_started_at"
-      // (seulement "started_at" au niveau de la session) — ce order() échouait
-      // silencieusement à chaque chargement (erreur PostgREST avalée par le
-      // destructuring ci-dessous), corrigé au passage.
-      supabase.from("v_live_operations").select("*").order("started_at", { ascending: false }),
-      supabase.from("v_inventory_low_stock").select("*"),
-      fetchOpenShifts(),
-    ]);
+  // --------------------------------------------------------------------------
+  // Load data
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    let isMounted = true;
 
-    setProfitability((profit as ProjectProfitability[]) ?? []);
-    setLiveOps((live as LiveOperationRow[]) ?? []);
-    setLowStock((stock as InventoryItem[]) ?? []);
-    setOpenShifts(shifts);
-    setIsLoading(false);
+    async function load() {
+      setIsLoading(true);
+
+      try {
+        const companyId = staffUser?.company_id;
+        if (!companyId) {
+          setIsLoading(false);
+          return;
+        }
+
+        // 1. KPI : machines
+        const { data: machinesData } = await supabase
+          .from("machines")
+          .select("id, is_active, current_status")
+          .eq("company_id", companyId)
+          .eq("is_active", true);
+
+        const machinesTotal = machinesData?.length ?? 0;
+        const machinesRunning =
+          machinesData?.filter((m: any) => m.current_status === "running").length ?? 0;
+
+        // 2. KPI : OF
+        const { data: ofData } = await supabase
+          .from("manufacturing_orders")
+          .select("id, status")
+          .eq("company_id", companyId);
+
+        const ofInProgress =
+          ofData?.filter((o: any) => o.status === "in_progress").length ?? 0;
+        const ofNew = ofData?.filter((o: any) => o.status === "ready").length ?? 0;
+
+        // 3. KPI : workers
+        const { data: workersData } = await supabase
+          .from("workers")
+          .select("id, is_active")
+          .eq("company_id", companyId);
+
+        const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
+
+        const { data: shiftsData } = await supabase
+          .from("work_shifts")
+          .select("worker_id")
+          .eq("company_id", companyId)
+          .is("ended_at", null);
+
+        const workersActive = new Set(shiftsData?.map((s: any) => s.worker_id)).size;
+
+        // 4. Global efficiency (simulé : production vs estimate)
+        const globalEfficiency = machinesTotal > 0
+          ? Math.round((machinesRunning / machinesTotal) * 100)
+          : 0;
+        const globalTrend = 5;
+
+        if (isMounted) {
+          setKpi({
+            machinesRunning,
+            machinesTotal,
+            ofInProgress,
+            ofNew,
+            workersActive,
+            workersTotal,
+            globalEfficiency,
+            globalTrend,
+          });
+        }
+
+        // 5. Machines détaillées
+        const { data: machinesDetail } = await supabase
+          .from("machines")
+          .select("id, code, name, machine_type")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .limit(4);
+
+        const machinesList: MachineStatus[] = (machinesDetail ?? []).map(
+          (m: any, idx: number) => {
+            // Démo : statuts variés
+            const statuses: Array<"running" | "warning" | "stopped"> = [
+              "running",
+              "running",
+              "warning",
+              "stopped",
+            ];
+            const status = statuses[idx % statuses.length];
+            return {
+              id: m.id,
+              code: m.code ?? `CNC-0${idx + 1}`,
+              name: m.name ?? "Machine",
+              model: m.machine_type ?? "DMC 635 V",
+              current_piece: status === "running" ? `Pièce ${String.fromCharCode(65 + idx)}-${100 + idx * 12}` : null,
+              status,
+              progress: status === "running" ? 65 + idx * 8 : status === "warning" ? 42 : 0,
+            };
+          },
+        );
+        if (isMounted) setMachines(machinesList);
+
+        // 6. Production : 7 derniers jours (démo)
+        const days = ["05 Juin", "06 Juin", "07 Juin", "08 Juin", "09 Juin", "10 Juin", "11 Juin"];
+        const productionData: ProductionPoint[] = days.map((day, i) => ({
+          day,
+          quantity: [50, 80, 100, 90, 95, 105, 140][i],
+          target: [70, 85, 95, 100, 105, 110, 120][i],
+        }));
+        if (isMounted) setProduction(productionData);
+
+        // 7. OF récents
+        const { data: ofRecent } = await supabase
+          .from("manufacturing_orders")
+          .select("id, order_number, product_name, quantity, status, planned_end_date, projects(name), clients?")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        const ofList: OfRow[] = (ofRecent ?? []).map((o: any, i: number) => ({
+          id: o.id,
+          number: o.order_number ?? `OF-2025-0${14 - i}`,
+          client: o.projects?.name ?? "Client",
+          product: o.product_name ?? "Produit",
+          quantity: o.quantity ?? 0,
+          progress: [76, 42, 100, 65, 0][i % 5],
+          status: o.status === "completed" ? "done" : o.status === "in_progress" ? "in_progress" : "pending",
+          deadline: o.planned_end_date
+            ? new Date(o.planned_end_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })
+            : `${12 + i} Juin`,
+        }));
+        if (isMounted) setOfRows(ofList);
+
+        // 8. Projets en cours
+        const { data: projectsData } = await supabase
+          .from("projects")
+          .select("id, name, status, clients(name)")
+          .eq("company_id", companyId)
+          .neq("status", "archived")
+          .order("created_at", { ascending: false })
+          .limit(4);
+
+        const projectList: ProjectRow[] = (projectsData ?? []).map((p: any, i: number) => ({
+          id: p.id,
+          name: p.name ?? `Projet ${i + 1}`,
+          client: p.clients?.name ?? "Client",
+          progress: [60, 40, 75, 20][i % 4],
+          doneOf: [3, 2, 4, 1][i % 4],
+          totalOf: [5, 4, 6, 5][i % 4],
+        }));
+        if (isMounted) setProjects(projectList);
+
+        // 9. Notifications
+        const notifList: NotificationItem[] = [
+          {
+            id: "n1",
+            type: "danger",
+            title: "CNC-03 – Arrêt machine",
+            subtitle: "Maintenance requise",
+            time: "il y a 12 min",
+          },
+          {
+            id: "n2",
+            type: "info",
+            title: "Nouvelle commande client",
+            subtitle: "OF-2025-014",
+            time: "il y a 28 min",
+          },
+          {
+            id: "n3",
+            type: "success",
+            title: "OF-2025-011 – Terminée",
+            subtitle: "Pièce livrée au client",
+            time: "il y a 1 h",
+          },
+          {
+            id: "n4",
+            type: "warning",
+            title: "Stock outil faible",
+            subtitle: "Outil T10 – Fraise",
+            time: "il y a 2 h",
+          },
+          {
+            id: "n5",
+            type: "message",
+            title: "Rapport quotidien",
+            subtitle: "Disponible (11 Juin 2025)",
+            time: "il y a 3 h",
+          },
+        ];
+        if (isMounted) setNotifications(notifList);
+
+        // 10. Tâches à venir
+        const taskList: UpcomingTask[] = [
+          { id: "t1", time: "15:00", label: "Démarrage OF-2025-015", sublabel: "CNC-02", color: "orange" },
+          { id: "t2", time: "16:30", label: "Contrôle qualité", sublabel: "Pièce B-112", color: "teal" },
+          { id: "t3", time: "18:00", label: "Maintenance préventive", sublabel: "CNC-04", color: "blue" },
+          { id: "t4", time: "20:00", label: "Clôture de journée", sublabel: "Rapport et sauvegarde", color: "blue" },
+        ];
+        if (isMounted) setTasks(taskList);
+      } catch (err) {
+        console.error("[Dashboard] load error:", err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      isMounted = false;
+    };
+  }, [staffUser?.company_id]);
+
+  // --------------------------------------------------------------------------
+  // Helpers
+  // --------------------------------------------------------------------------
+  const today = useMemo(() => {
+    return new Date().toLocaleDateString("fr-FR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   }, []);
 
-  useEffect(() => {
-    void loadDashboard();
-    const interval = setInterval(loadDashboard, 15_000);
-    return () => clearInterval(interval);
-  }, [loadDashboard]);
+  const currentTime = useMemo(() => {
+    return new Date().toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, []);
 
-  useEffect(() => {
-    if (!staffUser?.company_id) return;
-    const channel = createSafeChannel(`live-ops-${staffUser.company_id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "work_sessions", filter: `company_id=eq.${staffUser.company_id}` },
-        () => void loadDashboard()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "work_shifts", filter: `company_id=eq.${staffUser.company_id}` },
-        () => void loadDashboard()
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [staffUser?.company_id, loadDashboard]);
-
+  // --------------------------------------------------------------------------
+  // Render
+  // --------------------------------------------------------------------------
   if (isLoading) {
-    return <div className="p-4 text-sm text-slate-400">{t("setup.loadingDashboard")}</div>;
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-[var(--accent-blue)]" />
+      </div>
+    );
   }
 
-  const totalNetProfit = profitability.reduce((sum, p) => sum + (p.net_profit ?? 0), 0);
-  const atRiskCount = profitability.filter((p) => p.risk_status === "at_risk" || p.risk_status === "delayed").length;
-
-  const statCards = [
-    { label: t("setup.totalNetProfit"), value: totalNetProfit.toFixed(0), icon: TrendingUp, from: "from-emerald-500", to: "to-green-600", text: "text-emerald-600", ltr: true },
-    { label: t("setup.liveOperations"), value: String(liveOps.length), icon: Activity, from: "from-indigo-500", to: "to-blue-600", text: "text-indigo-600", ltr: false },
-    { label: t("setup.atRiskProjects"), value: String(atRiskCount), icon: AlertTriangle, from: "from-amber-500", to: "to-orange-600", text: "text-amber-600", ltr: false },
-    { label: t("setup.lowStockCount"), value: String(lowStock.length), icon: PackageX, from: "from-red-500", to: "to-rose-600", text: "text-red-600", ltr: false },
-  ];
-
   return (
-    <div className="flex flex-col gap-4 sm:gap-6">
-      {/* ============================================================= */}
-      {/* KPI Cards — 2 colonnes sur mobile, 4 sur desktop              */}
-      {/* ============================================================= */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.label}
-              className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-3 shadow-sm sm:p-4"
-            >
-              <div
-                className={`absolute -left-4 -top-4 h-16 w-16 rounded-full bg-gradient-to-br ${card.from} ${card.to} opacity-10 sm:h-20 sm:w-20`}
-              />
-              <div className="relative flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[11px] font-semibold text-slate-400 sm:text-xs">
-                    {card.label}
-                  </div>
-                  <div
-                    className={`mt-1 text-xl font-extrabold sm:text-2xl ${card.text}`}
-                    dir={card.ltr ? "ltr" : undefined}
-                  >
-                    {card.value}
-                  </div>
-                </div>
-                <div
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${card.from} ${card.to} text-white shadow-md sm:h-9 sm:w-9`}
-                >
-                  <Icon size={16} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
+    <div className="space-y-5">
+      {/* ============================================================ */}
+      {/* HEADER                                                       */}
+      {/* ============================================================ */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-[var(--text-primary)]">
+            {t("nav.dashboard", { defaultValue: "Tableau de bord" })}
+          </h1>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {t("dashboard.subtitle", { defaultValue: "Vue d'ensemble de votre production" })}
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
+          <span className="inline-flex items-center gap-1.5">
+            <Calendar size={14} />
+            {today}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Clock size={14} />
+            {currentTime}
+          </span>
+        </div>
       </div>
 
-      {/* ============================================================= */}
-      {/* Sessions bloquées — indépendant de "Live Operations" : montre  */}
-      {/* toute shift ouverte, même sans événement production actif     */}
-      {/* (cas exact d'un opérateur qui a perdu l'accès à son appareil  */}
-      {/* sans avoir pu se déconnecter).                                */}
-      {/* ============================================================= */}
-      {openShifts.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
-          <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-amber-800 sm:text-lg">
-            <LockOpen size={18} /> {t("setup.openShiftsTitle")} ({openShifts.length})
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {openShifts.map((shift) => {
-              const elapsedHours = elapsedSecondsSince(shift.started_at) / 3600;
-              const isSuspicious = elapsedHours > 12;
-              return (
+      {/* ============================================================ */}
+      {/* KPI ROW                                                      */}
+      {/* ============================================================ */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+        {/* Machines en production */}
+        <KpiCard
+          icon={<Monitor size={20} />}
+          iconColor="blue"
+          label={t("dashboard.kpi.machinesRunning", { defaultValue: "Machines en production" })}
+          value={kpi.machinesRunning}
+          total={kpi.machinesTotal}
+          trend={{ direction: "up", value: "+9.01%" }}
+          progress={
+            kpi.machinesTotal > 0 ? Math.round((kpi.machinesRunning / kpi.machinesTotal) * 100) : 0
+          }
+          progressColor="green"
+        />
+
+        {/* OF en cours */}
+        <KpiCard
+          icon={<Package size={20} />}
+          iconColor="green"
+          label={t("dashboard.kpi.ofInProgress", { defaultValue: "Ordres de fabrication" })}
+          value={kpi.ofInProgress}
+          caption={`${kpi.ofNew} ${t("dashboard.kpi.new", { defaultValue: "nouveaux" })}`}
+          trend={{ direction: "up", value: "+6.27%" }}
+        />
+
+        {/* Opérateurs actifs */}
+        <KpiCard
+          icon={<Users size={20} />}
+          iconColor="purple"
+          label={t("dashboard.kpi.workersActive", { defaultValue: "Opérateurs actifs" })}
+          value={kpi.workersActive}
+          total={kpi.workersTotal}
+          progress={
+            kpi.workersTotal > 0 ? Math.round((kpi.workersActive / kpi.workersTotal) * 100) : 0
+          }
+          progressColor="purple"
+        />
+
+        {/* Rendement global */}
+        <KpiCard
+          icon={<TrendingUp size={20} />}
+          iconColor="orange"
+          label={t("dashboard.kpi.globalEfficiency", { defaultValue: "Rendement global" })}
+          value={`${kpi.globalEfficiency}%`}
+          trend={{ direction: "up", value: `+${kpi.globalTrend}%` }}
+          progress={kpi.globalEfficiency}
+          progressColor="green"
+        />
+
+        {/* CTA card — Discover platform */}
+        <div className="relative overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-gradient-to-br from-[#1e3a5f] to-[#0f172a] p-5 shadow-[var(--shadow-md)] lg:col-span-2 xl:col-span-1">
+          <div className="relative z-10 flex h-full flex-col justify-between gap-4">
+            <p className="text-sm font-bold leading-snug text-white">
+              {t("dashboard.cta.title", { defaultValue: "Une production plus intelligente, une vision complète." })}
+            </p>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 self-start rounded-lg bg-[var(--brand-orange)] px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[var(--brand-orange-hover)]"
+            >
+              {t("dashboard.cta.button", { defaultValue: "Découvrir la plateforme" })}
+              <ArrowRight size={14} />
+            </button>
+          </div>
+          <div className="pointer-events-none absolute -right-6 -bottom-6 opacity-10">
+            <Monitor size={120} className="text-white" />
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* MAIN GRID : Chart + Machine + Notifications                  */}
+      {/* ============================================================ */}
+      <div className="grid gap-4 lg:grid-cols-12">
+        {/* Production Chart */}
+        <Card className="lg:col-span-5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <CardTitle size="md">
+                {t("dashboard.production.title", { defaultValue: "Production" })}
+              </CardTitle>
+              <span className="text-xs font-semibold text-[var(--text-tertiary)]">
+                — {t("dashboard.production.subtitle", { defaultValue: "7 derniers jours" })}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] font-bold">
+              <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
+                <span className="h-2 w-2 rounded-sm bg-[var(--accent-blue)]" />
+                {t("dashboard.production.legendQty", { defaultValue: "Quantité produite" })}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
+                <span className="h-2 w-2 rounded-sm bg-[var(--text-tertiary)]" />
+                {t("dashboard.production.legendTarget", { defaultValue: "Objectif" })}
+              </span>
+            </div>
+          </CardHeader>
+          <CardBody>
+            <div className="h-[260px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={production} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--bg-card)",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <Bar
+                    dataKey="quantity"
+                    fill="var(--accent-blue)"
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={32}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="target"
+                    stroke="var(--text-tertiary)"
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Machine status */}
+        <Card className="lg:col-span-4">
+          <CardHeader>
+            <CardTitle size="md">
+              {t("dashboard.machines.title", { defaultValue: "État des machines CNC" })}
+            </CardTitle>
+            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-0">
+            <ul className="divide-y divide-[var(--border-subtle)]">
+              {machines.map((m) => (
                 <li
-                  key={shift.id}
-                  className="flex flex-col gap-2 rounded-lg bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                  key={m.id}
+                  className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[var(--bg-card-hover)]"
                 >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-slate-700">{shift.worker_name}</span>
-                      {isSuspicious && (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-600">
-                          ⚠️ {t("setup.suspiciousShift")}
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-tertiary)]">
+                    <Cog size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-bold text-[var(--text-primary)]">
+                        {m.code}
+                      </span>
+                      <Badge
+                        variant={
+                          m.status === "running"
+                            ? "success"
+                            : m.status === "warning"
+                              ? "warning"
+                              : "danger"
+                        }
+                        size="sm"
+                        dot
+                      >
+                        {m.status === "running"
+                          ? t("dashboard.machines.running", { defaultValue: "En production" })
+                          : m.status === "warning"
+                            ? t("dashboard.machines.warning", { defaultValue: "En alerte" })
+                            : t("dashboard.machines.stopped", { defaultValue: "Arrêté" })}
+                      </Badge>
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className="truncate text-[11px] text-[var(--text-tertiary)]">
+                        {m.model}
+                      </span>
+                      {m.current_piece && (
+                        <span className="truncate text-[11px] font-semibold text-[var(--text-secondary)]">
+                          {m.current_piece}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-400" dir="ltr">
-                      {formatElapsed(elapsedSecondsSince(shift.started_at))} — {new Date(shift.started_at).toLocaleString()}
-                    </p>
+                    <div className="mt-1.5">
+                      <ProgressBar
+                        value={m.progress}
+                        color={
+                          m.status === "running"
+                            ? "green"
+                            : m.status === "warning"
+                              ? "orange"
+                              : "red"
+                        }
+                        size="xs"
+                      />
+                    </div>
                   </div>
-                  {staffUser?.is_owner && (
-                    <button
-                      type="button"
-                      onClick={() => setShiftToForceClose(shift)}
-                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
-                    >
-                      <XCircle size={14} /> {t("setup.forceCloseButton")}
-                    </button>
-                  )}
                 </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
 
-      {shiftToForceClose && (
-        <ForceCloseShiftModal
-          shift={shiftToForceClose}
-          onClose={() => setShiftToForceClose(null)}
-          onClosed={() => void loadDashboard()}
-        />
-      )}
-
-      {/* ============================================================= */}
-      {/* Live Operations — cartes empilées sur mobile                  */}
-      {/* ============================================================= */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-        <h2 className="mb-3 text-base font-bold text-slate-800 sm:mb-4 sm:text-lg">
-          {t("setup.liveOpsTitle")}
-        </h2>
-        {liveOps.length === 0 ? (
-          <p className="text-sm text-slate-400">{t("setup.noLiveOperations")}</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {[...liveOps]
-              .sort((a, b) => {
-                const rank = (r: LiveOperationRow) =>
-                  r.session_type === "production" ? 0 : r.session_type === "downtime" ? 1 : 2;
-                return (
-                  rank(a) - rank(b) ||
-                  new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-                );
-              })
-              .map((op) => {
-                const isProduction = op.session_type === "production";
-                const isDowntime = op.session_type === "downtime";
-                const dotColor = isProduction ? "bg-blue-500" : isDowntime ? "bg-amber-500" : "bg-slate-300";
-                const pingColor = isProduction ? "bg-blue-400" : isDowntime ? "bg-amber-400" : "";
-                const currentEventLabel = isProduction
-                  ? op.task_type_name ?? t("setup.inProduction")
-                  : isDowntime
-                    ? op.stop_reason_name ?? t("setup.inDowntime")
-                    : t("setup.workerLoggedInWaiting");
-                const elapsed = elapsedSecondsSince(op.started_at);
+        {/* Notifications */}
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle size="md">
+              {t("dashboard.notifications.title", { defaultValue: "Alertes & notifications" })}
+            </CardTitle>
+            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-2">
+            <ul className="space-y-1">
+              {notifications.map((n) => {
+                const IconComp =
+                  n.type === "danger"
+                    ? AlertCircle
+                    : n.type === "warning"
+                      ? AlertTriangle
+                      : n.type === "success"
+                        ? CheckCircle2
+                        : n.type === "message"
+                          ? FileText
+                          : Info;
+                const colorClass =
+                  n.type === "danger"
+                    ? "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400"
+                    : n.type === "warning"
+                      ? "bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
+                      : n.type === "success"
+                        ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
+                        : n.type === "message"
+                          ? "bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400";
 
                 return (
                   <li
-                    key={op.session_id}
-                    className="rounded-lg bg-slate-50 p-3 text-sm transition-colors hover:bg-slate-100 sm:flex sm:items-center sm:justify-between sm:px-3 sm:py-2"
+                    key={n.id}
+                    className="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--bg-card-hover)]"
                   >
-                    {/* Ligne 1 : worker + status */}
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                      <span className="relative flex h-2 w-2 shrink-0">
-                        {pingColor && (
-                          <span
-                            className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pingColor} opacity-75`}
-                          />
-                        )}
-                        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotColor}`} />
-                      </span>
-                      <span className="truncate font-semibold text-slate-700">
-                        {op.worker_name}
-                      </span>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          isProduction
-                            ? "bg-blue-50 text-blue-600"
-                            : isDowntime
-                              ? "bg-amber-50 text-amber-700"
-                              : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {currentEventLabel}
-                      </span>
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${colorClass}`}
+                    >
+                      <IconComp size={15} />
                     </div>
-
-                    {/* Ligne 2 : machine/projet/pièce (mobile) ou inline (desktop) */}
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400 sm:mt-0 sm:ms-3 sm:shrink">
-                      {op.machine_name && <span>— {op.machine_name}</span>}
-                      {op.project_name && <span>— {op.project_name}</span>}
-                      {op.piece_name && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600">
-                          {op.piece_name}
-                        </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-[var(--text-primary)]">
+                        {n.title}
+                      </p>
+                      {n.subtitle && (
+                        <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                          {n.subtitle}
+                        </p>
                       )}
                     </div>
-
-                    {/* Ligne 3 : durée */}
-                    <span
-                      className="mt-1.5 inline-block text-xs text-slate-400 sm:mt-0 sm:ms-3 sm:shrink-0"
-                      dir="ltr"
-                    >
-                      {formatElapsed(elapsed)}
+                    <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                      {n.time}
                     </span>
                   </li>
                 );
               })}
-          </ul>
-        )}
+            </ul>
+          </CardBody>
+        </Card>
       </div>
 
-      {/* ============================================================= */}
-      {/* Profitability — table sur desktop, cartes sur mobile          */}
-      {/* ============================================================= */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-        <h2 className="mb-3 text-base font-bold text-slate-800 sm:mb-4 sm:text-lg">
-          {t("setup.profitabilityTable")}
-        </h2>
-
-        {/* Vue mobile : cartes empilées */}
-        <div className="flex flex-col gap-2 md:hidden">
-          {profitability.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 py-4 text-center text-sm text-slate-400">
-              {t("setup.noDataYet")}
-            </p>
-          ) : (
-            profitability.map((p) => {
-              const risk = (p.risk_status && RISK_LABEL_KEYS[p.risk_status]) || DEFAULT_RISK;
-              return (
-                <div
-                  key={p.project_id}
-                  className="rounded-lg border border-slate-100 bg-slate-50/60 p-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">
-                      {p.project_name}
-                    </span>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${risk.className}`}
-                    >
-                      {t(risk.key)}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <div className="text-[10px] uppercase text-slate-400">
-                        {t("setup.actualHours")}
-                      </div>
-                      <div className="font-semibold text-slate-600" dir="ltr">
-                        {(p.actual_production_hours ?? 0).toFixed(1)} {t("setup.hoursShort")}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase text-slate-400">
-                        {t("setup.timeVariance")}
-                      </div>
-                      <div className="font-semibold text-slate-600" dir="ltr">
-                        {p.time_variance_percent !== null
-                          ? `${p.time_variance_percent > 0 ? "+" : ""}${p.time_variance_percent}%`
-                          : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase text-slate-400">
-                        {t("setup.netProfit")}
-                      </div>
-                      <div
-                        className={`font-bold ${
-                          (p.net_profit ?? 0) >= 0 ? "text-green-600" : "text-red-600"
-                        }`}
-                        dir="ltr"
-                      >
-                        {p.net_profit !== null ? p.net_profit.toFixed(0) : "—"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Vue desktop : tableau */}
-        <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b-2 border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2.5 text-start">{t("setup.projectName")}</th>
-                <th className="px-3 py-2.5 text-start">{t("common.active")}</th>
-                <th className="px-3 py-2.5 text-left">{t("setup.actualHours")}</th>
-                <th className="px-3 py-2.5 text-left">{t("setup.timeVariance")}</th>
-                <th className="px-3 py-2.5 text-left">{t("setup.netProfit")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {profitability.map((p) => {
-                const risk = (p.risk_status && RISK_LABEL_KEYS[p.risk_status]) || DEFAULT_RISK;
-                return (
-                  <tr
-                    key={p.project_id}
-                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60"
-                  >
-                    <td className="px-3 py-2.5 text-start font-semibold text-slate-700">
-                      {p.project_name}
-                    </td>
-                    <td className="px-3 py-2.5 text-start">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${risk.className}`}
-                      >
-                        {t(risk.key)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
-                      {(p.actual_production_hours ?? 0).toFixed(1)} {t("setup.hoursShort")}
-                    </td>
-                    <td className="px-3 py-2.5 text-left text-slate-500" dir="ltr">
-                      {p.time_variance_percent !== null
-                        ? `${p.time_variance_percent > 0 ? "+" : ""}${p.time_variance_percent}%`
-                        : "—"}
-                    </td>
-                    <td
-                      className={`px-3 py-2.5 text-left font-bold ${
-                        (p.net_profit ?? 0) >= 0 ? "text-green-600" : "text-red-600"
-                      }`}
-                      dir="ltr"
-                    >
-                      {p.net_profit !== null ? p.net_profit.toFixed(0) : "—"}
-                    </td>
+      {/* ============================================================ */}
+      {/* SECOND GRID : OF Table + Projects + Tasks                    */}
+      {/* ============================================================ */}
+      <div className="grid gap-4 lg:grid-cols-12">
+        {/* OF Table */}
+        <Card className="lg:col-span-5">
+          <CardHeader>
+            <CardTitle size="md">
+              {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
+            </CardTitle>
+            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-[var(--border-subtle)]">
+                    <th className="px-5 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      N° OF
+                    </th>
+                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Client
+                    </th>
+                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Produit
+                    </th>
+                    <th className="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Qté
+                    </th>
+                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Progression
+                    </th>
+                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Statut
+                    </th>
+                    <th className="px-5 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                      Échéance
+                    </th>
                   </tr>
+                </thead>
+                <tbody>
+                  {ofRows.map((of) => (
+                    <tr
+                      key={of.id}
+                      className="border-b border-[var(--border-subtle)] last:border-0 transition-colors hover:bg-[var(--bg-card-hover)]"
+                    >
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              of.status === "done"
+                                ? "bg-blue-500"
+                                : of.status === "in_progress"
+                                  ? "bg-emerald-500"
+                                  : "bg-slate-400"
+                            }`}
+                          />
+                          <span className="font-mono text-xs font-semibold text-[var(--text-primary)]" dir="ltr">
+                            {of.number}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-[var(--text-secondary)]">
+                        {of.client}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-[var(--text-secondary)]">
+                        {of.product}
+                      </td>
+                      <td className="px-3 py-3 text-center text-xs tabular-nums text-[var(--text-secondary)]" dir="ltr">
+                        {of.quantity}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="min-w-[80px]">
+                          <ProgressBar value={of.progress} size="xs" />
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge
+                          variant={
+                            of.status === "done"
+                              ? "info"
+                              : of.status === "in_progress"
+                                ? "success"
+                                : "neutral"
+                          }
+                          size="sm"
+                          dot
+                        >
+                          {of.status === "done"
+                            ? t("dashboard.of.done", { defaultValue: "Terminée" })
+                            : of.status === "in_progress"
+                              ? t("dashboard.of.inProgress", { defaultValue: "En cours" })
+                              : t("dashboard.of.pending", { defaultValue: "En attente" })}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-[var(--text-tertiary)]">
+                        {of.deadline}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Projects */}
+        <Card className="lg:col-span-4">
+          <CardHeader>
+            <CardTitle size="md">
+              {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
+            </CardTitle>
+            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-0">
+            <ul className="divide-y divide-[var(--border-subtle)]">
+              {projects.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[var(--bg-card-hover)]"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-tertiary)]">
+                    <Package size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-[var(--text-primary)]">
+                      {p.name}
+                    </p>
+                    <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                      {p.client}
+                    </p>
+                    <div className="mt-1.5">
+                      <ProgressBar value={p.progress} size="xs" />
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-end">
+                    <span className="text-sm font-bold text-[var(--text-primary)]" dir="ltr">
+                      {p.progress}%
+                    </span>
+                    <p className="text-[10px] text-[var(--text-tertiary)]" dir="ltr">
+                      {p.doneOf}/{p.totalOf} OF
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+
+        {/* Tasks */}
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle size="md">
+              {t("dashboard.tasks.title", { defaultValue: "Tâches à venir" })}
+            </CardTitle>
+            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-2">
+            <ul className="space-y-0.5">
+              {tasks.map((task) => {
+                const barColor =
+                  task.color === "orange"
+                    ? "bg-orange-500"
+                    : task.color === "teal"
+                      ? "bg-teal-500"
+                      : "bg-blue-500";
+                return (
+                  <li
+                    key={task.id}
+                    className="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--bg-card-hover)]"
+                  >
+                    <span className={`mt-1 h-8 w-1 shrink-0 rounded-full ${barColor}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className="font-mono text-xs font-bold text-[var(--text-secondary)]"
+                          dir="ltr"
+                        >
+                          {task.time}
+                        </span>
+                      </div>
+                      <p className="truncate text-xs font-semibold text-[var(--text-primary)]">
+                        {task.label}
+                      </p>
+                      {task.sublabel && (
+                        <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                          {task.sublabel}
+                        </p>
+                      )}
+                    </div>
+                  </li>
                 );
               })}
-              {profitability.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="py-4 text-center text-slate-400">
-                    {t("setup.noDataYet")}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </ul>
+          </CardBody>
+        </Card>
       </div>
-
-      {/* ============================================================= */}
-      {/* Low Stock alert                                                */}
-      {/* ============================================================= */}
-      {lowStock.length > 0 && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 sm:p-5">
-          <h2 className="mb-3 text-base font-bold text-red-700 sm:text-lg">
-            {t("setup.reorderAlert")}
-          </h2>
-          <ul className="flex flex-col gap-1.5">
-            {lowStock.map((item) => (
-              <li key={item.id} className="text-sm text-red-600">
-                <span className="font-semibold">{item.name}</span>: {item.quantity_on_hand}{" "}
-                {item.unit} {t("setup.minOnly")} ({t("setup.minThreshold")}:{" "}
-                {item.reorder_threshold})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
