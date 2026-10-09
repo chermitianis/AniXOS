@@ -211,9 +211,14 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
             <button
               type="button"
               onClick={onCreateAccount}
-              className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-orange-200 transition hover:bg-orange-600 sm:px-5"
+              className="rounded-xl bg-orange-500 px-3 py-2 text-sm font-bold text-white shadow-md shadow-orange-200 transition hover:bg-orange-600 sm:px-5"
             >
-              {t("landing.nav.trial", { defaultValue: "Essai gratuit" })}
+              <span className="sm:hidden">
+                {t("landing.nav.trialShort", { defaultValue: "Essai" })}
+              </span>
+              <span className="hidden sm:inline">
+                {t("landing.nav.trial", { defaultValue: "Essai gratuit" })}
+              </span>
             </button>
           </div>
         </div>
