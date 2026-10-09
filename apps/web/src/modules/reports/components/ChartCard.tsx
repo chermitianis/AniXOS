@@ -9,9 +9,18 @@ interface ChartCardProps {
 
 export function ChartCard({ title, action, children, height = 260 }: ChartCardProps) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+    <div
+      className="rounded-xl border p-3 shadow-[var(--shadow-sm)] transition-shadow hover:shadow-[var(--shadow-md)] sm:p-4"
+      style={{
+        backgroundColor: "var(--bg-card)",
+        borderColor: "var(--border-subtle)",
+      }}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700 sm:text-sm">
+        <h3
+          className="min-w-0 flex-1 truncate text-xs font-bold sm:text-sm"
+          style={{ color: "var(--text-primary)" }}
+        >
           {title}
         </h3>
         {action && <div className="shrink-0">{action}</div>}
