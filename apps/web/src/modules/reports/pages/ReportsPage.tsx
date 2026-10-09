@@ -28,22 +28,37 @@ export function ReportsPage() {
   );
 
   return (
-    <div>
-      {/* En-tête : titre + sélecteur de période */}
-      <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+    <div className="space-y-5">
+      {/* ============================================================ */}
+      {/* HEADER                                                       */}
+      {/* ============================================================ */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="truncate text-base font-extrabold tracking-tight text-slate-800 sm:text-lg">
+          <h1
+            className="truncate text-2xl font-black tracking-tight"
+            style={{ color: "var(--text-primary)" }}
+          >
             {t("reports.title")}
           </h1>
-          <p className="mt-0.5 text-xs text-slate-400">{t("reports.subtitle")}</p>
+          <p className="mt-0.5 text-sm" style={{ color: "var(--text-secondary)" }}>
+            {t("reports.subtitle")}
+          </p>
         </div>
         <div className="shrink-0">
           <PeriodSelector value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 
-      {/* Onglets — scroll horizontal sur mobile */}
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
+      {/* ============================================================ */}
+      {/* TABS                                                         */}
+      {/* ============================================================ */}
+      <div
+        className="flex gap-1 overflow-x-auto rounded-xl border p-1"
+        style={{
+          backgroundColor: "var(--bg-card)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
@@ -51,11 +66,30 @@ export function ReportsPage() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-sm font-semibold transition-colors sm:px-4 ${
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-all sm:px-4"
+              style={
                 isActive
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-slate-400 hover:text-slate-600"
-              }`}
+                  ? {
+                      backgroundColor: "var(--brand-orange)",
+                      color: "#ffffff",
+                      boxShadow: "var(--shadow-sm)",
+                    }
+                  : {
+                      color: "var(--text-secondary)",
+                    }
+              }
+              onMouseEnter={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.backgroundColor = "var(--bg-muted)";
+                  e.currentTarget.style.color = "var(--text-primary)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "var(--text-secondary)";
+                }
+              }}
             >
               <Icon size={15} />
               {t(tab.labelKey)}
@@ -64,7 +98,9 @@ export function ReportsPage() {
         })}
       </div>
 
-      {/* Contenu selon l'onglet */}
+      {/* ============================================================ */}
+      {/* CONTENT                                                      */}
+      {/* ============================================================ */}
       {activeTab === "overview" && <OverviewTab dateRange={dateRange} />}
       {activeTab === "projects" && <ProjectsReportTab dateRange={dateRange} />}
       {activeTab === "workers" && <WorkersReportTab dateRange={dateRange} />}
