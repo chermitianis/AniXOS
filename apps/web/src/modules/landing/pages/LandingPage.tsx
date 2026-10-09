@@ -189,10 +189,17 @@ export function LandingPage({ onLogin, onCreateAccount, onPlanning }: LandingPag
             <button
               type="button"
               onClick={onPlanning}
-              className="hidden items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 sm:flex"
+              title={t("landing.nav.planning", { defaultValue: "Suivi Planning" })}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 sm:px-3"
             >
               <QrCode size={14} />
-              {t("landing.nav.planning", { defaultValue: "Suivi Planning" })}
+              {/* Sur mobile : mot court. Sur desktop : texte complet. */}
+              <span className="sm:hidden">
+                {t("landing.nav.planningShort", { defaultValue: "Planning" })}
+              </span>
+              <span className="hidden sm:inline">
+                {t("landing.nav.planning", { defaultValue: "Suivi Planning" })}
+              </span>
             </button>
             <button
               type="button"
