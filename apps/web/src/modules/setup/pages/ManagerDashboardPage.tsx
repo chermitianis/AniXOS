@@ -6,35 +6,40 @@ import {
   Users,
   TrendingUp,
   ArrowRight,
-  Bell,
   Calendar,
   Clock,
   AlertCircle,
   CheckCircle2,
   Info,
   AlertTriangle,
-  FileCheck,
-  PackageX,
   FileText,
   Loader2,
   Cog,
-  CalendarClock,
 } from "lucide-react";
 import {
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  ComposedChart,
-  Legend,
 } from "recharts";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { Card, CardHeader, CardTitle, CardAction, CardBody, KpiCard, Badge, ProgressBar, Button } from "../../../shared/ui";
+import {
+  Badge,
+  Card,
+  CardAction,
+  CardBody,
+  CardHeader,
+  CardTitle,
+  KpiCard,
+  ProgressBar,
+} from "../../../shared/ui";
 
 // ============================================================================
 // Types
@@ -180,10 +185,11 @@ export function ManagerDashboardPage() {
 
         const workersActive = new Set(shiftsData?.map((s: any) => s.worker_id)).size;
 
-        // 4. Global efficiency (simulé : production vs estimate)
-        const globalEfficiency = machinesTotal > 0
-          ? Math.round((machinesRunning / machinesTotal) * 100)
-          : 0;
+        // 4. Global efficiency
+        const globalEfficiency =
+          machinesTotal > 0
+            ? Math.round((machinesRunning / machinesTotal) * 100)
+            : 0;
         const globalTrend = 5;
 
         if (isMounted) {
@@ -209,7 +215,6 @@ export function ManagerDashboardPage() {
 
         const machinesList: MachineStatus[] = (machinesDetail ?? []).map(
           (m: any, idx: number) => {
-            // Démo : statuts variés
             const statuses: Array<"running" | "warning" | "stopped"> = [
               "running",
               "running",
@@ -222,7 +227,10 @@ export function ManagerDashboardPage() {
               code: m.code ?? `CNC-0${idx + 1}`,
               name: m.name ?? "Machine",
               model: m.machine_type ?? "DMC 635 V",
-              current_piece: status === "running" ? `Pièce ${String.fromCharCode(65 + idx)}-${100 + idx * 12}` : null,
+              current_piece:
+                status === "running"
+                  ? `Pièce ${String.fromCharCode(65 + idx)}-${100 + idx * 12}`
+                  : null,
               status,
               progress: status === "running" ? 65 + idx * 8 : status === "warning" ? 42 : 0,
             };
@@ -231,7 +239,15 @@ export function ManagerDashboardPage() {
         if (isMounted) setMachines(machinesList);
 
         // 6. Production : 7 derniers jours (démo)
-        const days = ["05 Juin", "06 Juin", "07 Juin", "08 Juin", "09 Juin", "10 Juin", "11 Juin"];
+        const days = [
+          "05 Juin",
+          "06 Juin",
+          "07 Juin",
+          "08 Juin",
+          "09 Juin",
+          "10 Juin",
+          "11 Juin",
+        ];
         const productionData: ProductionPoint[] = days.map((day, i) => ({
           day,
           quantity: [50, 80, 100, 90, 95, 105, 140][i],
@@ -239,10 +255,12 @@ export function ManagerDashboardPage() {
         }));
         if (isMounted) setProduction(productionData);
 
-        // 7. OF récents
+        // 7. OF récents — ✅ Corrigé : suppression de "clients?"
         const { data: ofRecent } = await supabase
           .from("manufacturing_orders")
-          .select("id, order_number, product_name, quantity, status, planned_end_date, projects(name), clients?")
+          .select(
+            "id, order_number, product_name, quantity, status, planned_end_date, projects(name)",
+          )
           .eq("company_id", companyId)
           .order("created_at", { ascending: false })
           .limit(5);
@@ -254,9 +272,17 @@ export function ManagerDashboardPage() {
           product: o.product_name ?? "Produit",
           quantity: o.quantity ?? 0,
           progress: [76, 42, 100, 65, 0][i % 5],
-          status: o.status === "completed" ? "done" : o.status === "in_progress" ? "in_progress" : "pending",
+          status:
+            o.status === "completed"
+              ? "done"
+              : o.status === "in_progress"
+                ? "in_progress"
+                : "pending",
           deadline: o.planned_end_date
-            ? new Date(o.planned_end_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })
+            ? new Date(o.planned_end_date).toLocaleDateString("fr-FR", {
+                day: "2-digit",
+                month: "short",
+              })
             : `${12 + i} Juin`,
         }));
         if (isMounted) setOfRows(ofList);
@@ -280,7 +306,7 @@ export function ManagerDashboardPage() {
         }));
         if (isMounted) setProjects(projectList);
 
-        // 9. Notifications
+        // 9. Notifications (démo)
         const notifList: NotificationItem[] = [
           {
             id: "n1",
@@ -320,12 +346,36 @@ export function ManagerDashboardPage() {
         ];
         if (isMounted) setNotifications(notifList);
 
-        // 10. Tâches à venir
+        // 10. Tâches à venir (démo)
         const taskList: UpcomingTask[] = [
-          { id: "t1", time: "15:00", label: "Démarrage OF-2025-015", sublabel: "CNC-02", color: "orange" },
-          { id: "t2", time: "16:30", label: "Contrôle qualité", sublabel: "Pièce B-112", color: "teal" },
-          { id: "t3", time: "18:00", label: "Maintenance préventive", sublabel: "CNC-04", color: "blue" },
-          { id: "t4", time: "20:00", label: "Clôture de journée", sublabel: "Rapport et sauvegarde", color: "blue" },
+          {
+            id: "t1",
+            time: "15:00",
+            label: "Démarrage OF-2025-015",
+            sublabel: "CNC-02",
+            color: "orange",
+          },
+          {
+            id: "t2",
+            time: "16:30",
+            label: "Contrôle qualité",
+            sublabel: "Pièce B-112",
+            color: "teal",
+          },
+          {
+            id: "t3",
+            time: "18:00",
+            label: "Maintenance préventive",
+            sublabel: "CNC-04",
+            color: "blue",
+          },
+          {
+            id: "t4",
+            time: "20:00",
+            label: "Clôture de journée",
+            sublabel: "Rapport et sauvegarde",
+            color: "blue",
+          },
         ];
         if (isMounted) setTasks(taskList);
       } catch (err) {
@@ -366,7 +416,11 @@ export function ManagerDashboardPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-[var(--accent-blue)]" />
+        <Loader2
+          size={24}
+          className="animate-spin"
+          style={{ color: "var(--accent-blue)" }}
+        />
       </div>
     );
   }
@@ -378,14 +432,20 @@ export function ManagerDashboardPage() {
       {/* ============================================================ */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-[var(--text-primary)]">
+          <h1
+            className="text-2xl font-black tracking-tight"
+            style={{ color: "var(--text-primary)" }}
+          >
             {t("nav.dashboard", { defaultValue: "Tableau de bord" })}
           </h1>
-          <p className="text-sm text-[var(--text-secondary)]">
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
             {t("dashboard.subtitle", { defaultValue: "Vue d'ensemble de votre production" })}
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
+        <div
+          className="flex items-center gap-4 text-sm"
+          style={{ color: "var(--text-secondary)" }}
+        >
           <span className="inline-flex items-center gap-1.5">
             <Calendar size={14} />
             {today}
@@ -401,63 +461,87 @@ export function ManagerDashboardPage() {
       {/* KPI ROW                                                      */}
       {/* ============================================================ */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-        {/* Machines en production */}
         <KpiCard
           icon={<Monitor size={20} />}
           iconColor="blue"
-          label={t("dashboard.kpi.machinesRunning", { defaultValue: "Machines en production" })}
+          label={t("dashboard.kpi.machinesRunning", {
+            defaultValue: "Machines en production",
+          })}
           value={kpi.machinesRunning}
           total={kpi.machinesTotal}
           trend={{ direction: "up", value: "+9.01%" }}
           progress={
-            kpi.machinesTotal > 0 ? Math.round((kpi.machinesRunning / kpi.machinesTotal) * 100) : 0
+            kpi.machinesTotal > 0
+              ? Math.round((kpi.machinesRunning / kpi.machinesTotal) * 100)
+              : 0
           }
           progressColor="green"
         />
 
-        {/* OF en cours */}
         <KpiCard
           icon={<Package size={20} />}
           iconColor="green"
-          label={t("dashboard.kpi.ofInProgress", { defaultValue: "Ordres de fabrication" })}
+          label={t("dashboard.kpi.ofInProgress", {
+            defaultValue: "Ordres de fabrication",
+          })}
           value={kpi.ofInProgress}
           caption={`${kpi.ofNew} ${t("dashboard.kpi.new", { defaultValue: "nouveaux" })}`}
           trend={{ direction: "up", value: "+6.27%" }}
         />
 
-        {/* Opérateurs actifs */}
         <KpiCard
           icon={<Users size={20} />}
           iconColor="purple"
-          label={t("dashboard.kpi.workersActive", { defaultValue: "Opérateurs actifs" })}
+          label={t("dashboard.kpi.workersActive", {
+            defaultValue: "Opérateurs actifs",
+          })}
           value={kpi.workersActive}
           total={kpi.workersTotal}
           progress={
-            kpi.workersTotal > 0 ? Math.round((kpi.workersActive / kpi.workersTotal) * 100) : 0
+            kpi.workersTotal > 0
+              ? Math.round((kpi.workersActive / kpi.workersTotal) * 100)
+              : 0
           }
           progressColor="purple"
         />
 
-        {/* Rendement global */}
         <KpiCard
           icon={<TrendingUp size={20} />}
           iconColor="orange"
-          label={t("dashboard.kpi.globalEfficiency", { defaultValue: "Rendement global" })}
+          label={t("dashboard.kpi.globalEfficiency", {
+            defaultValue: "Rendement global",
+          })}
           value={`${kpi.globalEfficiency}%`}
           trend={{ direction: "up", value: `+${kpi.globalTrend}%` }}
           progress={kpi.globalEfficiency}
           progressColor="green"
         />
 
-        {/* CTA card — Discover platform */}
-        <div className="relative overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-gradient-to-br from-[#1e3a5f] to-[#0f172a] p-5 shadow-[var(--shadow-md)] lg:col-span-2 xl:col-span-1">
+        {/* CTA card */}
+        <div
+          className="relative overflow-hidden rounded-2xl p-5 lg:col-span-2 xl:col-span-1"
+          style={{
+            background:
+              "linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)",
+            boxShadow: "var(--shadow-md)",
+          }}
+        >
           <div className="relative z-10 flex h-full flex-col justify-between gap-4">
             <p className="text-sm font-bold leading-snug text-white">
-              {t("dashboard.cta.title", { defaultValue: "Une production plus intelligente, une vision complète." })}
+              {t("dashboard.cta.title", {
+                defaultValue: "Une production plus intelligente, une vision complète.",
+              })}
             </p>
             <button
               type="button"
-              className="inline-flex items-center gap-2 self-start rounded-lg bg-[var(--brand-orange)] px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[var(--brand-orange-hover)]"
+              className="inline-flex items-center gap-2 self-start rounded-lg px-3.5 py-2 text-xs font-bold text-white transition-colors"
+              style={{ backgroundColor: "var(--brand-orange)" }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--brand-orange-hover)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--brand-orange)";
+              }}
             >
               {t("dashboard.cta.button", { defaultValue: "Découvrir la plateforme" })}
               <ArrowRight size={14} />
@@ -470,7 +554,7 @@ export function ManagerDashboardPage() {
       </div>
 
       {/* ============================================================ */}
-      {/* MAIN GRID : Chart + Machine + Notifications                  */}
+      {/* MAIN GRID : Chart + Machines + Notifications                 */}
       {/* ============================================================ */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* Production Chart */}
@@ -480,17 +564,37 @@ export function ManagerDashboardPage() {
               <CardTitle size="md">
                 {t("dashboard.production.title", { defaultValue: "Production" })}
               </CardTitle>
-              <span className="text-xs font-semibold text-[var(--text-tertiary)]">
-                — {t("dashboard.production.subtitle", { defaultValue: "7 derniers jours" })}
+              <span
+                className="text-xs font-semibold"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                —{" "}
+                {t("dashboard.production.subtitle", {
+                  defaultValue: "7 derniers jours",
+                })}
               </span>
             </div>
             <div className="flex items-center gap-3 text-[10px] font-bold">
-              <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                <span className="h-2 w-2 rounded-sm bg-[var(--accent-blue)]" />
-                {t("dashboard.production.legendQty", { defaultValue: "Quantité produite" })}
+              <span
+                className="inline-flex items-center gap-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <span
+                  className="h-2 w-2 rounded-sm"
+                  style={{ backgroundColor: "var(--accent-blue)" }}
+                />
+                {t("dashboard.production.legendQty", {
+                  defaultValue: "Quantité produite",
+                })}
               </span>
-              <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                <span className="h-2 w-2 rounded-sm bg-[var(--text-tertiary)]" />
+              <span
+                className="inline-flex items-center gap-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <span
+                  className="h-2 w-2 rounded-sm"
+                  style={{ backgroundColor: "var(--text-tertiary)" }}
+                />
                 {t("dashboard.production.legendTarget", { defaultValue: "Objectif" })}
               </span>
             </div>
@@ -498,40 +602,47 @@ export function ManagerDashboardPage() {
           <CardBody>
             <div className="h-[260px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={production} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                <ComposedChart
+                  data={production}
+                  margin={{ top: 5, right: 5, bottom: 5, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#94a3b833"
+                    vertical={false}
+                  />
                   <XAxis
                     dataKey="day"
-                    stroke="var(--text-tertiary)"
+                    stroke="#94a3b8"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                   />
                   <YAxis
-                    stroke="var(--text-tertiary)"
+                    stroke="#94a3b8"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "var(--bg-card)",
-                      border: "1px solid var(--border-subtle)",
+                      backgroundColor: "#1e293b",
+                      border: "1px solid #334155",
                       borderRadius: "8px",
                       fontSize: "12px",
-                      color: "var(--text-primary)",
+                      color: "#f1f5f9",
                     }}
                   />
                   <Bar
                     dataKey="quantity"
-                    fill="var(--accent-blue)"
+                    fill="#3b82f6"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={32}
                   />
                   <Line
                     type="monotone"
                     dataKey="target"
-                    stroke="var(--text-tertiary)"
+                    stroke="#94a3b8"
                     strokeWidth={2}
                     strokeDasharray="4 4"
                     dot={false}
@@ -546,23 +657,39 @@ export function ManagerDashboardPage() {
         <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle size="md">
-              {t("dashboard.machines.title", { defaultValue: "État des machines CNC" })}
+              {t("dashboard.machines.title", {
+                defaultValue: "État des machines CNC",
+              })}
             </CardTitle>
-            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+            <CardAction>
+              {t("common.viewAll", { defaultValue: "Voir tout →" })}
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
-            <ul className="divide-y divide-[var(--border-subtle)]">
-              {machines.map((m) => (
+            <ul>
+              {machines.map((m, idx) => (
                 <li
                   key={m.id}
-                  className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[var(--bg-card-hover)]"
+                  className="flex items-center gap-3 px-5 py-3 transition-colors"
+                  style={{
+                    borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                  }}
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-tertiary)]">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                    style={{
+                      backgroundColor: "var(--bg-muted)",
+                      color: "var(--text-tertiary)",
+                    }}
+                  >
                     <Cog size={18} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-bold text-[var(--text-primary)]">
+                      <span
+                        className="truncate text-sm font-bold"
+                        style={{ color: "var(--text-primary)" }}
+                      >
                         {m.code}
                       </span>
                       <Badge
@@ -577,18 +704,30 @@ export function ManagerDashboardPage() {
                         dot
                       >
                         {m.status === "running"
-                          ? t("dashboard.machines.running", { defaultValue: "En production" })
+                          ? t("dashboard.machines.running", {
+                              defaultValue: "En production",
+                            })
                           : m.status === "warning"
-                            ? t("dashboard.machines.warning", { defaultValue: "En alerte" })
-                            : t("dashboard.machines.stopped", { defaultValue: "Arrêté" })}
+                            ? t("dashboard.machines.warning", {
+                                defaultValue: "En alerte",
+                              })
+                            : t("dashboard.machines.stopped", {
+                                defaultValue: "Arrêté",
+                              })}
                       </Badge>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <span className="truncate text-[11px] text-[var(--text-tertiary)]">
+                      <span
+                        className="truncate text-[11px]"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
                         {m.model}
                       </span>
                       {m.current_piece && (
-                        <span className="truncate text-[11px] font-semibold text-[var(--text-secondary)]">
+                        <span
+                          className="truncate text-[11px] font-semibold"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
                           {m.current_piece}
                         </span>
                       )}
@@ -617,9 +756,13 @@ export function ManagerDashboardPage() {
         <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle size="md">
-              {t("dashboard.notifications.title", { defaultValue: "Alertes & notifications" })}
+              {t("dashboard.notifications.title", {
+                defaultValue: "Alertes & notifications",
+              })}
             </CardTitle>
-            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+            <CardAction>
+              {t("common.viewAll", { defaultValue: "Voir tout →" })}
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-2">
             <ul className="space-y-1">
@@ -634,38 +777,63 @@ export function ManagerDashboardPage() {
                         : n.type === "message"
                           ? FileText
                           : Info;
-                const colorClass =
+
+                const iconBg =
                   n.type === "danger"
-                    ? "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400"
+                    ? "rgba(239, 68, 68, 0.12)"
                     : n.type === "warning"
-                      ? "bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
+                      ? "rgba(245, 158, 11, 0.12)"
                       : n.type === "success"
-                        ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"
+                        ? "rgba(16, 185, 129, 0.12)"
                         : n.type === "message"
-                          ? "bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400";
+                          ? "rgba(59, 130, 246, 0.12)"
+                          : "rgba(100, 116, 139, 0.12)";
+
+                const iconColor =
+                  n.type === "danger"
+                    ? "#ef4444"
+                    : n.type === "warning"
+                      ? "#f59e0b"
+                      : n.type === "success"
+                        ? "#10b981"
+                        : n.type === "message"
+                          ? "#3b82f6"
+                          : "#64748b";
 
                 return (
                   <li
                     key={n.id}
-                    className="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--bg-card-hover)]"
+                    className="flex items-start gap-3 px-5 py-2.5 transition-colors"
                   >
                     <div
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${colorClass}`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      style={{
+                        backgroundColor: iconBg,
+                        color: iconColor,
+                      }}
                     >
                       <IconComp size={15} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-bold text-[var(--text-primary)]">
+                      <p
+                        className="truncate text-xs font-bold"
+                        style={{ color: "var(--text-primary)" }}
+                      >
                         {n.title}
                       </p>
                       {n.subtitle && (
-                        <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                        <p
+                          className="truncate text-[11px]"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
                           {n.subtitle}
                         </p>
                       )}
                     </div>
-                    <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                    <span
+                      className="shrink-0 text-[10px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
                       {n.time}
                     </span>
                   </li>
@@ -686,41 +854,42 @@ export function ManagerDashboardPage() {
             <CardTitle size="md">
               {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
             </CardTitle>
-            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+            <CardAction>
+              {t("common.viewAll", { defaultValue: "Voir tout →" })}
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-[var(--border-subtle)]">
-                    <th className="px-5 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      N° OF
-                    </th>
-                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Client
-                    </th>
-                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Produit
-                    </th>
-                    <th className="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Qté
-                    </th>
-                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Progression
-                    </th>
-                    <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Statut
-                    </th>
-                    <th className="px-5 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                      Échéance
-                    </th>
+                  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                    {[
+                      t("dashboard.of.colNumber", { defaultValue: "N° OF" }),
+                      t("dashboard.of.colClient", { defaultValue: "Client" }),
+                      t("dashboard.of.colProduct", { defaultValue: "Produit" }),
+                      t("dashboard.of.colQty", { defaultValue: "Qté" }),
+                      t("dashboard.of.colProgress", { defaultValue: "Progression" }),
+                      t("dashboard.of.colStatus", { defaultValue: "Statut" }),
+                      t("dashboard.of.colDeadline", { defaultValue: "Échéance" }),
+                    ].map((label, i) => (
+                      <th
+                        key={i}
+                        className={`px-${i === 0 || i === 6 ? "5" : "3"} py-2 text-[10px] font-bold uppercase tracking-wider ${
+                          i === 3 ? "text-center" : "text-start"
+                        }`}
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {ofRows.map((of) => (
                     <tr
                       key={of.id}
-                      className="border-b border-[var(--border-subtle)] last:border-0 transition-colors hover:bg-[var(--bg-card-hover)]"
+                      className="transition-colors"
+                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
                     >
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
@@ -733,18 +902,32 @@ export function ManagerDashboardPage() {
                                   : "bg-slate-400"
                             }`}
                           />
-                          <span className="font-mono text-xs font-semibold text-[var(--text-primary)]" dir="ltr">
+                          <span
+                            className="font-mono text-xs font-semibold"
+                            style={{ color: "var(--text-primary)" }}
+                            dir="ltr"
+                          >
                             {of.number}
                           </span>
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-xs text-[var(--text-secondary)]">
+                      <td
+                        className="px-3 py-3 text-xs"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
                         {of.client}
                       </td>
-                      <td className="px-3 py-3 text-xs text-[var(--text-secondary)]">
+                      <td
+                        className="px-3 py-3 text-xs"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
                         {of.product}
                       </td>
-                      <td className="px-3 py-3 text-center text-xs tabular-nums text-[var(--text-secondary)]" dir="ltr">
+                      <td
+                        className="px-3 py-3 text-center text-xs tabular-nums"
+                        style={{ color: "var(--text-secondary)" }}
+                        dir="ltr"
+                      >
                         {of.quantity}
                       </td>
                       <td className="px-3 py-3">
@@ -767,11 +950,18 @@ export function ManagerDashboardPage() {
                           {of.status === "done"
                             ? t("dashboard.of.done", { defaultValue: "Terminée" })
                             : of.status === "in_progress"
-                              ? t("dashboard.of.inProgress", { defaultValue: "En cours" })
-                              : t("dashboard.of.pending", { defaultValue: "En attente" })}
+                              ? t("dashboard.of.inProgress", {
+                                  defaultValue: "En cours",
+                                })
+                              : t("dashboard.of.pending", {
+                                  defaultValue: "En attente",
+                                })}
                         </Badge>
                       </td>
-                      <td className="px-5 py-3 text-xs text-[var(--text-tertiary)]">
+                      <td
+                        className="px-5 py-3 text-xs"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
                         {of.deadline}
                       </td>
                     </tr>
@@ -788,23 +978,40 @@ export function ManagerDashboardPage() {
             <CardTitle size="md">
               {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
             </CardTitle>
-            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+            <CardAction>
+              {t("common.viewAll", { defaultValue: "Voir tout →" })}
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
-            <ul className="divide-y divide-[var(--border-subtle)]">
-              {projects.map((p) => (
+            <ul>
+              {projects.map((p, idx) => (
                 <li
                   key={p.id}
-                  className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-[var(--bg-card-hover)]"
+                  className="flex items-center gap-3 px-5 py-3 transition-colors"
+                  style={{
+                    borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                  }}
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-tertiary)]">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                    style={{
+                      backgroundColor: "var(--bg-muted)",
+                      color: "var(--text-tertiary)",
+                    }}
+                  >
                     <Package size={18} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold text-[var(--text-primary)]">
+                    <p
+                      className="truncate text-sm font-bold"
+                      style={{ color: "var(--text-primary)" }}
+                    >
                       {p.name}
                     </p>
-                    <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                    <p
+                      className="truncate text-[11px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
                       {p.client}
                     </p>
                     <div className="mt-1.5">
@@ -812,10 +1019,18 @@ export function ManagerDashboardPage() {
                     </div>
                   </div>
                   <div className="shrink-0 text-end">
-                    <span className="text-sm font-bold text-[var(--text-primary)]" dir="ltr">
+                    <span
+                      className="text-sm font-bold"
+                      style={{ color: "var(--text-primary)" }}
+                      dir="ltr"
+                    >
                       {p.progress}%
                     </span>
-                    <p className="text-[10px] text-[var(--text-tertiary)]" dir="ltr">
+                    <p
+                      className="text-[10px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                      dir="ltr"
+                    >
                       {p.doneOf}/{p.totalOf} OF
                     </p>
                   </div>
@@ -831,7 +1046,9 @@ export function ManagerDashboardPage() {
             <CardTitle size="md">
               {t("dashboard.tasks.title", { defaultValue: "Tâches à venir" })}
             </CardTitle>
-            <CardAction>{t("common.viewAll", { defaultValue: "Voir tout →" })}</CardAction>
+            <CardAction>
+              {t("common.viewAll", { defaultValue: "Voir tout →" })}
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-2">
             <ul className="space-y-0.5">
@@ -845,23 +1062,30 @@ export function ManagerDashboardPage() {
                 return (
                   <li
                     key={task.id}
-                    className="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--bg-card-hover)]"
+                    className="flex items-start gap-3 px-5 py-2.5 transition-colors"
                   >
-                    <span className={`mt-1 h-8 w-1 shrink-0 rounded-full ${barColor}`} />
+                    <span
+                      className={`mt-1 h-8 w-1 shrink-0 rounded-full ${barColor}`}
+                    />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className="font-mono text-xs font-bold text-[var(--text-secondary)]"
-                          dir="ltr"
-                        >
-                          {task.time}
-                        </span>
-                      </div>
-                      <p className="truncate text-xs font-semibold text-[var(--text-primary)]">
+                      <span
+                        className="font-mono text-xs font-bold"
+                        style={{ color: "var(--text-secondary)" }}
+                        dir="ltr"
+                      >
+                        {task.time}
+                      </span>
+                      <p
+                        className="truncate text-xs font-semibold"
+                        style={{ color: "var(--text-primary)" }}
+                      >
                         {task.label}
                       </p>
                       {task.sublabel && (
-                        <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+                        <p
+                          className="truncate text-[11px]"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
                           {task.sublabel}
                         </p>
                       )}
