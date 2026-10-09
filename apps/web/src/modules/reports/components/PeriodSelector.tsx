@@ -45,8 +45,14 @@ export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-      {/* Presets — scroll horizontal sur mobile */}
-      <div className="-mx-1 flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 px-1 sm:mx-0">
+      {/* Presets */}
+      <div
+        className="-mx-1 flex gap-1 overflow-x-auto rounded-xl border p-1 sm:mx-0"
+        style={{
+          backgroundColor: "var(--bg-card)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         {PRESETS.map((p) => {
           const active = value.preset === p.key;
           return (
@@ -54,11 +60,31 @@ export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
               key={p.key}
               type="button"
               onClick={() => handlePreset(p.key)}
-              className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors sm:px-3 ${
+              className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all sm:px-3"
+              style={
                 active
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-              }`}
+                  ? {
+                      backgroundColor: "var(--brand-orange)",
+                      color: "#ffffff",
+                      boxShadow: "var(--shadow-sm)",
+                    }
+                  : {
+                      color: "var(--text-secondary)",
+                      backgroundColor: "transparent",
+                    }
+              }
+              onMouseEnter={(e) => {
+                if (!active) {
+                  e.currentTarget.style.backgroundColor = "var(--bg-muted)";
+                  e.currentTarget.style.color = "var(--text-primary)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "var(--text-secondary)";
+                }
+              }}
             >
               {t(p.labelKey)}
             </button>
@@ -67,27 +93,37 @@ export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
       </div>
 
       {/* Dates personnalisées */}
-      <div className="flex items-center gap-1 self-start rounded-lg border border-slate-200 bg-white px-2 py-1 sm:self-auto">
-        <Calendar size={14} className="shrink-0 text-slate-400" />
+      <div
+        className="flex items-center gap-1 self-start rounded-xl border px-2 py-1 sm:self-auto"
+        style={{
+          backgroundColor: "var(--bg-card)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
+        <Calendar size={14} className="shrink-0" style={{ color: "var(--text-tertiary)" }} />
         <input
           type="date"
           value={toInputValue(value.from)}
           onChange={handleCustomFrom}
-          className="min-w-0 border-0 bg-transparent text-xs text-slate-600 focus:outline-none"
+          className="min-w-0 border-0 bg-transparent text-xs focus:outline-none"
+          style={{ color: "var(--text-primary)" }}
           dir="ltr"
         />
-        <span className="text-xs text-slate-300">→</span>
+        <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+          →
+        </span>
         <input
           type="date"
           value={toInputValue(value.to)}
           onChange={handleCustomTo}
-          className="min-w-0 border-0 bg-transparent text-xs text-slate-600 focus:outline-none"
+          className="min-w-0 border-0 bg-transparent text-xs focus:outline-none"
+          style={{ color: "var(--text-primary)" }}
           dir="ltr"
         />
       </div>
 
-      {/* Résumé texte — masqué sur mobile pour économiser l'espace */}
-      <span className="hidden text-xs text-slate-400 sm:inline">
+      {/* Résumé texte — masqué sur mobile */}
+      <span className="hidden text-xs sm:inline" style={{ color: "var(--text-tertiary)" }}>
         {fmt(value.from)} → {fmt(value.to)}
       </span>
     </div>
