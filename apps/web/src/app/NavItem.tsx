@@ -13,6 +13,11 @@ interface NavItemProps {
 
 const INDENT_PER_LEVEL = 12;
 
+/**
+ * NavItem — عنصر التنقل في Sidebar (Deep Navy).
+ * يعمل تلقائياً مع أي وضع (Light/Dark) لأن Sidebar ثابت داكن.
+ * الألوان مضمونة للتباين (WCAG AA).
+ */
 export function NavItem({
   node,
   depth,
@@ -43,28 +48,46 @@ export function NavItem({
       <button
         type="button"
         onClick={handleClick}
-        className={`group flex w-full items-center gap-2 rounded-lg py-1.5 pe-2 text-start text-sm font-medium transition-colors ${
-          isActive
-            ? "bg-indigo-50 text-indigo-700"
-            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+        className={`group flex w-full items-center gap-2 rounded-lg py-1.5 pe-2 text-start text-sm font-medium transition-colors duration-150 ${
+          isActive ? "font-bold" : ""
         }`}
-        style={{ paddingInlineStart: indent }}
+        style={{
+          paddingInlineStart: indent,
+          backgroundColor: isActive ? "var(--sidebar-bg-active)" : "transparent",
+          color: isActive ? "#ffffff" : "var(--sidebar-text)",
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = "var(--sidebar-bg-hover)";
+            e.currentTarget.style.color = "#ffffff";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = "transparent";
+            e.currentTarget.style.color = "var(--sidebar-text)";
+          }
+        }}
       >
         {Icon && (
           <Icon
             size={16}
-            className={`shrink-0 ${
-              isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-500"
-            }`}
+            className="shrink-0 transition-colors"
+            style={{
+              color: isActive ? "#ffffff" : "var(--sidebar-text-secondary)",
+            }}
           />
         )}
         <span className="flex-1 truncate">{label}</span>
         {hasChildren && (
           <ChevronRight
             size={14}
-            className={`shrink-0 text-slate-400 transition-transform ${
+            className={`shrink-0 transition-transform duration-150 ${
               isExpanded ? "rotate-90" : ""
             }`}
+            style={{
+              color: isActive ? "#ffffff" : "var(--sidebar-text-secondary)",
+            }}
           />
         )}
       </button>
