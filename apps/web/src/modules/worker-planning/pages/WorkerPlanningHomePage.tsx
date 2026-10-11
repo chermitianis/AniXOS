@@ -403,4 +403,190 @@ export function WorkerPlanningHomePage() {
                                     className="relative flex overflow-hidden rounded-md border shadow-sm"
                                     style={{
                                       backgroundColor: "var(--bg-card)",
-                                      border
+                                      borderColor: "var(--border-subtle)",
+                                    }}
+                                  >
+                                    {isInProgress && (
+                                      <span
+                                        className="w-[4px] shrink-0"
+                                        style={{ backgroundColor: "var(--brand-orange)" }}
+                                      />
+                                    )}
+                                    <div className="min-w-0 flex-1 px-2.5 py-1.5">
+                                      <div
+                                        className="truncate text-[13px] font-bold leading-tight"
+                                        style={{ color: "var(--text-primary)" }}
+                                      >
+                                        {c.piece_name || c.product_name || "—"}
+                                      </div>
+                                      <div className="mt-0.5 flex items-center justify-between gap-2">
+                                        {c.project_code && (
+                                          <span
+                                            className="truncate font-mono text-[10px]"
+                                            style={{ color: "var(--text-tertiary)" }}
+                                            dir="ltr"
+                                          >
+                                            {c.project_code}
+                                          </span>
+                                        )}
+                                        {c.cell_worker_name && (
+                                          <span
+                                            className="flex shrink-0 items-center gap-0.5 text-[10px]"
+                                            style={{ color: "var(--text-tertiary)" }}
+                                          >
+                                            <User size={9} />
+                                            {c.cell_worker_name}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* MOBILE : cartes par machine */}
+          <div className="flex flex-col gap-3 md:hidden">
+            {machinesGrouped.map(({ machine, shifts }) => (
+              <div
+                key={machine.id}
+                className="overflow-hidden rounded-xl border shadow-sm"
+                style={{
+                  backgroundColor: "var(--bg-card)",
+                  borderColor: "var(--border-subtle)",
+                }}
+              >
+                <div
+                  className="flex items-center gap-2 border-b px-4 py-3"
+                  style={{
+                    backgroundColor: "var(--bg-muted)",
+                    borderColor: "var(--border-subtle)",
+                  }}
+                >
+                  <Cog size={16} style={{ color: "var(--text-tertiary)" }} />
+                  <span className="font-bold" style={{ color: "var(--text-primary)" }}>
+                    {machine.name}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  {shiftNumbers.map((n) => {
+                    const cellCards = shifts.get(n) ?? [];
+                    if (cellCards.length === 0) return null;
+                    return (
+                      <div
+                        key={n}
+                        className="border-b last:border-b-0"
+                        style={{ borderColor: "var(--border-subtle)" }}
+                      >
+                        <div
+                          className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wide"
+                          style={{
+                            backgroundColor: "var(--bg-muted)",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {t("production.planning.shift", { defaultValue: "Poste" })} {n}
+                        </div>
+                        <div className="flex flex-col gap-1.5 p-2">
+                          {cellCards.map((c) => {
+                            const isInProgress = c.status === "in_progress";
+                            return (
+                              <div
+                                key={c.planning_id}
+                                className="relative flex overflow-hidden rounded-md border shadow-sm"
+                                style={{
+                                  backgroundColor: "var(--bg-card)",
+                                  borderColor: "var(--border-subtle)",
+                                }}
+                              >
+                                {isInProgress && (
+                                  <span
+                                    className="w-[4px] shrink-0"
+                                    style={{ backgroundColor: "var(--brand-orange)" }}
+                                  />
+                                )}
+                                <div className="min-w-0 flex-1 px-3 py-2">
+                                  <div
+                                    className="truncate text-sm font-bold"
+                                    style={{ color: "var(--text-primary)" }}
+                                  >
+                                    {c.piece_name || c.product_name || "—"}
+                                  </div>
+                                  {c.project_code && (
+                                    <div
+                                      className="mt-0.5 truncate font-mono text-[11px]"
+                                      style={{ color: "var(--text-tertiary)" }}
+                                      dir="ltr"
+                                    >
+                                      {c.project_code}
+                                    </div>
+                                  )}
+                                  {c.cell_worker_name && (
+                                    <div
+                                      className="mt-0.5 flex items-center gap-1 truncate text-[11px]"
+                                      style={{ color: "var(--text-tertiary)" }}
+                                    >
+                                      <User size={10} />
+                                      {c.cell_worker_name}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* LOGOUT CONFIRM */}
+      {confirmLogout && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4">
+          <div
+            className="w-full max-w-sm rounded-xl p-5 text-center shadow-2xl"
+            style={{ backgroundColor: "var(--bg-card)" }}
+          >
+            <p className="mb-4 text-sm" style={{ color: "var(--text-secondary)" }}>
+              {t("workerPlanning.logoutConfirm", { defaultValue: "Se déconnecter ?" })}
+            </p>
+            <div className="flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={logout}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                {t("workerPlanning.logoutButton", { defaultValue: "Se déconnecter" })}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmLogout(false)}
+                className="rounded-lg border px-4 py-2 text-sm font-semibold transition"
+                style={{
+                  borderColor: "var(--border-strong)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {t("common.cancel", { defaultValue: "Annuler" })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
