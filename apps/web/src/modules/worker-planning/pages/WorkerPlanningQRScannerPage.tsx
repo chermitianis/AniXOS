@@ -185,12 +185,15 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
 
   // ---------------------------------------------------------------------------
   // Phase 2 : Saisie du PIN
+  //
+  // ✅ FIX : currentPin est passé en argument pour éviter le stale closure
+  //          du setTimeout (qui capturait une ancienne valeur de `pin`).
   // ---------------------------------------------------------------------------
-  async function submitPin() {
-    if (!scannedToken || pin.length !== 4 || isLocked || isVerifying) return;
+  async function submitPin(currentPin: string) {
+    if (!scannedToken || currentPin.length !== 4 || isLocked || isVerifying) return;
     setResultError(null);
 
-    const result = await loginWithToken(scannedToken, pin);
+    const result = await loginWithToken(scannedToken, currentPin);
 
     if (!result.ok) {
       const nextAttempts = attempts + 1;
@@ -221,7 +224,8 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
     const next = pin + d;
     setPin(next);
     if (next.length === 4) {
-      setTimeout(() => void submitPin(), 80);
+      // ✅ FIX : passer `next` explicitement — évite la stale closure
+      setTimeout(() => void submitPin(next), 80);
     }
   }
 
