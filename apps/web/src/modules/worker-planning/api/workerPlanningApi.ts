@@ -3,11 +3,7 @@ import { parsePlanningQrToken } from "../../../shared/utils/planningQrToken";
 import type { KioskPlanningCard } from "../../kiosk/api/kioskApi";
 
 // ============================================================================
-// Client de la PWA Planning opérateur (/planning). Aucune session Supabase
-// Auth ici : l'app ne connaît que { companyId, secret, workerId, workerName }
-// (venant du QR + PIN vérifié), revérifiés par l'Edge Function
-// `worker-planning-access` à chaque appel.
-// Lecture seule stricte — cette API n'écrit jamais rien.
+// Client de la PWA Planning opérateur (/planning).
 // ============================================================================
 
 export interface PlanningSession {
@@ -35,7 +31,7 @@ export function savePlanningSession(session: PlanningSession) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
-    /* stockage indisponible */
+    /* ignore */
   }
 }
 
@@ -43,7 +39,7 @@ export function clearPlanningSession() {
   try {
     localStorage.removeItem(SESSION_KEY);
   } catch {
-    /* ignoré */
+    /* ignore */
   }
 }
 
@@ -107,11 +103,6 @@ export interface FetchPlanningResult {
   error?: "invalid_token" | "subscription_required" | "network_error" | "fetch_failed";
 }
 
-interface ServerKioskCard extends Omit<KioskPlanningCard, "cell_worker_id" | "cell_worker_name"> {
-  cell_worker_id: string | null;
-  cell_worker_name: string | null;
-}
-
 function cacheKey(companyId: string, date: string) {
   return `${CACHE_PREFIX}${companyId}:${date}`;
 }
@@ -122,9 +113,7 @@ function readCache(
 ): { cards: KioskPlanningCard[]; fetchedAt: string } | null {
   try {
     const raw = localStorage.getItem(cacheKey(companyId, date));
-    return raw
-      ? (JSON.parse(raw) as { cards: KioskPlanningCard[]; fetchedAt: string })
-      : null;
+    return raw ? (JSON.parse(raw) as { cards: KioskPlanningCard[]; fetchedAt: string }) : null;
   } catch {
     return null;
   }
@@ -143,11 +132,6 @@ function writeCache(
   }
 }
 
-/**
- * Récupère les cartes de planning d'une date donnée, avec les mêmes champs
- * que `fetchDayPlanningForKiosk` (sequence_order, wp_interface, cell_worker).
- * Utilise l'Edge Function `worker-planning-access` (action "fetch").
- */
 export async function fetchPlanningForDate(
   session: PlanningSession,
   date: string,
@@ -169,7 +153,7 @@ export async function fetchPlanningForDate(
       return { cards: [], fetchedAt: null, fromCache: false, error: errCode };
     }
 
-    const cards: KioskPlanningCard[] = (data.cards ?? []) as ServerKioskCard[];
+    const cards: KioskPlanningCard[] = (data.cards ?? []) as KioskPlanningCard[];
     const fetchedAt = data.server_time ?? new Date().toISOString();
     writeCache(session.companyId, date, cards, fetchedAt);
     return { cards, fetchedAt, fromCache: false };
