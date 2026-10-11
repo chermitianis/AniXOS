@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-const jsQR = (await import("jsqr")).default;
-import { AlertCircle, Loader2, QrCode, X, Delete, ArrowLeft } from "lucide-react";
+import jsQR from "jsqr";
+import { AlertCircle, Loader2, QrCode, X, Delete, ArrowLeft, Image as ImageIcon } from "lucide-react";
 import { usePlanningSession } from "../context/PlanningSessionContext";
 
 interface Props {
   onCancel?: () => void;
 }
 
-/** Scanner QR (caméra + jsQR) suivi d'un écran de saisie PIN à 4 chiffres.
- *  Le PIN est propre à l'opérateur et complète le token du QR (2FA léger).
- *  3 tentatives max, puis verrouillage local de 30 secondes. */
+/**
+ * Scanner QR (caméra + jsQR) OU depuis une image du téléphone, suivi d'un
+ * écran de saisie PIN à 4 chiffres. Le PIN est propre à l'opérateur et
+ * complète le token du QR (2FA léger). 3 tentatives max, puis verrouillage
+ * local de 30 secondes.
+ *
+ * Aucune image n'est envoyée au serveur — tout est décodé côté client.
+ */
 export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
   const { t } = useTranslation();
   const { loginWithToken, isVerifying } = usePlanningSession();
@@ -20,6 +25,7 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const scanLockRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
@@ -35,14 +41,17 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
     streamRef.current = null;
   }, []);
 
-  const handleDecoded = useCallback((raw: string) => {
-    if (scanLockRef.current) return;
-    scanLockRef.current = true;
-    stopCamera();
-    setResultError(null);
-    setScannedToken(raw);
-    setPin("");
-  }, [stopCamera]);
+  const handleDecoded = useCallback(
+    (raw: string) => {
+      if (scanLockRef.current) return;
+      scanLockRef.current = true;
+      stopCamera();
+      setResultError(null);
+      setScannedToken(raw);
+      setPin("");
+    },
+    [stopCamera],
+  );
 
   const tick = useCallback(() => {
     const video = videoRef.current;
@@ -54,7 +63,9 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
         if (code?.data) {
           handleDecoded(code.data);
           return;
@@ -67,7 +78,9 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
   const startCamera = useCallback(async () => {
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -79,6 +92,7 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
     }
   }, [tick, t]);
 
+  // Démarre la caméra uniquement lors de la phase de scan (pas de PIN)
   useEffect(() => {
     if (!scannedToken) {
       void startCamera();
@@ -105,6 +119,73 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
 
   const isLocked = lockedUntil !== null && Date.now() < lockedUntil;
 
+  // ---------------------------------------------------------------------------
+  // Décode un QR depuis une image fournie par l'utilisateur (galerie / fichiers)
+  // ---------------------------------------------------------------------------
+  async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setResultError(null);
+
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = objectUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("image_load_failed"));
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setResultError(
+          t("workerPlanning.imageDecodeError", {
+            defaultValue: "Impossible de lire cette image. Essayez à nouveau.",
+          }),
+        );
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "attemptBoth",
+      });
+
+      if (code?.data) {
+        // Réinitialise le lock pour permettre le traitement
+        scanLockRef.current = false;
+        handleDecoded(code.data);
+      } else {
+        setResultError(
+          t("workerPlanning.qrNotFoundInImage", {
+            defaultValue:
+              "Aucun code QR détecté dans cette image. Essayez avec une autre photo.",
+          }),
+        );
+      }
+    } catch {
+      setResultError(
+        t("workerPlanning.imageDecodeError", {
+          defaultValue: "Impossible de lire cette image. Essayez à nouveau.",
+        }),
+      );
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      // Réinitialise l'input pour permettre de re-sélectionner la même image
+      e.target.value = "";
+    }
+  }
+
+  function openImagePicker() {
+    fileInputRef.current?.click();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 2 : Saisie du PIN
+  // ---------------------------------------------------------------------------
   async function submitPin() {
     if (!scannedToken || pin.length !== 4 || isLocked || isVerifying) return;
     setResultError(null);
@@ -129,10 +210,9 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
             ? t("workerPlanning.subscriptionRequired")
             : result.error === "network_error"
               ? t("workerPlanning.networkError")
-              : t("workerPlanning.pinInvalid")
+              : t("workerPlanning.pinInvalid"),
       );
     }
-    // Si OK, le PlanningSessionContext remplace le rendu (session non nulle).
   }
 
   function handleDigit(d: string) {
@@ -141,7 +221,6 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
     const next = pin + d;
     setPin(next);
     if (next.length === 4) {
-      // soumettre automatiquement après le 4ème chiffre
       setTimeout(() => void submitPin(), 80);
     }
   }
@@ -155,6 +234,7 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
     setScannedToken(null);
     setPin("");
     setResultError(null);
+    setAttempts(0);
     scanLockRef.current = false;
   }
 
@@ -214,7 +294,7 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
 
           {/* Erreur */}
           {resultError && (
-            <div className="flex max-w-xs items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            <div className="flex max-w-xs items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-center text-sm text-red-400">
               <AlertCircle size={16} className="shrink-0" />
               {resultError}
             </div>
@@ -283,7 +363,7 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
   }
 
   // ============================================================
-  // Rendu : Phase 1 — Scan QR
+  // Rendu : Phase 1 — Scan QR (caméra OU galerie)
   // ============================================================
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white">
@@ -315,15 +395,41 @@ export function WorkerPlanningQRScannerPage({ onCancel }: Props) {
         </div>
       </div>
 
-      <div className="space-y-2 px-4 pb-8 pt-3 text-center">
+      <div className="space-y-3 px-4 pb-8 pt-3 text-center">
         {cameraError && (
           <p className="flex items-center justify-center gap-2 text-sm text-red-400">
             <AlertCircle size={16} /> {cameraError}
           </p>
         )}
-        {!cameraError && (
+        {resultError && (
+          <p className="flex items-center justify-center gap-2 text-sm text-red-400">
+            <AlertCircle size={16} /> {resultError}
+          </p>
+        )}
+        {!cameraError && !resultError && (
           <p className="text-sm text-slate-300">{t("workerPlanning.scanHint")}</p>
         )}
+
+        {/* Input caché pour la galerie */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => void handleImageFile(e)}
+          className="hidden"
+        />
+
+        {/* Bouton "Choisir depuis une image" */}
+        <button
+          type="button"
+          onClick={openImagePicker}
+          className="mx-auto flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10 active:scale-95"
+        >
+          <ImageIcon size={16} />
+          {t("workerPlanning.pickFromGallery", {
+            defaultValue: "Choisir depuis une image",
+          })}
+        </button>
       </div>
     </div>
   );
