@@ -137,11 +137,11 @@ export function ManagerDashboardPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-  // timer for debounced realtime reload (voir useEffect plus bas)
+  // Timer pour debounce des rechargements Realtime (évite les floods d'événements)
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // --------------------------------------------------------------------------
-  // Load data (extracted as useCallback so both mount & realtime can reuse it)
+  // Load data (extrait en useCallback pour être réutilisable par le Realtime)
   // --------------------------------------------------------------------------
   const load = useCallback(async () => {
     const companyId = staffUser?.company_id;
@@ -217,6 +217,7 @@ export function ManagerDashboardPage() {
 
       const machineIds = (machinesDetail ?? []).map((m: any) => m.id);
 
+      // Pour chaque machine : la session ouverte (pièce en cours + avancement)
       const { data: openSessions } = machineIds.length > 0
         ? await supabase
             .from("work_sessions")
@@ -231,6 +232,7 @@ export function ManagerDashboardPage() {
         if (!openByMachine.has(s.machine_id)) openByMachine.set(s.machine_id, s);
       }
 
+      // Pour le progress : durée écoulée vs estimation (à défaut, calcul simple)
       const machinesList: MachineStatus[] = (machinesDetail ?? []).map((m: any) => {
         const open = openByMachine.get(m.id);
         const currentStatus: string = m.current_status ?? "idle";
@@ -240,11 +242,13 @@ export function ManagerDashboardPage() {
         else if (currentStatus === "maintenance") status = "warning";
         else status = "stopped";
 
+        // Progress = % de temps écoulé depuis started_at (max 100) si session ouverte
         let progress = 0;
         if (open?.started_at) {
           const elapsedMin = Math.floor(
             (Date.now() - new Date(open.started_at).getTime()) / 60000,
           );
+          // 8 heures = 480 min par shift ; on plafonne à 99 tant que pas terminé
           progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
         }
 
@@ -260,7 +264,7 @@ export function ManagerDashboardPage() {
       });
       setMachines(machinesList);
 
-      // ----- 6. Production : 7 derniers jours -----
+      // ----- 6. Production : 7 derniers jours (vrai calcul) -----
       const today = new Date();
       const days: Date[] = [];
       for (let i = 6; i >= 0; i--) {
@@ -280,6 +284,7 @@ export function ManagerDashboardPage() {
         .lte("started_at", toIso)
         .is("voided_at", null);
 
+      // Compter les sessions de production par jour
       const countByDay = new Map<string, number>();
       for (const s of (prodSessions ?? []) as any[]) {
         const day = (s.started_at as string).slice(0, 10);
@@ -296,7 +301,7 @@ export function ManagerDashboardPage() {
       });
       setProduction(productionData);
 
-      // ----- 7. OF récents -----
+      // ----- 7. OF récents (progress réelle) -----
       const { data: ofRecent } = await supabase
         .from("manufacturing_orders")
         .select(
@@ -308,6 +313,7 @@ export function ManagerDashboardPage() {
 
       const ofIds = (ofRecent ?? []).map((o: any) => o.id);
 
+      // Progress réelle : WP terminées / WP totales par OF
       const { data: wpsData } = ofIds.length > 0
         ? await supabase
             .from("of_work_packages")
@@ -351,7 +357,7 @@ export function ManagerDashboardPage() {
       });
       setOfRows(ofList);
 
-      // ----- 8. Projets en cours -----
+      // ----- 8. Projets en cours (progress réelle) -----
       const { data: projectsData } = await supabase
         .from("projects")
         .select("id, name, status, clients(name)")
@@ -363,6 +369,7 @@ export function ManagerDashboardPage() {
 
       const projectIds = (projectsData ?? []).map((p: any) => p.id);
 
+      // Pour chaque projet : OF total / OF terminés
       const { data: projOfs } = projectIds.length > 0
         ? await supabase
             .from("manufacturing_orders")
@@ -395,7 +402,7 @@ export function ManagerDashboardPage() {
       });
       setProjects(projectList);
 
-      // ----- 9. Notifications -----
+      // ----- 9. Notifications (réclamations atelier non lues) -----
       const { data: reclamations } = await supabase
         .from("workshop_reclamations")
         .select("id, message, status, created_at, workers(full_name), machines(name)")
@@ -433,7 +440,7 @@ export function ManagerDashboardPage() {
   }, [load]);
 
   // --------------------------------------------------------------------------
-  // Live updates: réagit aux changements côté Kiosk (sessions, machines, OF,
+  // Live updates : réagit aux changements côté Kiosk (sessions, machines, OF,
   // réclamations, pièces, projets) et recharge le dashboard avec debounce.
   // Filtre company_id + RLS = isolation stricte entre entreprises.
   // --------------------------------------------------------------------------
