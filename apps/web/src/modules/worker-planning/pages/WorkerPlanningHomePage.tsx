@@ -20,12 +20,16 @@ import { fetchPlanningForDate } from "../api/workerPlanningApi";
 import type { KioskPlanningCard } from "../../kiosk/api/kioskApi";
 
 function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
 }
 function addDays(dateStr: string, delta: number): string {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + delta);
-  return toDateStr(d);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + delta);
+  return toDateStr(date);
 }
 
 type WpFilter = "all" | "cnc" | "classique";
