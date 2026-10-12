@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Monitor,
@@ -25,6 +25,7 @@ import {
   YAxis,
 } from "recharts";
 import { supabase } from "../../../lib/supabaseClient";
+import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
   Badge,
@@ -136,309 +137,344 @@ export function ManagerDashboardPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
+  // timer for debounced realtime reload (voir useEffect plus bas)
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   // --------------------------------------------------------------------------
-  // Load data
+  // Load data (extracted as useCallback so both mount & realtime can reuse it)
   // --------------------------------------------------------------------------
-  useEffect(() => {
-    let isMounted = true;
-
-    async function load() {
-      setIsLoading(true);
-
-      try {
-        const companyId = staffUser?.company_id;
-        if (!companyId) {
-          setIsLoading(false);
-          return;
-        }
-
-        // ----- 1. Machines : running / total -----
-        const { data: machinesData } = await supabase
-          .from("machines")
-          .select("id, is_active, current_status")
-          .eq("company_id", companyId)
-          .eq("is_active", true);
-
-        const machinesTotal = machinesData?.length ?? 0;
-        const machinesRunning =
-          machinesData?.filter((m: any) => m.current_status === "running").length ?? 0;
-
-        // ----- 2. Workers : active / total -----
-        const { data: workersData } = await supabase
-          .from("workers")
-          .select("id, is_active")
-          .eq("company_id", companyId);
-
-        const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
-
-        // Workers actifs = ayant au moins une session EN COURS (production ou downtime)
-        const { data: activeSessions } = await supabase
-          .from("work_sessions")
-          .select("worker_id")
-          .eq("company_id", companyId)
-          .is("ended_at", null)
-          .is("voided_at", null);
-
-        const workersActive = new Set(
-          (activeSessions ?? []).map((s: any) => s.worker_id).filter(Boolean),
-        ).size;
-
-        // ----- 3. OF : in_progress / ready -----
-        const { data: ofData } = await supabase
-          .from("manufacturing_orders")
-          .select("id, status")
-          .eq("company_id", companyId);
-
-        const ofInProgress =
-          ofData?.filter((o: any) => o.status === "in_progress").length ?? 0;
-        const ofNew = ofData?.filter((o: any) => o.status === "ready").length ?? 0;
-
-        // ----- 4. Global efficiency (machines running / total) -----
-        const globalEfficiency =
-          machinesTotal > 0 ? Math.round((machinesRunning / machinesTotal) * 100) : 0;
-
-        if (isMounted) {
-          setKpi({
-            machinesRunning,
-            machinesTotal,
-            ofInProgress,
-            ofNew,
-            workersActive,
-            workersTotal,
-            globalEfficiency,
-          });
-        }
-
-        // ----- 5. Machines détaillées (état + pièce en cours + progress) -----
-        const { data: machinesDetail } = await supabase
-          .from("machines")
-          .select("id, code, name, machine_type, current_status")
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .order("name")
-          .limit(6);
-
-        const machineIds = (machinesDetail ?? []).map((m: any) => m.id);
-
-        // Pour chaque machine : la session ouverte (pièce en cours + avancement)
-        const { data: openSessions } = machineIds.length > 0
-          ? await supabase
-              .from("work_sessions")
-              .select("machine_id, piece_task_id, started_at, pieces_tasks(name)")
-              .in("machine_id", machineIds)
-              .is("ended_at", null)
-              .is("voided_at", null)
-          : { data: [] };
-
-        const openByMachine = new Map<string, any>();
-        for (const s of (openSessions ?? []) as any[]) {
-          if (!openByMachine.has(s.machine_id)) openByMachine.set(s.machine_id, s);
-        }
-
-        // Pour le progress : durée écoulée vs estimation (à défaut, calcul simple)
-        const machinesList: MachineStatus[] = (machinesDetail ?? []).map((m: any) => {
-          const open = openByMachine.get(m.id);
-          const currentStatus: string = m.current_status ?? "idle";
-
-          let status: MachineStatus["status"] = "stopped";
-          if (currentStatus === "running") status = "running";
-          else if (currentStatus === "maintenance") status = "warning";
-          else status = "stopped";
-
-          // Progress = % de temps écoulé depuis started_at (max 100) si session ouverte
-          let progress = 0;
-          if (open?.started_at) {
-            const elapsedMin = Math.floor(
-              (Date.now() - new Date(open.started_at).getTime()) / 60000,
-            );
-            // 8 heures = 480 min par shift ; on plafonne à 99 tant que pas terminé
-            progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
-          }
-
-          return {
-            id: m.id,
-            code: m.code ?? "—",
-            name: m.name ?? "Machine",
-            model: m.machine_type ?? "—",
-            current_piece: open?.pieces_tasks?.name ?? null,
-            status,
-            progress,
-          };
-        });
-        if (isMounted) setMachines(machinesList);
-
-        // ----- 6. Production : 7 derniers jours (vrai calcul) -----
-        const today = new Date();
-        const days: Date[] = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(today.getDate() - i);
-          days.push(d);
-        }
-        const fromIso = `${localDateStr(days[0])}T00:00:00.000Z`;
-        const toIso = `${localDateStr(days[6])}T23:59:59.999Z`;
-
-        const { data: prodSessions } = await supabase
-          .from("work_sessions")
-          .select("started_at, duration_seconds")
-          .eq("company_id", companyId)
-          .eq("session_type", "production")
-          .gte("started_at", fromIso)
-          .lte("started_at", toIso)
-          .is("voided_at", null);
-
-        // Compter les sessions de production par jour (nombre de pièces produites)
-        const countByDay = new Map<string, number>();
-        for (const s of (prodSessions ?? []) as any[]) {
-          const day = (s.started_at as string).slice(0, 10);
-          countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
-        }
-
-        const productionData: ProductionPoint[] = days.map((d) => {
-          const iso = localDateStr(d);
-          const label = d.toLocaleDateString(i18n.language, {
-            day: "2-digit",
-            month: "short",
-          });
-          return { day: label, quantity: countByDay.get(iso) ?? 0 };
-        });
-        if (isMounted) setProduction(productionData);
-
-        // ----- 7. OF récents (progress réelle) -----
-        const { data: ofRecent } = await supabase
-          .from("manufacturing_orders")
-          .select(
-            "id, order_number, product_name, quantity, status, planned_end_date, project_id, projects(name)",
-          )
-          .eq("company_id", companyId)
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        const ofIds = (ofRecent ?? []).map((o: any) => o.id);
-
-        // Progress réelle : WP terminées / WP totales par OF
-        const { data: wpsData } = ofIds.length > 0
-          ? await supabase
-              .from("of_work_packages")
-              .select("manufacturing_order_id, status")
-              .in("manufacturing_order_id", ofIds)
-          : { data: [] };
-
-        const wpByOf = new Map<string, { total: number; done: number }>();
-        for (const wp of (wpsData ?? []) as any[]) {
-          const entry = wpByOf.get(wp.manufacturing_order_id) ?? { total: 0, done: 0 };
-          entry.total += 1;
-          if (wp.status === "completed") entry.done += 1;
-          wpByOf.set(wp.manufacturing_order_id, entry);
-        }
-
-        const ofList: OfRow[] = (ofRecent ?? []).map((o: any) => {
-          const wpInfo = wpByOf.get(o.id) ?? { total: 0, done: 0 };
-          const progress =
-            wpInfo.total > 0 ? Math.round((wpInfo.done / wpInfo.total) * 100) : 0;
-
-          return {
-            id: o.id,
-            number: o.order_number ?? "—",
-            client: o.projects?.name ?? "—",
-            product: o.product_name ?? "—",
-            quantity: o.quantity ?? 0,
-            progress,
-            status:
-              o.status === "completed"
-                ? "done"
-                : o.status === "in_progress"
-                  ? "in_progress"
-                  : "pending",
-            deadline: o.planned_end_date
-              ? new Date(o.planned_end_date).toLocaleDateString(i18n.language, {
-                  day: "2-digit",
-                  month: "short",
-                })
-              : "—",
-          };
-        });
-        if (isMounted) setOfRows(ofList);
-
-        // ----- 8. Projets en cours (progress réelle) -----
-        const { data: projectsData } = await supabase
-          .from("projects")
-          .select("id, name, status, clients(name)")
-          .eq("company_id", companyId)
-          .neq("is_archived", true)
-          .neq("status", "completed")
-          .order("created_at", { ascending: false })
-          .limit(4);
-
-        const projectIds = (projectsData ?? []).map((p: any) => p.id);
-
-        // Pour chaque projet : OF total / OF terminés
-        const { data: projOfs } = projectIds.length > 0
-          ? await supabase
-              .from("manufacturing_orders")
-              .select("project_id, status")
-              .eq("company_id", companyId)
-              .in("project_id", projectIds)
-          : { data: [] };
-
-        const ofByProject = new Map<string, { total: number; done: number }>();
-        for (const o of (projOfs ?? []) as any[]) {
-          if (!o.project_id) continue;
-          const entry = ofByProject.get(o.project_id) ?? { total: 0, done: 0 };
-          entry.total += 1;
-          if (o.status === "completed") entry.done += 1;
-          ofByProject.set(o.project_id, entry);
-        }
-
-        const projectList: ProjectRow[] = (projectsData ?? []).map((p: any) => {
-          const info = ofByProject.get(p.id) ?? { total: 0, done: 0 };
-          const progress =
-            info.total > 0 ? Math.round((info.done / info.total) * 100) : 0;
-          return {
-            id: p.id,
-            name: p.name ?? "—",
-            client: p.clients?.name ?? "—",
-            progress,
-            doneOf: info.done,
-            totalOf: info.total,
-          };
-        });
-        if (isMounted) setProjects(projectList);
-
-        // ----- 9. Notifications (réclamations atelier non lues) -----
-        const { data: reclamations } = await supabase
-          .from("workshop_reclamations")
-          .select("id, message, status, created_at, workers(full_name), machines(name)")
-          .eq("company_id", companyId)
-          .is("read_at", null)
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        const notifList: NotificationItem[] = (reclamations ?? []).map((r: any) => {
-          const isResolved = r.status === "resolu";
-          return {
-            id: r.id,
-            type: isResolved ? "success" : r.status === "en_cours" ? "warning" : "danger",
-            title: `${r.workers?.full_name ?? "—"}${
-              r.machines?.name ? ` · ${r.machines.name}` : ""
-            }`,
-            subtitle: r.message,
-            time: timeAgo(r.created_at, i18n.language),
-          };
-        });
-        if (isMounted) setNotifications(notifList);
-      } catch (err) {
-        console.error("[Dashboard] load error:", err);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+  const load = useCallback(async () => {
+    const companyId = staffUser?.company_id;
+    if (!companyId) {
+      setIsLoading(false);
+      return;
     }
 
-    void load();
-    return () => {
-      isMounted = false;
-    };
+    try {
+      // ----- 1. Machines : running / total -----
+      const { data: machinesData } = await supabase
+        .from("machines")
+        .select("id, is_active, current_status")
+        .eq("company_id", companyId)
+        .eq("is_active", true);
+
+      const machinesTotal = machinesData?.length ?? 0;
+      const machinesRunning =
+        machinesData?.filter((m: any) => m.current_status === "running").length ?? 0;
+
+      // ----- 2. Workers : active / total -----
+      const { data: workersData } = await supabase
+        .from("workers")
+        .select("id, is_active")
+        .eq("company_id", companyId);
+
+      const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
+
+      // Workers actifs = ayant au moins une session EN COURS (production ou downtime)
+      const { data: activeSessions } = await supabase
+        .from("work_sessions")
+        .select("worker_id")
+        .eq("company_id", companyId)
+        .is("ended_at", null)
+        .is("voided_at", null);
+
+      const workersActive = new Set(
+        (activeSessions ?? []).map((s: any) => s.worker_id).filter(Boolean),
+      ).size;
+
+      // ----- 3. OF : in_progress / ready -----
+      const { data: ofData } = await supabase
+        .from("manufacturing_orders")
+        .select("id, status")
+        .eq("company_id", companyId);
+
+      const ofInProgress =
+        ofData?.filter((o: any) => o.status === "in_progress").length ?? 0;
+      const ofNew = ofData?.filter((o: any) => o.status === "ready").length ?? 0;
+
+      // ----- 4. Global efficiency (machines running / total) -----
+      const globalEfficiency =
+        machinesTotal > 0 ? Math.round((machinesRunning / machinesTotal) * 100) : 0;
+
+      setKpi({
+        machinesRunning,
+        machinesTotal,
+        ofInProgress,
+        ofNew,
+        workersActive,
+        workersTotal,
+        globalEfficiency,
+      });
+
+      // ----- 5. Machines détaillées (état + pièce en cours + progress) -----
+      const { data: machinesDetail } = await supabase
+        .from("machines")
+        .select("id, code, name, machine_type, current_status")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .order("name")
+        .limit(6);
+
+      const machineIds = (machinesDetail ?? []).map((m: any) => m.id);
+
+      const { data: openSessions } = machineIds.length > 0
+        ? await supabase
+            .from("work_sessions")
+            .select("machine_id, piece_task_id, started_at, pieces_tasks(name)")
+            .in("machine_id", machineIds)
+            .is("ended_at", null)
+            .is("voided_at", null)
+        : { data: [] };
+
+      const openByMachine = new Map<string, any>();
+      for (const s of (openSessions ?? []) as any[]) {
+        if (!openByMachine.has(s.machine_id)) openByMachine.set(s.machine_id, s);
+      }
+
+      const machinesList: MachineStatus[] = (machinesDetail ?? []).map((m: any) => {
+        const open = openByMachine.get(m.id);
+        const currentStatus: string = m.current_status ?? "idle";
+
+        let status: MachineStatus["status"] = "stopped";
+        if (currentStatus === "running") status = "running";
+        else if (currentStatus === "maintenance") status = "warning";
+        else status = "stopped";
+
+        let progress = 0;
+        if (open?.started_at) {
+          const elapsedMin = Math.floor(
+            (Date.now() - new Date(open.started_at).getTime()) / 60000,
+          );
+          progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
+        }
+
+        return {
+          id: m.id,
+          code: m.code ?? "—",
+          name: m.name ?? "Machine",
+          model: m.machine_type ?? "—",
+          current_piece: open?.pieces_tasks?.name ?? null,
+          status,
+          progress,
+        };
+      });
+      setMachines(machinesList);
+
+      // ----- 6. Production : 7 derniers jours -----
+      const today = new Date();
+      const days: Date[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        days.push(d);
+      }
+      const fromIso = `${localDateStr(days[0])}T00:00:00.000Z`;
+      const toIso = `${localDateStr(days[6])}T23:59:59.999Z`;
+
+      const { data: prodSessions } = await supabase
+        .from("work_sessions")
+        .select("started_at, duration_seconds")
+        .eq("company_id", companyId)
+        .eq("session_type", "production")
+        .gte("started_at", fromIso)
+        .lte("started_at", toIso)
+        .is("voided_at", null);
+
+      const countByDay = new Map<string, number>();
+      for (const s of (prodSessions ?? []) as any[]) {
+        const day = (s.started_at as string).slice(0, 10);
+        countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
+      }
+
+      const productionData: ProductionPoint[] = days.map((d) => {
+        const iso = localDateStr(d);
+        const label = d.toLocaleDateString(i18n.language, {
+          day: "2-digit",
+          month: "short",
+        });
+        return { day: label, quantity: countByDay.get(iso) ?? 0 };
+      });
+      setProduction(productionData);
+
+      // ----- 7. OF récents -----
+      const { data: ofRecent } = await supabase
+        .from("manufacturing_orders")
+        .select(
+          "id, order_number, product_name, quantity, status, planned_end_date, project_id, projects(name)",
+        )
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const ofIds = (ofRecent ?? []).map((o: any) => o.id);
+
+      const { data: wpsData } = ofIds.length > 0
+        ? await supabase
+            .from("of_work_packages")
+            .select("manufacturing_order_id, status")
+            .in("manufacturing_order_id", ofIds)
+        : { data: [] };
+
+      const wpByOf = new Map<string, { total: number; done: number }>();
+      for (const wp of (wpsData ?? []) as any[]) {
+        const entry = wpByOf.get(wp.manufacturing_order_id) ?? { total: 0, done: 0 };
+        entry.total += 1;
+        if (wp.status === "completed") entry.done += 1;
+        wpByOf.set(wp.manufacturing_order_id, entry);
+      }
+
+      const ofList: OfRow[] = (ofRecent ?? []).map((o: any) => {
+        const wpInfo = wpByOf.get(o.id) ?? { total: 0, done: 0 };
+        const progress =
+          wpInfo.total > 0 ? Math.round((wpInfo.done / wpInfo.total) * 100) : 0;
+
+        return {
+          id: o.id,
+          number: o.order_number ?? "—",
+          client: o.projects?.name ?? "—",
+          product: o.product_name ?? "—",
+          quantity: o.quantity ?? 0,
+          progress,
+          status:
+            o.status === "completed"
+              ? "done"
+              : o.status === "in_progress"
+                ? "in_progress"
+                : "pending",
+          deadline: o.planned_end_date
+            ? new Date(o.planned_end_date).toLocaleDateString(i18n.language, {
+                day: "2-digit",
+                month: "short",
+              })
+            : "—",
+        };
+      });
+      setOfRows(ofList);
+
+      // ----- 8. Projets en cours -----
+      const { data: projectsData } = await supabase
+        .from("projects")
+        .select("id, name, status, clients(name)")
+        .eq("company_id", companyId)
+        .neq("is_archived", true)
+        .neq("status", "completed")
+        .order("created_at", { ascending: false })
+        .limit(4);
+
+      const projectIds = (projectsData ?? []).map((p: any) => p.id);
+
+      const { data: projOfs } = projectIds.length > 0
+        ? await supabase
+            .from("manufacturing_orders")
+            .select("project_id, status")
+            .eq("company_id", companyId)
+            .in("project_id", projectIds)
+        : { data: [] };
+
+      const ofByProject = new Map<string, { total: number; done: number }>();
+      for (const o of (projOfs ?? []) as any[]) {
+        if (!o.project_id) continue;
+        const entry = ofByProject.get(o.project_id) ?? { total: 0, done: 0 };
+        entry.total += 1;
+        if (o.status === "completed") entry.done += 1;
+        ofByProject.set(o.project_id, entry);
+      }
+
+      const projectList: ProjectRow[] = (projectsData ?? []).map((p: any) => {
+        const info = ofByProject.get(p.id) ?? { total: 0, done: 0 };
+        const progress =
+          info.total > 0 ? Math.round((info.done / info.total) * 100) : 0;
+        return {
+          id: p.id,
+          name: p.name ?? "—",
+          client: p.clients?.name ?? "—",
+          progress,
+          doneOf: info.done,
+          totalOf: info.total,
+        };
+      });
+      setProjects(projectList);
+
+      // ----- 9. Notifications -----
+      const { data: reclamations } = await supabase
+        .from("workshop_reclamations")
+        .select("id, message, status, created_at, workers(full_name), machines(name)")
+        .eq("company_id", companyId)
+        .is("read_at", null)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const notifList: NotificationItem[] = (reclamations ?? []).map((r: any) => {
+        const isResolved = r.status === "resolu";
+        return {
+          id: r.id,
+          type: isResolved ? "success" : r.status === "en_cours" ? "warning" : "danger",
+          title: `${r.workers?.full_name ?? "—"}${
+            r.machines?.name ? ` · ${r.machines.name}` : ""
+          }`,
+          subtitle: r.message,
+          time: timeAgo(r.created_at, i18n.language),
+        };
+      });
+      setNotifications(notifList);
+    } catch (err) {
+      console.error("[Dashboard] load error:", err);
+    } finally {
+      setIsLoading(false);
+    }
   }, [staffUser?.company_id, i18n.language]);
+
+  // --------------------------------------------------------------------------
+  // Initial load
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    setIsLoading(true);
+    void load();
+  }, [load]);
+
+  // --------------------------------------------------------------------------
+  // Live updates: réagit aux changements côté Kiosk (sessions, machines, OF,
+  // réclamations, pièces, projets) et recharge le dashboard avec debounce.
+  // Filtre company_id + RLS = isolation stricte entre entreprises.
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const companyId = staffUser?.company_id;
+    if (!companyId) return;
+
+    const channel = createSafeChannel(`dashboard-live-${companyId}`);
+    const filter = `company_id=eq.${companyId}`;
+
+    const scheduleReload = () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = setTimeout(() => {
+        void load();
+      }, 400);
+    };
+
+    const tables = [
+      "work_sessions",
+      "machines",
+      "manufacturing_orders",
+      "workshop_reclamations",
+      "pieces_tasks",
+      "projects",
+    ] as const;
+
+    let ch = channel;
+    for (const table of tables) {
+      ch = ch.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table, filter },
+        scheduleReload,
+      );
+    }
+    ch.subscribe();
+
+    return () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      void supabase.removeChannel(channel);
+    };
+  }, [staffUser?.company_id, load]);
 
   // --------------------------------------------------------------------------
   // Helpers
