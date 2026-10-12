@@ -10,17 +10,13 @@ import {
   Clock,
   AlertCircle,
   CheckCircle2,
-  Info,
-  AlertTriangle,
   FileText,
   Loader2,
   Cog,
 } from "lucide-react";
 import {
   Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Line,
   ResponsiveContainer,
@@ -56,24 +52,15 @@ interface MachineStatus {
 
 interface NotificationItem {
   id: string;
-  type: "danger" | "info" | "success" | "warning" | "message";
+  type: "danger" | "info" | "success" | "warning";
   title: string;
   subtitle?: string;
   time: string;
 }
 
-interface UpcomingTask {
-  id: string;
-  time: string;
-  label: string;
-  sublabel?: string;
-  color: "orange" | "blue" | "teal";
-}
-
 interface ProductionPoint {
   day: string;
   quantity: number;
-  target: number;
 }
 
 interface OfRow {
@@ -104,14 +91,33 @@ interface KpiData {
   workersActive: number;
   workersTotal: number;
   globalEfficiency: number;
-  globalTrend: number;
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+function timeAgo(iso: string, locale: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "•";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  return new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
+}
+
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
 }
 
 // ============================================================================
 // Component
 // ============================================================================
 export function ManagerDashboardPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { staffUser } = useStaffAuth();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -123,14 +129,12 @@ export function ManagerDashboardPage() {
     workersActive: 0,
     workersTotal: 0,
     globalEfficiency: 0,
-    globalTrend: 0,
   });
   const [machines, setMachines] = useState<MachineStatus[]>([]);
   const [production, setProduction] = useState<ProductionPoint[]>([]);
   const [ofRows, setOfRows] = useState<OfRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [tasks, setTasks] = useState<UpcomingTask[]>([]);
 
   // --------------------------------------------------------------------------
   // Load data
@@ -148,7 +152,7 @@ export function ManagerDashboardPage() {
           return;
         }
 
-        // 1. KPI : machines
+        // ----- 1. Machines : running / total -----
         const { data: machinesData } = await supabase
           .from("machines")
           .select("id, is_active, current_status")
@@ -159,7 +163,27 @@ export function ManagerDashboardPage() {
         const machinesRunning =
           machinesData?.filter((m: any) => m.current_status === "running").length ?? 0;
 
-        // 2. KPI : OF
+        // ----- 2. Workers : active / total -----
+        const { data: workersData } = await supabase
+          .from("workers")
+          .select("id, is_active")
+          .eq("company_id", companyId);
+
+        const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
+
+        // Workers actifs = ayant au moins une session EN COURS (production ou downtime)
+        const { data: activeSessions } = await supabase
+          .from("work_sessions")
+          .select("worker_id")
+          .eq("company_id", companyId)
+          .is("ended_at", null)
+          .is("voided_at", null);
+
+        const workersActive = new Set(
+          (activeSessions ?? []).map((s: any) => s.worker_id).filter(Boolean),
+        ).size;
+
+        // ----- 3. OF : in_progress / ready -----
         const { data: ofData } = await supabase
           .from("manufacturing_orders")
           .select("id, status")
@@ -169,28 +193,9 @@ export function ManagerDashboardPage() {
           ofData?.filter((o: any) => o.status === "in_progress").length ?? 0;
         const ofNew = ofData?.filter((o: any) => o.status === "ready").length ?? 0;
 
-        // 3. KPI : workers
-        const { data: workersData } = await supabase
-          .from("workers")
-          .select("id, is_active")
-          .eq("company_id", companyId);
-
-        const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
-
-        const { data: shiftsData } = await supabase
-          .from("work_shifts")
-          .select("worker_id")
-          .eq("company_id", companyId)
-          .is("ended_at", null);
-
-        const workersActive = new Set(shiftsData?.map((s: any) => s.worker_id)).size;
-
-        // 4. Global efficiency
+        // ----- 4. Global efficiency (machines running / total) -----
         const globalEfficiency =
-          machinesTotal > 0
-            ? Math.round((machinesRunning / machinesTotal) * 100)
-            : 0;
-        const globalTrend = 5;
+          machinesTotal > 0 ? Math.round((machinesRunning / machinesTotal) * 100) : 0;
 
         if (isMounted) {
           setKpi({
@@ -201,183 +206,227 @@ export function ManagerDashboardPage() {
             workersActive,
             workersTotal,
             globalEfficiency,
-            globalTrend,
           });
         }
 
-        // 5. Machines détaillées
+        // ----- 5. Machines détaillées (état + pièce en cours + progress) -----
         const { data: machinesDetail } = await supabase
           .from("machines")
-          .select("id, code, name, machine_type")
+          .select("id, code, name, machine_type, current_status")
           .eq("company_id", companyId)
           .eq("is_active", true)
-          .limit(4);
+          .order("name")
+          .limit(6);
 
-        const machinesList: MachineStatus[] = (machinesDetail ?? []).map(
-          (m: any, idx: number) => {
-            const statuses: Array<"running" | "warning" | "stopped"> = [
-              "running",
-              "running",
-              "warning",
-              "stopped",
-            ];
-            const status = statuses[idx % statuses.length];
-            return {
-              id: m.id,
-              code: m.code ?? `CNC-0${idx + 1}`,
-              name: m.name ?? "Machine",
-              model: m.machine_type ?? "DMC 635 V",
-              current_piece:
-                status === "running"
-                  ? `Pièce ${String.fromCharCode(65 + idx)}-${100 + idx * 12}`
-                  : null,
-              status,
-              progress: status === "running" ? 65 + idx * 8 : status === "warning" ? 42 : 0,
-            };
-          },
-        );
+        const machineIds = (machinesDetail ?? []).map((m: any) => m.id);
+
+        // Pour chaque machine : la session ouverte (pièce en cours + avancement)
+        const { data: openSessions } = machineIds.length > 0
+          ? await supabase
+              .from("work_sessions")
+              .select("machine_id, piece_task_id, started_at, pieces_tasks(name)")
+              .in("machine_id", machineIds)
+              .is("ended_at", null)
+              .is("voided_at", null)
+          : { data: [] };
+
+        const openByMachine = new Map<string, any>();
+        for (const s of (openSessions ?? []) as any[]) {
+          if (!openByMachine.has(s.machine_id)) openByMachine.set(s.machine_id, s);
+        }
+
+        // Pour le progress : durée écoulée vs estimation (à défaut, calcul simple)
+        const machinesList: MachineStatus[] = (machinesDetail ?? []).map((m: any) => {
+          const open = openByMachine.get(m.id);
+          const currentStatus: string = m.current_status ?? "idle";
+
+          let status: MachineStatus["status"] = "stopped";
+          if (currentStatus === "running") status = "running";
+          else if (currentStatus === "maintenance") status = "warning";
+          else status = "stopped";
+
+          // Progress = % de temps écoulé depuis started_at (max 100) si session ouverte
+          let progress = 0;
+          if (open?.started_at) {
+            const elapsedMin = Math.floor(
+              (Date.now() - new Date(open.started_at).getTime()) / 60000,
+            );
+            // 8 heures = 480 min par shift ; on plafonne à 99 tant que pas terminé
+            progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
+          }
+
+          return {
+            id: m.id,
+            code: m.code ?? "—",
+            name: m.name ?? "Machine",
+            model: m.machine_type ?? "—",
+            current_piece: open?.pieces_tasks?.name ?? null,
+            status,
+            progress,
+          };
+        });
         if (isMounted) setMachines(machinesList);
 
-        // 6. Production : 7 derniers jours (démo)
-        const days = [
-          "05 Juin",
-          "06 Juin",
-          "07 Juin",
-          "08 Juin",
-          "09 Juin",
-          "10 Juin",
-          "11 Juin",
-        ];
-        const productionData: ProductionPoint[] = days.map((day, i) => ({
-          day,
-          quantity: [50, 80, 100, 90, 95, 105, 140][i],
-          target: [70, 85, 95, 100, 105, 110, 120][i],
-        }));
+        // ----- 6. Production : 7 derniers jours (vrai calcul) -----
+        const today = new Date();
+        const days: Date[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          days.push(d);
+        }
+        const fromIso = `${localDateStr(days[0])}T00:00:00.000Z`;
+        const toIso = `${localDateStr(days[6])}T23:59:59.999Z`;
+
+        const { data: prodSessions } = await supabase
+          .from("work_sessions")
+          .select("started_at, duration_seconds")
+          .eq("company_id", companyId)
+          .eq("session_type", "production")
+          .gte("started_at", fromIso)
+          .lte("started_at", toIso)
+          .is("voided_at", null);
+
+        // Compter les sessions de production par jour (nombre de pièces produites)
+        const countByDay = new Map<string, number>();
+        for (const s of (prodSessions ?? []) as any[]) {
+          const day = (s.started_at as string).slice(0, 10);
+          countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
+        }
+
+        const productionData: ProductionPoint[] = days.map((d) => {
+          const iso = localDateStr(d);
+          const label = d.toLocaleDateString(i18n.language, {
+            day: "2-digit",
+            month: "short",
+          });
+          return { day: label, quantity: countByDay.get(iso) ?? 0 };
+        });
         if (isMounted) setProduction(productionData);
 
-        // 7. OF récents — ✅ Corrigé : suppression de "clients?"
+        // ----- 7. OF récents (progress réelle) -----
         const { data: ofRecent } = await supabase
           .from("manufacturing_orders")
           .select(
-            "id, order_number, product_name, quantity, status, planned_end_date, projects(name)",
+            "id, order_number, product_name, quantity, status, planned_end_date, project_id, projects(name)",
           )
           .eq("company_id", companyId)
           .order("created_at", { ascending: false })
           .limit(5);
 
-        const ofList: OfRow[] = (ofRecent ?? []).map((o: any, i: number) => ({
-          id: o.id,
-          number: o.order_number ?? `OF-2025-0${14 - i}`,
-          client: o.projects?.name ?? "Client",
-          product: o.product_name ?? "Produit",
-          quantity: o.quantity ?? 0,
-          progress: [76, 42, 100, 65, 0][i % 5],
-          status:
-            o.status === "completed"
-              ? "done"
-              : o.status === "in_progress"
-                ? "in_progress"
-                : "pending",
-          deadline: o.planned_end_date
-            ? new Date(o.planned_end_date).toLocaleDateString("fr-FR", {
-                day: "2-digit",
-                month: "short",
-              })
-            : `${12 + i} Juin`,
-        }));
+        const ofIds = (ofRecent ?? []).map((o: any) => o.id);
+
+        // Progress réelle : WP terminées / WP totales par OF
+        const { data: wpsData } = ofIds.length > 0
+          ? await supabase
+              .from("of_work_packages")
+              .select("manufacturing_order_id, status")
+              .in("manufacturing_order_id", ofIds)
+          : { data: [] };
+
+        const wpByOf = new Map<string, { total: number; done: number }>();
+        for (const wp of (wpsData ?? []) as any[]) {
+          const entry = wpByOf.get(wp.manufacturing_order_id) ?? { total: 0, done: 0 };
+          entry.total += 1;
+          if (wp.status === "completed") entry.done += 1;
+          wpByOf.set(wp.manufacturing_order_id, entry);
+        }
+
+        const ofList: OfRow[] = (ofRecent ?? []).map((o: any) => {
+          const wpInfo = wpByOf.get(o.id) ?? { total: 0, done: 0 };
+          const progress =
+            wpInfo.total > 0 ? Math.round((wpInfo.done / wpInfo.total) * 100) : 0;
+
+          return {
+            id: o.id,
+            number: o.order_number ?? "—",
+            client: o.projects?.name ?? "—",
+            product: o.product_name ?? "—",
+            quantity: o.quantity ?? 0,
+            progress,
+            status:
+              o.status === "completed"
+                ? "done"
+                : o.status === "in_progress"
+                  ? "in_progress"
+                  : "pending",
+            deadline: o.planned_end_date
+              ? new Date(o.planned_end_date).toLocaleDateString(i18n.language, {
+                  day: "2-digit",
+                  month: "short",
+                })
+              : "—",
+          };
+        });
         if (isMounted) setOfRows(ofList);
 
-        // 8. Projets en cours
+        // ----- 8. Projets en cours (progress réelle) -----
         const { data: projectsData } = await supabase
           .from("projects")
           .select("id, name, status, clients(name)")
           .eq("company_id", companyId)
-          .neq("status", "archived")
+          .neq("is_archived", true)
+          .neq("status", "completed")
           .order("created_at", { ascending: false })
           .limit(4);
 
-        const projectList: ProjectRow[] = (projectsData ?? []).map((p: any, i: number) => ({
-          id: p.id,
-          name: p.name ?? `Projet ${i + 1}`,
-          client: p.clients?.name ?? "Client",
-          progress: [60, 40, 75, 20][i % 4],
-          doneOf: [3, 2, 4, 1][i % 4],
-          totalOf: [5, 4, 6, 5][i % 4],
-        }));
+        const projectIds = (projectsData ?? []).map((p: any) => p.id);
+
+        // Pour chaque projet : OF total / OF terminés
+        const { data: projOfs } = projectIds.length > 0
+          ? await supabase
+              .from("manufacturing_orders")
+              .select("project_id, status")
+              .eq("company_id", companyId)
+              .in("project_id", projectIds)
+          : { data: [] };
+
+        const ofByProject = new Map<string, { total: number; done: number }>();
+        for (const o of (projOfs ?? []) as any[]) {
+          if (!o.project_id) continue;
+          const entry = ofByProject.get(o.project_id) ?? { total: 0, done: 0 };
+          entry.total += 1;
+          if (o.status === "completed") entry.done += 1;
+          ofByProject.set(o.project_id, entry);
+        }
+
+        const projectList: ProjectRow[] = (projectsData ?? []).map((p: any) => {
+          const info = ofByProject.get(p.id) ?? { total: 0, done: 0 };
+          const progress =
+            info.total > 0 ? Math.round((info.done / info.total) * 100) : 0;
+          return {
+            id: p.id,
+            name: p.name ?? "—",
+            client: p.clients?.name ?? "—",
+            progress,
+            doneOf: info.done,
+            totalOf: info.total,
+          };
+        });
         if (isMounted) setProjects(projectList);
 
-        // 9. Notifications (démo)
-        const notifList: NotificationItem[] = [
-          {
-            id: "n1",
-            type: "danger",
-            title: "CNC-03 – Arrêt machine",
-            subtitle: "Maintenance requise",
-            time: "il y a 12 min",
-          },
-          {
-            id: "n2",
-            type: "info",
-            title: "Nouvelle commande client",
-            subtitle: "OF-2025-014",
-            time: "il y a 28 min",
-          },
-          {
-            id: "n3",
-            type: "success",
-            title: "OF-2025-011 – Terminée",
-            subtitle: "Pièce livrée au client",
-            time: "il y a 1 h",
-          },
-          {
-            id: "n4",
-            type: "warning",
-            title: "Stock outil faible",
-            subtitle: "Outil T10 – Fraise",
-            time: "il y a 2 h",
-          },
-          {
-            id: "n5",
-            type: "message",
-            title: "Rapport quotidien",
-            subtitle: "Disponible (11 Juin 2025)",
-            time: "il y a 3 h",
-          },
-        ];
-        if (isMounted) setNotifications(notifList);
+        // ----- 9. Notifications (réclamations atelier non lues) -----
+        const { data: reclamations } = await supabase
+          .from("workshop_reclamations")
+          .select("id, message, status, created_at, workers(full_name), machines(name)")
+          .eq("company_id", companyId)
+          .is("read_at", null)
+          .order("created_at", { ascending: false })
+          .limit(5);
 
-        // 10. Tâches à venir (démo)
-        const taskList: UpcomingTask[] = [
-          {
-            id: "t1",
-            time: "15:00",
-            label: "Démarrage OF-2025-015",
-            sublabel: "CNC-02",
-            color: "orange",
-          },
-          {
-            id: "t2",
-            time: "16:30",
-            label: "Contrôle qualité",
-            sublabel: "Pièce B-112",
-            color: "teal",
-          },
-          {
-            id: "t3",
-            time: "18:00",
-            label: "Maintenance préventive",
-            sublabel: "CNC-04",
-            color: "blue",
-          },
-          {
-            id: "t4",
-            time: "20:00",
-            label: "Clôture de journée",
-            sublabel: "Rapport et sauvegarde",
-            color: "blue",
-          },
-        ];
-        if (isMounted) setTasks(taskList);
+        const notifList: NotificationItem[] = (reclamations ?? []).map((r: any) => {
+          const isResolved = r.status === "resolu";
+          return {
+            id: r.id,
+            type: isResolved ? "success" : r.status === "en_cours" ? "warning" : "danger",
+            title: `${r.workers?.full_name ?? "—"}${
+              r.machines?.name ? ` · ${r.machines.name}` : ""
+            }`,
+            subtitle: r.message,
+            time: timeAgo(r.created_at, i18n.language),
+          };
+        });
+        if (isMounted) setNotifications(notifList);
       } catch (err) {
         console.error("[Dashboard] load error:", err);
       } finally {
@@ -389,26 +438,26 @@ export function ManagerDashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, [staffUser?.company_id]);
+  }, [staffUser?.company_id, i18n.language]);
 
   // --------------------------------------------------------------------------
   // Helpers
   // --------------------------------------------------------------------------
   const today = useMemo(() => {
-    return new Date().toLocaleDateString("fr-FR", {
+    return new Date().toLocaleDateString(i18n.language, {
       weekday: "short",
       day: "2-digit",
       month: "short",
       year: "numeric",
     });
-  }, []);
+  }, [i18n.language]);
 
   const currentTime = useMemo(() => {
-    return new Date().toLocaleTimeString("fr-FR", {
+    return new Date().toLocaleTimeString(i18n.language, {
       hour: "2-digit",
       minute: "2-digit",
     });
-  }, []);
+  }, [i18n.language]);
 
   // --------------------------------------------------------------------------
   // Render
@@ -469,7 +518,6 @@ export function ManagerDashboardPage() {
           })}
           value={kpi.machinesRunning}
           total={kpi.machinesTotal}
-          trend={{ direction: "up", value: "+9.01%" }}
           progress={
             kpi.machinesTotal > 0
               ? Math.round((kpi.machinesRunning / kpi.machinesTotal) * 100)
@@ -486,7 +534,6 @@ export function ManagerDashboardPage() {
           })}
           value={kpi.ofInProgress}
           caption={`${kpi.ofNew} ${t("dashboard.kpi.new", { defaultValue: "nouveaux" })}`}
-          trend={{ direction: "up", value: "+6.27%" }}
         />
 
         <KpiCard
@@ -512,7 +559,6 @@ export function ManagerDashboardPage() {
             defaultValue: "Rendement global",
           })}
           value={`${kpi.globalEfficiency}%`}
-          trend={{ direction: "up", value: `+${kpi.globalTrend}%` }}
           progress={kpi.globalEfficiency}
           progressColor="green"
         />
@@ -521,8 +567,7 @@ export function ManagerDashboardPage() {
         <div
           className="relative overflow-hidden rounded-2xl p-5 lg:col-span-2 xl:col-span-1"
           style={{
-            background:
-              "linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)",
+            background: "linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)",
             boxShadow: "var(--shadow-md)",
           }}
         >
@@ -584,18 +629,8 @@ export function ManagerDashboardPage() {
                   style={{ backgroundColor: "var(--accent-blue)" }}
                 />
                 {t("dashboard.production.legendQty", {
-                  defaultValue: "Quantité produite",
+                  defaultValue: "Sessions de production",
                 })}
-              </span>
-              <span
-                className="inline-flex items-center gap-1.5"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                <span
-                  className="h-2 w-2 rounded-sm"
-                  style={{ backgroundColor: "var(--text-tertiary)" }}
-                />
-                {t("dashboard.production.legendTarget", { defaultValue: "Objectif" })}
               </span>
             </div>
           </CardHeader>
@@ -641,11 +676,11 @@ export function ManagerDashboardPage() {
                   />
                   <Line
                     type="monotone"
-                    dataKey="target"
+                    dataKey="quantity"
                     stroke="#94a3b8"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
+                    strokeWidth={0}
                     dot={false}
+                    legendType="none"
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -732,27 +767,31 @@ export function ManagerDashboardPage() {
                         </span>
                       )}
                     </div>
-                    <div className="mt-1.5">
-                      <ProgressBar
-                        value={m.progress}
-                        color={
-                          m.status === "running"
-                            ? "green"
-                            : m.status === "warning"
-                              ? "orange"
-                              : "red"
-                        }
-                        size="xs"
-                      />
-                    </div>
+                    {m.status === "running" && (
+                      <div className="mt-1.5">
+                        <ProgressBar
+                          value={m.progress}
+                          color="green"
+                          size="xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 </li>
               ))}
+              {machines.length === 0 && (
+                <li
+                  className="px-5 py-6 text-center text-xs"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  {t("setup.noDataYet", { defaultValue: "Aucune machine active" })}
+                </li>
+              )}
             </ul>
           </CardBody>
         </Card>
 
-        {/* Notifications */}
+        {/* Notifications (réclamations) */}
         <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle size="md">
@@ -766,17 +805,25 @@ export function ManagerDashboardPage() {
           </CardHeader>
           <CardBody className="!px-0 !pb-2">
             <ul className="space-y-1">
+              {notifications.length === 0 && (
+                <li
+                  className="px-5 py-6 text-center text-xs"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  {t("setup.reclamationsEmpty", {
+                    defaultValue: "Aucune réclamation en attente",
+                  })}
+                </li>
+              )}
               {notifications.map((n) => {
                 const IconComp =
                   n.type === "danger"
                     ? AlertCircle
                     : n.type === "warning"
-                      ? AlertTriangle
+                      ? AlertCircle
                       : n.type === "success"
                         ? CheckCircle2
-                        : n.type === "message"
-                          ? FileText
-                          : Info;
+                        : FileText;
 
                 const iconBg =
                   n.type === "danger"
@@ -785,9 +832,7 @@ export function ManagerDashboardPage() {
                       ? "rgba(245, 158, 11, 0.12)"
                       : n.type === "success"
                         ? "rgba(16, 185, 129, 0.12)"
-                        : n.type === "message"
-                          ? "rgba(59, 130, 246, 0.12)"
-                          : "rgba(100, 116, 139, 0.12)";
+                        : "rgba(59, 130, 246, 0.12)";
 
                 const iconColor =
                   n.type === "danger"
@@ -796,9 +841,7 @@ export function ManagerDashboardPage() {
                       ? "#f59e0b"
                       : n.type === "success"
                         ? "#10b981"
-                        : n.type === "message"
-                          ? "#3b82f6"
-                          : "#64748b";
+                        : "#3b82f6";
 
                 return (
                   <li
@@ -823,7 +866,7 @@ export function ManagerDashboardPage() {
                       </p>
                       {n.subtitle && (
                         <p
-                          className="truncate text-[11px]"
+                          className="line-clamp-1 text-[11px]"
                           style={{ color: "var(--text-tertiary)" }}
                         >
                           {n.subtitle}
@@ -845,11 +888,11 @@ export function ManagerDashboardPage() {
       </div>
 
       {/* ============================================================ */}
-      {/* SECOND GRID : OF Table + Projects + Tasks                    */}
+      {/* SECOND GRID : OF Table + Projects                            */}
       {/* ============================================================ */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* OF Table */}
-        <Card className="lg:col-span-5">
+        <Card className="lg:col-span-7">
           <CardHeader>
             <CardTitle size="md">
               {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
@@ -966,6 +1009,17 @@ export function ManagerDashboardPage() {
                       </td>
                     </tr>
                   ))}
+                  {ofRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-5 py-6 text-center text-xs"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {t("setup.noDataYet", { defaultValue: "Aucun ordre de fabrication" })}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -973,7 +1027,7 @@ export function ManagerDashboardPage() {
         </Card>
 
         {/* Projects */}
-        <Card className="lg:col-span-4">
+        <Card className="lg:col-span-5">
           <CardHeader>
             <CardTitle size="md">
               {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
@@ -1036,63 +1090,14 @@ export function ManagerDashboardPage() {
                   </div>
                 </li>
               ))}
-            </ul>
-          </CardBody>
-        </Card>
-
-        {/* Tasks */}
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle size="md">
-              {t("dashboard.tasks.title", { defaultValue: "Tâches à venir" })}
-            </CardTitle>
-            <CardAction>
-              {t("common.viewAll", { defaultValue: "Voir tout →" })}
-            </CardAction>
-          </CardHeader>
-          <CardBody className="!px-0 !pb-2">
-            <ul className="space-y-0.5">
-              {tasks.map((task) => {
-                const barColor =
-                  task.color === "orange"
-                    ? "bg-orange-500"
-                    : task.color === "teal"
-                      ? "bg-teal-500"
-                      : "bg-blue-500";
-                return (
-                  <li
-                    key={task.id}
-                    className="flex items-start gap-3 px-5 py-2.5 transition-colors"
-                  >
-                    <span
-                      className={`mt-1 h-8 w-1 shrink-0 rounded-full ${barColor}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <span
-                        className="font-mono text-xs font-bold"
-                        style={{ color: "var(--text-secondary)" }}
-                        dir="ltr"
-                      >
-                        {task.time}
-                      </span>
-                      <p
-                        className="truncate text-xs font-semibold"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {task.label}
-                      </p>
-                      {task.sublabel && (
-                        <p
-                          className="truncate text-[11px]"
-                          style={{ color: "var(--text-tertiary)" }}
-                        >
-                          {task.sublabel}
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+              {projects.length === 0 && (
+                <li
+                  className="px-5 py-6 text-center text-xs"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  {t("setup.noDataYet", { defaultValue: "Aucun projet en cours" })}
+                </li>
+              )}
             </ul>
           </CardBody>
         </Card>
