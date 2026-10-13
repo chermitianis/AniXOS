@@ -51,7 +51,14 @@ import { ProductionReportsPage } from "../../production-reports/pages/Production
 // ---------------------------------------------------------------------------
 // Pages mapping
 // ---------------------------------------------------------------------------
-const PAGES: Record<string, React.ComponentType> = {
+// NOTE : toutes les pages reçoivent potentiellement `onNavigate`, qui permet
+// à une page enfant de demander à AdminHomePage de changer de section.
+// Les pages qui ne l'utilisent pas l'ignorent simplement.
+export interface AdminPageProps {
+  onNavigate?: (key: string) => void;
+}
+
+const PAGES: Record<string, React.ComponentType<AdminPageProps>> = {
   dashboard: ManagerDashboardPage,
   reports: ReportsPage,
   crm: CRMAdminPage,
@@ -139,7 +146,7 @@ function findNode(groups: NavGroup[], key: string): NavNode | null {
   return null;
 }
 
-/** ✅ NEW — Trouve le groupe parent d'un node (pour le breadcrumb). */
+/** ✅ Trouve le groupe parent d'un node (pour le breadcrumb). */
 function findGroupOfKey(groups: NavGroup[], key: string): NavGroup | null {
   function contains(nodes: NavNode[], k: string): boolean {
     for (const n of nodes) {
@@ -636,7 +643,7 @@ export function AdminHomePage({
               ) : currentNode?.pageKey && PAGES[currentNode.pageKey] ? (
                 (() => {
                   const Comp = PAGES[currentNode.pageKey];
-                  return <Comp />;
+                  return <Comp onNavigate={handleSelect} />;
                 })()
               ) : currentKey ? (
                 <ComingSoonPage title={currentLabel} />
