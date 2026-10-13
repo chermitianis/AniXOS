@@ -41,13 +41,19 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
+type SessionKind = "production" | "downtime" | "none";
+
 interface MachineStatus {
   id: string;
   code: string;
   name: string;
   model: string;
   current_piece: string | null;
-  status: "running" | "warning" | "stopped";
+  current_project: string | null;
+  current_worker: string | null;
+  activity: string | null;
+  session_kind: SessionKind;
+  status: "running" | "warning" | "idle";
   progress: number;
 }
 
@@ -137,11 +143,10 @@ export function ManagerDashboardPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-  // Timer pour debounce des rechargements Realtime (évite les floods d'événements)
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // --------------------------------------------------------------------------
-  // Load data (extrait en useCallback pour être réutilisable par le Realtime)
+  // Load data
   // --------------------------------------------------------------------------
   const load = useCallback(async () => {
     const companyId = staffUser?.company_id;
@@ -151,125 +156,223 @@ export function ManagerDashboardPage() {
     }
 
     try {
-      // ----- 1. Machines : running / total -----
-      const { data: machinesData } = await supabase
-        .from("machines")
-        .select("id, is_active, current_status")
-        .eq("company_id", companyId)
-        .eq("is_active", true);
+      const today = localDateStr(new Date());
 
-      const machinesTotal = machinesData?.length ?? 0;
-      const machinesRunning =
-        machinesData?.filter((m: any) => m.current_status === "running").length ?? 0;
+      // ===== Step 1 — Parallel base fetches =====
+      const [
+        { data: openShifts },
+        { data: allActiveSessions },
+        { data: workersData },
+        { data: allMachinesData },
+        { data: allTaskTypes },
+        { data: allStopReasons },
+      ] = await Promise.all([
+        supabase
+          .from("work_shifts")
+          .select("id, worker_id, started_at")
+          .eq("company_id", companyId)
+          .is("ended_at", null),
+        supabase
+          .from("work_sessions")
+          .select(
+            "id, worker_id, machine_id, piece_task_id, session_type, task_type_id, stop_reason_id, started_at",
+          )
+          .eq("company_id", companyId)
+          .is("ended_at", null)
+          .is("voided_at", null),
+        supabase
+          .from("workers")
+          .select("id, full_name, is_active")
+          .eq("company_id", companyId),
+        supabase
+          .from("machines")
+          .select("id, code, name, machine_type, current_status")
+          .eq("company_id", companyId)
+          .eq("is_active", true),
+        supabase
+          .from("task_types")
+          .select("id, name")
+          .eq("company_id", companyId),
+        supabase
+          .from("stop_reasons")
+          .select("id, name")
+          .eq("company_id", companyId),
+      ]);
 
-      // ----- 2. Workers : active / total -----
-      const { data: workersData } = await supabase
-        .from("workers")
-        .select("id, is_active")
-        .eq("company_id", companyId);
+      // ===== Step 2 — Current piece per open shift =====
+      const shiftIds = (openShifts ?? []).map((s: any) => s.id);
+      const { data: pieceWork } =
+        shiftIds.length > 0
+          ? await supabase
+              .from("shift_piece_work")
+              .select("shift_id, worker_id, piece_task_id, project_id, started_at")
+              .in("shift_id", shiftIds)
+              .is("ended_at", null)
+              .order("started_at", { ascending: false })
+          : { data: [] };
 
-      const workersTotal = workersData?.filter((w: any) => w.is_active).length ?? 0;
+      // Keep only the most recent piece_work per worker
+      const pieceWorkByWorker = new Map<string, any>();
+      for (const pw of (pieceWork ?? []) as any[]) {
+        if (!pieceWorkByWorker.has(pw.worker_id)) {
+          pieceWorkByWorker.set(pw.worker_id, pw);
+        }
+      }
+      const currentPieces = Array.from(pieceWorkByWorker.values());
 
-      // Workers actifs = ayant au moins une session EN COURS (production ou downtime)
-      const { data: activeSessions } = await supabase
-        .from("work_sessions")
-        .select("worker_id")
-        .eq("company_id", companyId)
-        .is("ended_at", null)
-        .is("voided_at", null);
+      // ===== Step 3 — Details for pieces / projects / plannings =====
+      const pieceIds = Array.from(
+        new Set(currentPieces.map((p: any) => p.piece_task_id).filter(Boolean)),
+      );
+      const projectIds = Array.from(
+        new Set(currentPieces.map((p: any) => p.project_id).filter(Boolean)),
+      );
 
-      const workersActive = new Set(
-        (activeSessions ?? []).map((s: any) => s.worker_id).filter(Boolean),
-      ).size;
+      const [piecesRes, projectsRes, planningsRes] = await Promise.all([
+        pieceIds.length > 0
+          ? supabase.from("pieces_tasks").select("id, name, code").in("id", pieceIds)
+          : { data: [] },
+        projectIds.length > 0
+          ? supabase.from("projects").select("id, name, code").in("id", projectIds)
+          : { data: [] },
+        pieceIds.length > 0
+          ? supabase
+              .from("planning")
+              .select("piece_task_id, worker_id, machine_id, planned_date")
+              .in("piece_task_id", pieceIds)
+              .eq("planned_date", today)
+          : { data: [] },
+      ]);
 
-      // ----- 3. OF : in_progress / ready -----
-      const { data: ofData } = await supabase
-        .from("manufacturing_orders")
-        .select("id, status")
-        .eq("company_id", companyId);
+      // ===== Step 4 — Lookup maps =====
+      const pieceById = new Map<string, any>(
+        ((piecesRes.data ?? []) as any[]).map((p) => [p.id, p]),
+      );
+      const projectById = new Map<string, any>(
+        ((projectsRes.data ?? []) as any[]).map((p) => [p.id, p]),
+      );
+      const taskTypeById = new Map<string, string>(
+        ((allTaskTypes ?? []) as any[]).map((t) => [t.id, t.name]),
+      );
+      const stopReasonById = new Map<string, string>(
+        ((allStopReasons ?? []) as any[]).map((s) => [s.id, s.name]),
+      );
+      const workerById = new Map<string, any>(
+        ((workersData ?? []) as any[]).map((w) => [w.id, w]),
+      );
+      const machineById = new Map<string, any>(
+        ((allMachinesData ?? []) as any[]).map((m) => [m.id, m]),
+      );
 
-      const ofInProgress =
-        ofData?.filter((o: any) => o.status === "in_progress").length ?? 0;
-      const ofNew = ofData?.filter((o: any) => o.status === "ready").length ?? 0;
+      const planningByKey = new Map<string, any>();
+      for (const p of (planningsRes.data ?? []) as any[]) {
+        planningByKey.set(`${p.piece_task_id}::${p.worker_id}`, p);
+      }
 
-      // ----- 4. Global efficiency (machines running / total) -----
+      const sessionByKey = new Map<string, any>();
+      for (const s of (allActiveSessions ?? []) as any[]) {
+        if (!s.piece_task_id) continue;
+        const key = `${s.worker_id}::${s.piece_task_id}`;
+        if (!sessionByKey.has(key)) sessionByKey.set(key, s);
+      }
+
+      // ===== Step 5 — KPIs =====
+      const workersActive = new Set((openShifts ?? []).map((s: any) => s.worker_id)).size;
+      const workersTotal = (workersData ?? []).filter((w: any) => w.is_active).length;
+      const machinesTotal = (allMachinesData ?? []).length;
+
+      // ===== Step 6 — Build active machine rows =====
+      const activeRows: MachineStatus[] = [];
+      const seenMachineIds = new Set<string>();
+
+      for (const pw of currentPieces as any[]) {
+        const plan = planningByKey.get(`${pw.piece_task_id}::${pw.worker_id}`);
+        if (!plan || !plan.machine_id) continue;
+        if (seenMachineIds.has(plan.machine_id)) continue;
+
+        const machine = machineById.get(plan.machine_id);
+        if (!machine) continue;
+
+        const piece = pieceById.get(pw.piece_task_id);
+        const project = pw.project_id ? projectById.get(pw.project_id) : null;
+        const worker = workerById.get(pw.worker_id);
+        const session = sessionByKey.get(`${pw.worker_id}::${pw.piece_task_id}`);
+
+        let activity: string | null = null;
+        let sessionKind: SessionKind = "none";
+        let activeStart: string | null = null;
+
+        if (session) {
+          activeStart = session.started_at;
+          if (session.session_type === "production") {
+            activity = taskTypeById.get(session.task_type_id ?? "") ?? null;
+            sessionKind = "production";
+          } else if (session.session_type === "downtime") {
+            activity = stopReasonById.get(session.stop_reason_id ?? "") ?? null;
+            sessionKind = "downtime";
+          }
+        }
+
+        let progress = 0;
+        if (activeStart) {
+          const elapsedMin = Math.floor(
+            (Date.now() - new Date(activeStart).getTime()) / 60000,
+          );
+          progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
+        }
+
+        activeRows.push({
+          id: machine.id,
+          code: machine.code ?? "—",
+          name: machine.name ?? "Machine",
+          model: machine.machine_type ?? "—",
+          current_piece: piece?.name ?? null,
+          current_project: project?.name ?? null,
+          current_worker: worker?.full_name ?? null,
+          activity,
+          session_kind: sessionKind,
+          status:
+            sessionKind === "production"
+              ? "running"
+              : sessionKind === "downtime"
+                ? "warning"
+                : "idle",
+          progress,
+        });
+        seenMachineIds.add(machine.id);
+      }
+
+      const machinesRunning = activeRows.length;
       const globalEfficiency =
         machinesTotal > 0 ? Math.round((machinesRunning / machinesTotal) * 100) : 0;
 
       setKpi({
         machinesRunning,
         machinesTotal,
-        ofInProgress,
-        ofNew,
+        ofInProgress: 0,
+        ofNew: 0,
         workersActive,
         workersTotal,
         globalEfficiency,
       });
+      setMachines(activeRows);
 
-      // ----- 5. Machines détaillées (état + pièce en cours + progress) -----
-      const { data: machinesDetail } = await supabase
-        .from("machines")
-        .select("id, code, name, machine_type, current_status")
-        .eq("company_id", companyId)
-        .eq("is_active", true)
-        .order("name")
-        .limit(6);
+      // ===== Step 7 — OF =====
+      const { data: ofData } = await supabase
+        .from("manufacturing_orders")
+        .select("id, status")
+        .eq("company_id", companyId);
 
-      const machineIds = (machinesDetail ?? []).map((m: any) => m.id);
+      const ofInProgress =
+        (ofData ?? []).filter((o: any) => o.status === "in_progress").length;
+      const ofNew = (ofData ?? []).filter((o: any) => o.status === "ready").length;
 
-      // Pour chaque machine : la session ouverte (pièce en cours + avancement)
-      const { data: openSessions } = machineIds.length > 0
-        ? await supabase
-            .from("work_sessions")
-            .select("machine_id, piece_task_id, started_at, pieces_tasks(name)")
-            .in("machine_id", machineIds)
-            .is("ended_at", null)
-            .is("voided_at", null)
-        : { data: [] };
-
-      const openByMachine = new Map<string, any>();
-      for (const s of (openSessions ?? []) as any[]) {
-        if (!openByMachine.has(s.machine_id)) openByMachine.set(s.machine_id, s);
-      }
-
-      // Pour le progress : durée écoulée vs estimation (à défaut, calcul simple)
-      const machinesList: MachineStatus[] = (machinesDetail ?? []).map((m: any) => {
-        const open = openByMachine.get(m.id);
-        const currentStatus: string = m.current_status ?? "idle";
-
-        let status: MachineStatus["status"] = "stopped";
-        if (currentStatus === "running") status = "running";
-        else if (currentStatus === "maintenance") status = "warning";
-        else status = "stopped";
-
-        // Progress = % de temps écoulé depuis started_at (max 100) si session ouverte
-        let progress = 0;
-        if (open?.started_at) {
-          const elapsedMin = Math.floor(
-            (Date.now() - new Date(open.started_at).getTime()) / 60000,
-          );
-          // 8 heures = 480 min par shift ; on plafonne à 99 tant que pas terminé
-          progress = Math.min(99, Math.round((elapsedMin / 480) * 100));
-        }
-
-        return {
-          id: m.id,
-          code: m.code ?? "—",
-          name: m.name ?? "Machine",
-          model: m.machine_type ?? "—",
-          current_piece: open?.pieces_tasks?.name ?? null,
-          status,
-          progress,
-        };
-      });
-      setMachines(machinesList);
-
-      // ----- 6. Production : 7 derniers jours (vrai calcul) -----
-      const today = new Date();
+      // ===== Step 8 — Production chart (7 days) =====
+      const todayDate = new Date();
       const days: Date[] = [];
       for (let i = 6; i >= 0; i--) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
+        const d = new Date(todayDate);
+        d.setDate(todayDate.getDate() - i);
         days.push(d);
       }
       const fromIso = `${localDateStr(days[0])}T00:00:00.000Z`;
@@ -277,31 +380,27 @@ export function ManagerDashboardPage() {
 
       const { data: prodSessions } = await supabase
         .from("work_sessions")
-        .select("started_at, duration_seconds")
+        .select("started_at")
         .eq("company_id", companyId)
         .eq("session_type", "production")
         .gte("started_at", fromIso)
         .lte("started_at", toIso)
         .is("voided_at", null);
 
-      // Compter les sessions de production par jour
       const countByDay = new Map<string, number>();
       for (const s of (prodSessions ?? []) as any[]) {
         const day = (s.started_at as string).slice(0, 10);
         countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
       }
 
-      const productionData: ProductionPoint[] = days.map((d) => {
-        const iso = localDateStr(d);
-        const label = d.toLocaleDateString(i18n.language, {
-          day: "2-digit",
-          month: "short",
-        });
-        return { day: label, quantity: countByDay.get(iso) ?? 0 };
-      });
-      setProduction(productionData);
+      setProduction(
+        days.map((d) => ({
+          day: d.toLocaleDateString(i18n.language, { day: "2-digit", month: "short" }),
+          quantity: countByDay.get(localDateStr(d)) ?? 0,
+        })),
+      );
 
-      // ----- 7. OF récents (progress réelle) -----
+      // ===== Step 9 — OF récents =====
       const { data: ofRecent } = await supabase
         .from("manufacturing_orders")
         .select(
@@ -312,14 +411,13 @@ export function ManagerDashboardPage() {
         .limit(5);
 
       const ofIds = (ofRecent ?? []).map((o: any) => o.id);
-
-      // Progress réelle : WP terminées / WP totales par OF
-      const { data: wpsData } = ofIds.length > 0
-        ? await supabase
-            .from("of_work_packages")
-            .select("manufacturing_order_id, status")
-            .in("manufacturing_order_id", ofIds)
-        : { data: [] };
+      const { data: wpsData } =
+        ofIds.length > 0
+          ? await supabase
+              .from("of_work_packages")
+              .select("manufacturing_order_id, status")
+              .in("manufacturing_order_id", ofIds)
+          : { data: [] };
 
       const wpByOf = new Map<string, { total: number; done: number }>();
       for (const wp of (wpsData ?? []) as any[]) {
@@ -329,35 +427,34 @@ export function ManagerDashboardPage() {
         wpByOf.set(wp.manufacturing_order_id, entry);
       }
 
-      const ofList: OfRow[] = (ofRecent ?? []).map((o: any) => {
-        const wpInfo = wpByOf.get(o.id) ?? { total: 0, done: 0 };
-        const progress =
-          wpInfo.total > 0 ? Math.round((wpInfo.done / wpInfo.total) * 100) : 0;
+      setOfRows(
+        (ofRecent ?? []).map((o: any) => {
+          const wpInfo = wpByOf.get(o.id) ?? { total: 0, done: 0 };
+          return {
+            id: o.id,
+            number: o.order_number ?? "—",
+            client: o.projects?.name ?? "—",
+            product: o.product_name ?? "—",
+            quantity: o.quantity ?? 0,
+            progress:
+              wpInfo.total > 0 ? Math.round((wpInfo.done / wpInfo.total) * 100) : 0,
+            status:
+              o.status === "completed"
+                ? "done"
+                : o.status === "in_progress"
+                  ? "in_progress"
+                  : "pending",
+            deadline: o.planned_end_date
+              ? new Date(o.planned_end_date).toLocaleDateString(i18n.language, {
+                  day: "2-digit",
+                  month: "short",
+                })
+              : "—",
+          };
+        }),
+      );
 
-        return {
-          id: o.id,
-          number: o.order_number ?? "—",
-          client: o.projects?.name ?? "—",
-          product: o.product_name ?? "—",
-          quantity: o.quantity ?? 0,
-          progress,
-          status:
-            o.status === "completed"
-              ? "done"
-              : o.status === "in_progress"
-                ? "in_progress"
-                : "pending",
-          deadline: o.planned_end_date
-            ? new Date(o.planned_end_date).toLocaleDateString(i18n.language, {
-                day: "2-digit",
-                month: "short",
-              })
-            : "—",
-        };
-      });
-      setOfRows(ofList);
-
-      // ----- 8. Projets en cours (progress réelle) -----
+      // ===== Step 10 — Projets =====
       const { data: projectsData } = await supabase
         .from("projects")
         .select("id, name, status, clients(name)")
@@ -367,16 +464,15 @@ export function ManagerDashboardPage() {
         .order("created_at", { ascending: false })
         .limit(4);
 
-      const projectIds = (projectsData ?? []).map((p: any) => p.id);
-
-      // Pour chaque projet : OF total / OF terminés
-      const { data: projOfs } = projectIds.length > 0
-        ? await supabase
-            .from("manufacturing_orders")
-            .select("project_id, status")
-            .eq("company_id", companyId)
-            .in("project_id", projectIds)
-        : { data: [] };
+      const projectIdsList = (projectsData ?? []).map((p: any) => p.id);
+      const { data: projOfs } =
+        projectIdsList.length > 0
+          ? await supabase
+              .from("manufacturing_orders")
+              .select("project_id, status")
+              .eq("company_id", companyId)
+              .in("project_id", projectIdsList)
+          : { data: [] };
 
       const ofByProject = new Map<string, { total: number; done: number }>();
       for (const o of (projOfs ?? []) as any[]) {
@@ -387,22 +483,22 @@ export function ManagerDashboardPage() {
         ofByProject.set(o.project_id, entry);
       }
 
-      const projectList: ProjectRow[] = (projectsData ?? []).map((p: any) => {
-        const info = ofByProject.get(p.id) ?? { total: 0, done: 0 };
-        const progress =
-          info.total > 0 ? Math.round((info.done / info.total) * 100) : 0;
-        return {
-          id: p.id,
-          name: p.name ?? "—",
-          client: p.clients?.name ?? "—",
-          progress,
-          doneOf: info.done,
-          totalOf: info.total,
-        };
-      });
-      setProjects(projectList);
+      setProjects(
+        (projectsData ?? []).map((p: any) => {
+          const info = ofByProject.get(p.id) ?? { total: 0, done: 0 };
+          return {
+            id: p.id,
+            name: p.name ?? "—",
+            client: p.clients?.name ?? "—",
+            progress:
+              info.total > 0 ? Math.round((info.done / info.total) * 100) : 0,
+            doneOf: info.done,
+            totalOf: info.total,
+          };
+        }),
+      );
 
-      // ----- 9. Notifications (réclamations atelier non lues) -----
+      // ===== Step 11 — Notifications =====
       const { data: reclamations } = await supabase
         .from("workshop_reclamations")
         .select("id, message, status, created_at, workers(full_name), machines(name)")
@@ -411,19 +507,22 @@ export function ManagerDashboardPage() {
         .order("created_at", { ascending: false })
         .limit(5);
 
-      const notifList: NotificationItem[] = (reclamations ?? []).map((r: any) => {
-        const isResolved = r.status === "resolu";
-        return {
+      setNotifications(
+        (reclamations ?? []).map((r: any) => ({
           id: r.id,
-          type: isResolved ? "success" : r.status === "en_cours" ? "warning" : "danger",
+          type:
+            r.status === "resolu"
+              ? "success"
+              : r.status === "en_cours"
+                ? "warning"
+                : "danger",
           title: `${r.workers?.full_name ?? "—"}${
             r.machines?.name ? ` · ${r.machines.name}` : ""
           }`,
           subtitle: r.message,
           time: timeAgo(r.created_at, i18n.language),
-        };
-      });
-      setNotifications(notifList);
+        })),
+      );
     } catch (err) {
       console.error("[Dashboard] load error:", err);
     } finally {
@@ -440,9 +539,7 @@ export function ManagerDashboardPage() {
   }, [load]);
 
   // --------------------------------------------------------------------------
-  // Live updates : réagit aux changements côté Kiosk (sessions, machines, OF,
-  // réclamations, pièces, projets) et recharge le dashboard avec debounce.
-  // Filtre company_id + RLS = isolation stricte entre entreprises.
+  // Live updates — écoute work_shifts + shift_piece_work + autres tables
   // --------------------------------------------------------------------------
   useEffect(() => {
     const companyId = staffUser?.company_id;
@@ -459,6 +556,8 @@ export function ManagerDashboardPage() {
     };
 
     const tables = [
+      "work_shifts",
+      "shift_piece_work",
       "work_sessions",
       "machines",
       "manufacturing_orders",
@@ -486,21 +585,25 @@ export function ManagerDashboardPage() {
   // --------------------------------------------------------------------------
   // Helpers
   // --------------------------------------------------------------------------
-  const today = useMemo(() => {
-    return new Date().toLocaleDateString(i18n.language, {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  }, [i18n.language]);
+  const today = useMemo(
+    () =>
+      new Date().toLocaleDateString(i18n.language, {
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
+    [i18n.language],
+  );
 
-  const currentTime = useMemo(() => {
-    return new Date().toLocaleTimeString(i18n.language, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }, [i18n.language]);
+  const currentTime = useMemo(
+    () =>
+      new Date().toLocaleTimeString(i18n.language, {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    [i18n.language],
+  );
 
   // --------------------------------------------------------------------------
   // Render
@@ -519,9 +622,7 @@ export function ManagerDashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* ============================================================ */}
-      {/* HEADER                                                       */}
-      {/* ============================================================ */}
+      {/* HEADER */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1
@@ -549,9 +650,7 @@ export function ManagerDashboardPage() {
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* KPI ROW                                                      */}
-      {/* ============================================================ */}
+      {/* KPI ROW */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
         <KpiCard
           icon={<Monitor size={20} />}
@@ -606,7 +705,6 @@ export function ManagerDashboardPage() {
           progressColor="green"
         />
 
-        {/* CTA card */}
         <div
           className="relative overflow-hidden rounded-2xl p-5 lg:col-span-2 xl:col-span-1"
           style={{
@@ -641,9 +739,7 @@ export function ManagerDashboardPage() {
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* MAIN GRID : Chart + Machines + Notifications                 */}
-      {/* ============================================================ */}
+      {/* MAIN GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* Production Chart */}
         <Card className="lg:col-span-5">
@@ -731,7 +827,7 @@ export function ManagerDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Machine status */}
+        {/* Machine status — NEW : context affiché */}
         <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle size="md">
@@ -745,83 +841,95 @@ export function ManagerDashboardPage() {
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
             <ul>
-              {machines.map((m, idx) => (
-                <li
-                  key={m.id}
-                  className="flex items-center gap-3 px-5 py-3 transition-colors"
-                  style={{
-                    borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none",
-                  }}
-                >
-                  <div
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+              {machines.map((m, idx) => {
+                const badgeVariant =
+                  m.status === "running"
+                    ? "success"
+                    : m.status === "warning"
+                      ? "warning"
+                      : "neutral";
+                const badgeLabel =
+                  m.status === "running"
+                    ? m.activity ||
+                      t("dashboard.machines.running", { defaultValue: "En production" })
+                    : m.status === "warning"
+                      ? m.activity ||
+                        t("dashboard.machines.warning", { defaultValue: "En alerte" })
+                      : t("dashboard.machines.noActivity", {
+                          defaultValue: "Aucun",
+                        });
+
+                return (
+                  <li
+                    key={m.id}
+                    className="flex items-center gap-3 px-5 py-3 transition-colors"
                     style={{
-                      backgroundColor: "var(--bg-muted)",
-                      color: "var(--text-tertiary)",
+                      borderTop:
+                        idx > 0 ? "1px solid var(--border-subtle)" : "none",
                     }}
                   >
-                    <Cog size={18} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className="truncate text-sm font-bold"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {m.code}
-                      </span>
-                      <Badge
-                        variant={
-                          m.status === "running"
-                            ? "success"
-                            : m.status === "warning"
-                              ? "warning"
-                              : "danger"
-                        }
-                        size="sm"
-                        dot
-                      >
-                        {m.status === "running"
-                          ? t("dashboard.machines.running", {
-                              defaultValue: "En production",
-                            })
-                          : m.status === "warning"
-                            ? t("dashboard.machines.warning", {
-                                defaultValue: "En alerte",
-                              })
-                            : t("dashboard.machines.stopped", {
-                                defaultValue: "Arrêté",
-                              })}
-                      </Badge>
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                      style={{
+                        backgroundColor: "var(--bg-muted)",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      <Cog size={18} />
                     </div>
-                    <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <span
-                        className="truncate text-[11px]"
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className="truncate text-sm font-bold"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          {m.code}
+                        </span>
+                        <Badge variant={badgeVariant} size="sm" dot>
+                          {badgeLabel}
+                        </Badge>
+                      </div>
+                      <div
+                        className="mt-0.5 text-[11px]"
                         style={{ color: "var(--text-tertiary)" }}
                       >
                         {m.model}
-                      </span>
-                      {m.current_piece && (
-                        <span
-                          className="truncate text-[11px] font-semibold"
+                      </div>
+                      {(m.current_project || m.current_piece || m.current_worker) && (
+                        <div
+                          className="mt-0.5 truncate text-[11px] font-semibold"
                           style={{ color: "var(--text-secondary)" }}
                         >
-                          {m.current_piece}
-                        </span>
+                          {m.current_project && <span>{m.current_project}</span>}
+                          {m.current_piece && (
+                            <>
+                              {m.current_project && <span> · </span>}
+                              <span>{m.current_piece}</span>
+                            </>
+                          )}
+                          {m.current_worker && (
+                            <>
+                              {(m.current_project || m.current_piece) && (
+                                <span> · </span>
+                              )}
+                              <span>{m.current_worker}</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {m.status !== "idle" && (
+                        <div className="mt-1.5">
+                          <ProgressBar
+                            value={m.progress}
+                            color={m.status === "running" ? "green" : "orange"}
+                            size="xs"
+                          />
+                        </div>
                       )}
                     </div>
-                    {m.status === "running" && (
-                      <div className="mt-1.5">
-                        <ProgressBar
-                          value={m.progress}
-                          color="green"
-                          size="xs"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
               {machines.length === 0 && (
                 <li
                   className="px-5 py-6 text-center text-xs"
@@ -834,7 +942,7 @@ export function ManagerDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Notifications (réclamations) */}
+        {/* Notifications */}
         <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle size="md">
@@ -867,7 +975,6 @@ export function ManagerDashboardPage() {
                       : n.type === "success"
                         ? CheckCircle2
                         : FileText;
-
                 const iconBg =
                   n.type === "danger"
                     ? "rgba(239, 68, 68, 0.12)"
@@ -876,7 +983,6 @@ export function ManagerDashboardPage() {
                       : n.type === "success"
                         ? "rgba(16, 185, 129, 0.12)"
                         : "rgba(59, 130, 246, 0.12)";
-
                 const iconColor =
                   n.type === "danger"
                     ? "#ef4444"
@@ -885,7 +991,6 @@ export function ManagerDashboardPage() {
                       : n.type === "success"
                         ? "#10b981"
                         : "#3b82f6";
-
                 return (
                   <li
                     key={n.id}
@@ -893,10 +998,7 @@ export function ManagerDashboardPage() {
                   >
                     <div
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                      style={{
-                        backgroundColor: iconBg,
-                        color: iconColor,
-                      }}
+                      style={{ backgroundColor: iconBg, color: iconColor }}
                     >
                       <IconComp size={15} />
                     </div>
@@ -930,9 +1032,7 @@ export function ManagerDashboardPage() {
         </Card>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECOND GRID : OF Table + Projects                            */}
-      {/* ============================================================ */}
+      {/* SECOND GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* OF Table */}
         <Card className="lg:col-span-7">
@@ -974,7 +1074,6 @@ export function ManagerDashboardPage() {
                   {ofRows.map((of) => (
                     <tr
                       key={of.id}
-                      className="transition-colors"
                       style={{ borderBottom: "1px solid var(--border-subtle)" }}
                     >
                       <td className="px-5 py-3">
@@ -1059,7 +1158,9 @@ export function ManagerDashboardPage() {
                         className="px-5 py-6 text-center text-xs"
                         style={{ color: "var(--text-tertiary)" }}
                       >
-                        {t("setup.noDataYet", { defaultValue: "Aucun ordre de fabrication" })}
+                        {t("setup.noDataYet", {
+                          defaultValue: "Aucun ordre de fabrication",
+                        })}
                       </td>
                     </tr>
                   )}
@@ -1084,9 +1185,10 @@ export function ManagerDashboardPage() {
               {projects.map((p, idx) => (
                 <li
                   key={p.id}
-                  className="flex items-center gap-3 px-5 py-3 transition-colors"
+                  className="flex items-center gap-3 px-5 py-3"
                   style={{
-                    borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                    borderTop:
+                      idx > 0 ? "1px solid var(--border-subtle)" : "none",
                   }}
                 >
                   <div
