@@ -51,14 +51,16 @@ import { ProductionReportsPage } from "../../production-reports/pages/Production
 // ---------------------------------------------------------------------------
 // Pages mapping
 // ---------------------------------------------------------------------------
-// NOTE : toutes les pages reçoivent potentiellement `onNavigate`, qui permet
-// à une page enfant de demander à AdminHomePage de changer de section.
-// Les pages qui ne l'utilisent pas l'ignorent simplement.
+// NOTE : toutes les pages peuvent recevoir `onNavigate(pageKey)` — mais elles
+// l'ignorent si elles ne l'utilisent pas. C'est un mécanisme opt-in.
 export interface AdminPageProps {
-  onNavigate?: (key: string) => void;
+  /** Demande à AdminHomePage d'ouvrir une autre section.
+   *  Accepte un `node.key` OU un `node.pageKey` (les deux sont résolus). */
+  onNavigate?: (keyOrPageKey: string) => void;
 }
 
-const PAGES: Record<string, React.ComponentType<AdminPageProps>> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PAGES: Record<string, React.ComponentType<any>> = {
   dashboard: ManagerDashboardPage,
   reports: ReportsPage,
   crm: CRMAdminPage,
@@ -128,6 +130,7 @@ function filterTree(groups: NavGroup[], role: any, isOwner: boolean): NavGroup[]
     .filter((g) => g.items.length > 0);
 }
 
+/** Recherche un node par son `key` (identifiant unique dans la nav). */
 function findNode(groups: NavGroup[], key: string): NavNode | null {
   function walk(nodes: NavNode[]): NavNode | null {
     for (const n of nodes) {
@@ -146,7 +149,45 @@ function findNode(groups: NavGroup[], key: string): NavNode | null {
   return null;
 }
 
-/** ✅ Trouve le groupe parent d'un node (pour le breadcrumb). */
+/**
+ * ✅ NEW — Recherche un node par son `pageKey`.
+ * Utile quand une page appelle onNavigate("machines") — elle envoie
+ * le pageKey plutôt que le node.key ("atelier_machines_cnc").
+ */
+function findNodeByPageKey(groups: NavGroup[], pageKey: string): NavNode | null {
+  function walk(nodes: NavNode[]): NavNode | null {
+    for (const n of nodes) {
+      if (n.pageKey === pageKey) return n;
+      if (n.children) {
+        const found = walk(n.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  for (const g of groups) {
+    const found = walk(g.items);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * ✅ NEW — Résout un identifiant flou (key OU pageKey) vers un node.
+ * Cherche dans le NAV_TREE complet (pas seulement les items visibles),
+ * pour rester robuste même si la nav est partiellement repliée.
+ */
+function resolveNode(
+  groups: NavGroup[],
+  keyOrPageKey: string,
+): NavNode | null {
+  return (
+    findNode(groups, keyOrPageKey) ??
+    findNodeByPageKey(groups, keyOrPageKey)
+  );
+}
+
+/** Trouve le groupe parent d'un node (pour le breadcrumb). */
 function findGroupOfKey(groups: NavGroup[], key: string): NavGroup | null {
   function contains(nodes: NavNode[], k: string): boolean {
     for (const n of nodes) {
@@ -212,7 +253,9 @@ export function AdminHomePage({
   const navValue = useMemo(
     () => ({
       goToSection: (key: string, params?: Record<string, string>) => {
-        setActiveSection(key);
+        // Résout key OU pageKey vers le vrai node.key
+        const resolved = resolveNode(NAV_TREE, key);
+        setActiveSection(resolved?.key ?? key);
         setNavParams(params ?? null);
         setShowProfile(false);
       },
@@ -289,8 +332,14 @@ export function AdminHomePage({
 
   const fallbackKey = firstLeafKey(visibleGroups);
   const currentKey = activeSection ?? fallbackKey;
-  const currentNode = currentKey ? findNode(visibleGroups, currentKey) : null;
-  const currentGroup = currentKey ? findGroupOfKey(visibleGroups, currentKey) : null;
+  // ✅ Résolution robuste : cherche dans NAV_TREE complet (pas seulement visible)
+  // pour ne pas être bloqué si la nav est repliée ou si le role n'autorise pas.
+  const currentNode = currentKey
+    ? resolveNode(NAV_TREE, currentKey) ?? findNode(visibleGroups, currentKey)
+    : null;
+  const currentGroup = currentNode
+    ? findGroupOfKey(NAV_TREE, currentNode.key)
+    : null;
 
   const currentLabel = currentNode
     ? t(currentNode.labelKey, { defaultValue: currentNode.label })
@@ -302,8 +351,16 @@ export function AdminHomePage({
 
   const CurrentIcon = currentNode?.icon;
 
-  function handleSelect(key: string) {
-    setActiveSection(key);
+  /**
+   * ✅ Navigation interne.
+   * Accepte un node.key ("atelier_machines_cnc") OU un pageKey ("machines").
+   * Le pageKey est automatiquement résolu vers le node correspondant,
+   * ce qui permet aux pages enfants (ex: Dashboard "Voir tout") d'appeler
+   * onNavigate("machines") sans connaître le node.key exact.
+   */
+  function handleSelect(keyOrPageKey: string) {
+    const resolved = resolveNode(NAV_TREE, keyOrPageKey);
+    setActiveSection(resolved?.key ?? keyOrPageKey);
     setNavParams(null);
     setIsSidebarOpen(false);
     setShowProfile(false);
