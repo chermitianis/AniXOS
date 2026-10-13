@@ -82,9 +82,10 @@ interface OfRow {
   product: string;
   quantity: number;
   progress: number;
-  pieces_done: number;
-  pieces_total: number;
-  status: "done" | "in_progress" | "late" | "pending";
+  /** Work packages : mesure de progression réelle. Attendu = 2 (cnc + classique). */
+  wps_done: number;
+  wps_total: number;
+  status: "done" | "in_progress" | "late" | "partial" | "pending";
   deadline: string;
   days_left: number | null;
 }
@@ -150,7 +151,7 @@ function daysBetween(fromIso: string, toDate: Date): number {
 }
 
 // ============================================================================
-// Small UI helper — "Voir tout" button (works only if onNavigate provided)
+// Small UI helper — "Voir tout" button
 // ============================================================================
 function NavAction({
   pageKey,
@@ -294,7 +295,7 @@ export function ManagerDashboardPage({
           ? supabase
               .from("pieces_tasks")
               .select(
-                "id, name, code, quantity, estimated_time_minutes, estimated_minutes, manufacturing_order_id, project_id, production_status, status",
+                "id, name, code, quantity, estimated_time_minutes, estimated_minutes, manufacturing_order_id, project_id",
               )
               .in("id", pieceIds)
           : { data: [] },
@@ -382,7 +383,7 @@ export function ManagerDashboardPage({
         });
       }
 
-      // Enrich with worker context (via work_shifts + piece_work + planning)
+      // Enrich with worker context (occupied, no active session yet)
       for (const pw of currentPieces as any[]) {
         const key = `${pw.worker_id}::${pw.piece_task_id}`;
         const plan = planningByKey.get(key);
@@ -463,7 +464,7 @@ export function ManagerDashboardPage({
 
       setMachines(machineRows);
 
-      // ===== Step 7 — OF aggregation =====
+      // ===== Step 7 — OF aggregation (via work packages) =====
       const { data: ofData } = await supabase
         .from("manufacturing_orders")
         .select(
@@ -475,31 +476,39 @@ export function ManagerDashboardPage({
       const allOfs = (ofData ?? []) as any[];
       const allOfIds = allOfs.map((o) => o.id);
 
+      // Work packages — la vraie métrique de progression (attendu : 2 par OF)
+      const { data: wpsAllData } =
+        allOfIds.length > 0
+          ? await supabase
+              .from("of_work_packages")
+              .select("id, manufacturing_order_id, status, interface_type")
+              .in("manufacturing_order_id", allOfIds)
+          : { data: [] };
+
+      const wpsByOf = new Map<string, { total: number; done: number }>();
+      for (const wp of (wpsAllData ?? []) as any[]) {
+        if (!wp.manufacturing_order_id) continue;
+        const entry = wpsByOf.get(wp.manufacturing_order_id) ?? { total: 0, done: 0 };
+        entry.total += 1;
+        if (wp.status === "completed") entry.done += 1;
+        wpsByOf.set(wp.manufacturing_order_id, entry);
+      }
+
+      // Pièces → pour relier les sessions actives aux OFs
       const { data: ofPiecesData } =
         allOfIds.length > 0
           ? await supabase
               .from("pieces_tasks")
-              .select("id, manufacturing_order_id, production_status")
+              .select("id, manufacturing_order_id")
               .eq("company_id", companyId)
               .in("manufacturing_order_id", allOfIds)
           : { data: [] };
-
-      const piecesByOf = new Map<string, { total: number; done: number }>();
-      for (const p of (ofPiecesData ?? []) as any[]) {
-        if (!p.manufacturing_order_id) continue;
-        const entry = piecesByOf.get(p.manufacturing_order_id) ?? {
-          total: 0,
-          done: 0,
-        };
-        entry.total += 1;
-        if (p.production_status === "completed") entry.done += 1;
-        piecesByOf.set(p.manufacturing_order_id, entry);
-      }
 
       const pieceToOf = new Map<string, string>();
       for (const p of (ofPiecesData ?? []) as any[]) {
         if (p.manufacturing_order_id) pieceToOf.set(p.id, p.manufacturing_order_id);
       }
+
       const ofsWithActiveWork = new Set<string>();
       for (const s of (allActiveSessions ?? []) as any[]) {
         if (!s.piece_task_id) continue;
@@ -511,25 +520,25 @@ export function ManagerDashboardPage({
       let ofLateCount = 0;
 
       const ofList: OfRow[] = allOfs.map((o: any) => {
-        const pieces = piecesByOf.get(o.id) ?? { total: 0, done: 0 };
+        const wps = wpsByOf.get(o.id) ?? { total: 0, done: 0 };
         const hasActiveWork = ofsWithActiveWork.has(o.id);
-        const isDone = o.status === "completed";
+        const allWpsDone = wps.total > 0 && wps.done >= wps.total;
+        const isDone = o.status === "completed" || allWpsDone;
+
         const deadline = o.planned_end_date ? new Date(o.planned_end_date) : null;
         const daysLeft = deadline ? daysBetween(deadline.toISOString(), now) : null;
         const isLate =
           !isDone && deadline !== null && deadline.getTime() < now.getTime();
 
-        let progress = 0;
-        if (pieces.total > 0) {
-          progress = Math.round((pieces.done / pieces.total) * 100);
-        } else if (isDone) {
-          progress = 100;
-        }
+        const progress =
+          wps.total > 0 ? Math.round((wps.done / wps.total) * 100) : 0;
 
-        let status: OfRow["status"] = "pending";
+        let status: OfRow["status"];
         if (isDone) status = "done";
         else if (isLate) status = "late";
-        else if (hasActiveWork || o.status === "in_progress") status = "in_progress";
+        else if (hasActiveWork) status = "in_progress";
+        else if (wps.done > 0) status = "partial";
+        else status = "pending";
 
         if (status === "in_progress") ofInProgressCount += 1;
         if (status === "late") ofLateCount += 1;
@@ -541,8 +550,8 @@ export function ManagerDashboardPage({
           product: o.product_name ?? "—",
           quantity: o.quantity ?? 0,
           progress,
-          pieces_done: pieces.done,
-          pieces_total: pieces.total,
+          wps_done: wps.done,
+          wps_total: wps.total,
           status,
           deadline: deadline
             ? deadline.toLocaleDateString(i18n.language, {
@@ -557,8 +566,9 @@ export function ManagerDashboardPage({
       const ofStatusOrder: Record<OfRow["status"], number> = {
         late: 0,
         in_progress: 1,
-        pending: 2,
-        done: 3,
+        partial: 2,
+        pending: 3,
+        done: 4,
       };
       ofList.sort((a, b) => {
         const so = ofStatusOrder[a.status] - ofStatusOrder[b.status];
@@ -682,7 +692,7 @@ export function ManagerDashboardPage({
       // ===== Step 10 — Alerts =====
       const alertList: AlertItem[] = [];
 
-      // 10a. Réclamations non lues — informatif, non cliquable
+      // 10a. Réclamations non lues
       const { data: reclamations } = await supabase
         .from("workshop_reclamations")
         .select("id, message, status, created_at, workers(full_name), machines(name)")
@@ -704,7 +714,7 @@ export function ManagerDashboardPage({
         });
       }
 
-      // 10b. OF en retard — cliquable → manufacturing_orders
+      // 10b. OF en retard
       for (const o of ofList.filter((x) => x.status === "late").slice(0, 5)) {
         alertList.push({
           id: `of-${o.id}`,
@@ -721,7 +731,7 @@ export function ManagerDashboardPage({
         });
       }
 
-      // 10c. Sessions suspectes (> 8h) — cliquable → production_reports
+      // 10c. Sessions suspectes (> 8h)
       for (const s of (allActiveSessions ?? []) as any[]) {
         const hoursOpen =
           (Date.now() - new Date(s.started_at).getTime()) / (1000 * 60 * 60);
@@ -740,7 +750,7 @@ export function ManagerDashboardPage({
         }
       }
 
-      // 10d. Machines en maintenance — cliquable → machines
+      // 10d. Machines en maintenance
       for (const m of (allMachinesData ?? []) as any[]) {
         if (m.current_status === "maintenance") {
           alertList.push({
@@ -819,6 +829,7 @@ export function ManagerDashboardPage({
       "work_sessions",
       "machines",
       "manufacturing_orders",
+      "of_work_packages",
       "workshop_reclamations",
       "pieces_tasks",
       "projects",
@@ -1408,119 +1419,143 @@ export function ManagerDashboardPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {ofRows.map((of) => (
-                    <tr
-                      key={of.id}
-                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                    >
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`h-2 w-2 shrink-0 rounded-full ${
-                              of.status === "done"
-                                ? "bg-blue-500"
-                                : of.status === "late"
-                                  ? "bg-red-500"
-                                  : of.status === "in_progress"
-                                    ? "bg-emerald-500"
-                                    : "bg-slate-400"
-                            }`}
-                          />
-                          <span
-                            className="font-mono text-xs font-semibold"
-                            style={{ color: "var(--text-primary)" }}
-                            dir="ltr"
-                          >
-                            {of.number}
-                          </span>
-                        </div>
-                      </td>
-                      <td
-                        className="px-3 py-3 text-xs"
-                        style={{ color: "var(--text-secondary)" }}
+                  {ofRows.map((of) => {
+                    const wpIncomplete = of.wps_total < 2;
+                    return (
+                      <tr
+                        key={of.id}
+                        style={{ borderBottom: "1px solid var(--border-subtle)" }}
                       >
-                        {of.project_name}
-                      </td>
-                      <td
-                        className="px-3 py-3 text-xs"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        {of.product}
-                      </td>
-                      <td
-                        className="px-3 py-3 text-center text-xs tabular-nums"
-                        style={{ color: "var(--text-secondary)" }}
-                        dir="ltr"
-                      >
-                        {of.quantity}
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="min-w-[100px]">
-                          <ProgressBar value={of.progress} size="xs" />
-                          {of.pieces_total > 0 && (
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
                             <span
-                              className="mt-0.5 block text-[10px]"
-                              style={{ color: "var(--text-tertiary)" }}
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                of.status === "done"
+                                  ? "bg-blue-500"
+                                  : of.status === "late"
+                                    ? "bg-red-500"
+                                    : of.status === "in_progress"
+                                      ? "bg-emerald-500"
+                                      : of.status === "partial"
+                                        ? "bg-amber-500"
+                                        : "bg-slate-400"
+                              }`}
+                            />
+                            <span
+                              className="font-mono text-xs font-semibold"
+                              style={{ color: "var(--text-primary)" }}
                               dir="ltr"
                             >
-                              {of.pieces_done}/{of.pieces_total}
+                              {of.number}
                             </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <Badge
-                          variant={
-                            of.status === "done"
-                              ? "info"
-                              : of.status === "late"
-                                ? "danger"
-                                : of.status === "in_progress"
-                                  ? "success"
-                                  : "neutral"
-                          }
-                          size="sm"
-                          dot
+                          </div>
+                        </td>
+                        <td
+                          className="px-3 py-3 text-xs"
+                          style={{ color: "var(--text-secondary)" }}
                         >
-                          {of.status === "done"
-                            ? t("dashboard.of.done", { defaultValue: "Terminée" })
-                            : of.status === "late"
-                              ? t("dashboard.of.late", { defaultValue: "En retard" })
-                              : of.status === "in_progress"
-                                ? t("dashboard.of.inProgress", {
-                                    defaultValue: "En cours",
-                                  })
-                                : t("dashboard.of.pending", {
-                                    defaultValue: "En attente",
-                                  })}
-                        </Badge>
-                      </td>
-                      <td
-                        className="px-5 py-3 text-xs"
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        <span dir="ltr">{of.deadline}</span>
-                        {of.days_left !== null && of.status !== "done" && (
+                          {of.project_name}
+                        </td>
+                        <td
+                          className="px-3 py-3 text-xs"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {of.product}
+                        </td>
+                        <td
+                          className="px-3 py-3 text-center text-xs tabular-nums"
+                          style={{ color: "var(--text-secondary)" }}
+                          dir="ltr"
+                        >
+                          {of.quantity}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex min-w-[110px] items-center gap-2">
+                            <div className="flex-1">
+                              <ProgressBar value={of.progress} size="xs" />
+                            </div>
+                            {wpIncomplete && (
+                              <span
+                                title={t("dashboard.of.wpIncompleteHint", {
+                                  defaultValue:
+                                    "Work packages incomplets (attendu : cnc + classique)",
+                                })}
+                                className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold leading-none text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                              >
+                                !
+                              </span>
+                            )}
+                          </div>
                           <span
                             className="mt-0.5 block text-[10px]"
-                            style={{
-                              color:
-                                of.days_left < 0
-                                  ? "#ef4444"
-                                  : of.days_left <= 2
-                                    ? "#f59e0b"
-                                    : "var(--text-tertiary)",
-                            }}
+                            style={{ color: "var(--text-tertiary)" }}
                             dir="ltr"
                           >
-                            {of.days_left < 0
-                              ? `${Math.abs(of.days_left)} j`
-                              : `${of.days_left} j`}
+                            {of.wps_done}/{of.wps_total}
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant={
+                              of.status === "done"
+                                ? "info"
+                                : of.status === "late"
+                                  ? "danger"
+                                  : of.status === "in_progress"
+                                    ? "success"
+                                    : of.status === "partial"
+                                      ? "warning"
+                                      : "neutral"
+                            }
+                            size="sm"
+                            dot
+                          >
+                            {of.status === "done"
+                              ? t("dashboard.of.done", { defaultValue: "Terminée" })
+                              : of.status === "late"
+                                ? t("dashboard.of.late", {
+                                    defaultValue: "En retard",
+                                  })
+                                : of.status === "in_progress"
+                                  ? t("dashboard.of.inProgress", {
+                                      defaultValue: "En cours",
+                                    })
+                                  : of.status === "partial"
+                                    ? t("dashboard.of.partial", {
+                                        defaultValue: "Partiel",
+                                      })
+                                    : t("dashboard.of.pending", {
+                                        defaultValue: "En attente",
+                                      })}
+                          </Badge>
+                        </td>
+                        <td
+                          className="px-5 py-3 text-xs"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          <span dir="ltr">{of.deadline}</span>
+                          {of.days_left !== null && of.status !== "done" && (
+                            <span
+                              className="mt-0.5 block text-[10px]"
+                              style={{
+                                color:
+                                  of.days_left < 0
+                                    ? "#ef4444"
+                                    : of.days_left <= 2
+                                      ? "#f59e0b"
+                                      : "var(--text-tertiary)",
+                              }}
+                              dir="ltr"
+                            >
+                              {of.days_left < 0
+                                ? `${Math.abs(of.days_left)} j`
+                                : `${of.days_left} j`}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {ofRows.length === 0 && (
                     <tr>
                       <td
