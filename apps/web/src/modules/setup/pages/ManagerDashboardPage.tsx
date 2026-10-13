@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import {
   Monitor,
   Package,
   Users,
   TrendingUp,
-  ArrowRight,
   Calendar,
   Clock,
   AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
   FileText,
   Loader2,
   Cog,
@@ -46,7 +42,6 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
-type SessionKind = "production" | "downtime" | "none";
 type MachineDisplayStatus = "running" | "warning" | "occupied" | "idle" | "maintenance";
 
 interface MachineRow {
@@ -58,7 +53,6 @@ interface MachineRow {
   current_project: string | null;
   current_worker: string | null;
   activity: string | null;
-  session_kind: SessionKind;
   display_status: MachineDisplayStatus;
   elapsed_minutes: number | null;
   estimated_minutes: number | null;
@@ -71,7 +65,8 @@ interface AlertItem {
   title: string;
   message: string;
   created_at: string;
-  link: string;
+  /** Si défini → l'alerte est cliquable et navigue vers cette page. */
+  pageKey?: string;
 }
 
 interface ProductionPoint {
@@ -101,7 +96,6 @@ interface ProjectRow {
   progress: number;
   piecesDone: number;
   piecesTotal: number;
-  deadline: string;
 }
 
 interface KpiData {
@@ -115,6 +109,16 @@ interface KpiData {
   workersTotal: number;
   globalEfficiency: number;
   alertsCount: number;
+}
+
+interface ManagerDashboardPageProps {
+  /**
+   * Navigation callback fourni par AdminHomePage.
+   * Si absent, les boutons "Voir tout" sont affichés en texte inactif.
+   * Clés attendues (voir navTree.ts) : "machines", "manufacturing_orders",
+   * "projects", "production_reports", …
+   */
+  onNavigate?: (pageKey: string) => void;
 }
 
 // ============================================================================
@@ -146,9 +150,45 @@ function daysBetween(fromIso: string, toDate: Date): number {
 }
 
 // ============================================================================
+// Small UI helper — "Voir tout" button (works only if onNavigate provided)
+// ============================================================================
+function NavAction({
+  pageKey,
+  onNavigate,
+  label,
+}: {
+  pageKey: string;
+  onNavigate?: (k: string) => void;
+  label: string;
+}) {
+  if (!onNavigate) {
+    return (
+      <span
+        className="text-xs font-semibold"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(pageKey)}
+      className="text-xs font-semibold hover:underline"
+      style={{ color: "var(--accent-blue)" }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ============================================================================
 // Component
 // ============================================================================
-export function ManagerDashboardPage() {
+export function ManagerDashboardPage({
+  onNavigate,
+}: ManagerDashboardPageProps = {}) {
   const { t, i18n } = useTranslation();
   const { staffUser } = useStaffAuth();
 
@@ -185,7 +225,6 @@ export function ManagerDashboardPage() {
 
     try {
       const now = new Date();
-      const todayStr = localDateStr(now);
 
       // ===== Step 1 — Parallel base fetches =====
       const [
@@ -283,10 +322,10 @@ export function ManagerDashboardPage() {
         ((projectsRes.data ?? []) as any[]).map((p) => [p.id, p]),
       );
       const taskTypeById = new Map<string, string>(
-        ((allTaskTypes ?? []) as any[]).map((t) => [t.id, t.name]),
+        ((allTaskTypes ?? []) as any[]).map((tt) => [tt.id, tt.name]),
       );
       const stopReasonById = new Map<string, string>(
-        ((allStopReasons ?? []) as any[]).map((s) => [s.id, s.name]),
+        ((allStopReasons ?? []) as any[]).map((sr) => [sr.id, sr.name]),
       );
       const workerById = new Map<string, any>(
         ((workersData ?? []) as any[]).map((w) => [w.id, w]),
@@ -327,7 +366,6 @@ export function ManagerDashboardPage() {
       // ===== Step 6 — Build machine rows (ALL active machines) =====
       const machineRowsMap = new Map<string, MachineRow>();
 
-      // Pre-seed with all active machines
       for (const m of (allMachinesData ?? []) as any[]) {
         machineRowsMap.set(m.id, {
           id: m.id,
@@ -338,7 +376,6 @@ export function ManagerDashboardPage() {
           current_project: null,
           current_worker: null,
           activity: null,
-          session_kind: "none",
           display_status: m.current_status === "maintenance" ? "maintenance" : "idle",
           elapsed_minutes: null,
           estimated_minutes: null,
@@ -356,15 +393,12 @@ export function ManagerDashboardPage() {
 
         const machineRow = machineRowsMap.get(machineId);
         if (!machineRow) continue;
-
-        // Skip if this machine already has a session row (handled in next loop)
-        if (session) continue;
+        if (session) continue; // handled in next loop
 
         const piece = pieceById.get(pw.piece_task_id);
         const project = pw.project_id ? projectById.get(pw.project_id) : null;
         const worker = workerById.get(pw.worker_id);
 
-        // Only mark as "occupied" if not already running
         if (machineRow.display_status === "idle") {
           machineRow.display_status = "occupied";
         }
@@ -391,11 +425,9 @@ export function ManagerDashboardPage() {
           : null;
 
         if (s.session_type === "production") {
-          machineRow.session_kind = "production";
           machineRow.activity = taskTypeById.get(s.task_type_id ?? "") ?? null;
           machineRow.display_status = "running";
         } else if (s.session_type === "downtime") {
-          machineRow.session_kind = "downtime";
           machineRow.activity = stopReasonById.get(s.stop_reason_id ?? "") ?? null;
           machineRow.display_status = "warning";
         }
@@ -408,7 +440,6 @@ export function ManagerDashboardPage() {
           piece?.estimated_time_minutes ?? piece?.estimated_minutes ?? null;
       }
 
-      // Sort: running > warning > occupied > idle > maintenance, then by code
       const statusOrder: Record<MachineDisplayStatus, number> = {
         running: 0,
         warning: 1,
@@ -444,7 +475,6 @@ export function ManagerDashboardPage() {
       const allOfs = (ofData ?? []) as any[];
       const allOfIds = allOfs.map((o) => o.id);
 
-      // Fetch all pieces of all OFs
       const { data: ofPiecesData } =
         allOfIds.length > 0
           ? await supabase
@@ -466,7 +496,6 @@ export function ManagerDashboardPage() {
         piecesByOf.set(p.manufacturing_order_id, entry);
       }
 
-      // Identify OFs with active work (session open)
       const pieceToOf = new Map<string, string>();
       for (const p of (ofPiecesData ?? []) as any[]) {
         if (p.manufacturing_order_id) pieceToOf.set(p.id, p.manufacturing_order_id);
@@ -485,9 +514,7 @@ export function ManagerDashboardPage() {
         const pieces = piecesByOf.get(o.id) ?? { total: 0, done: 0 };
         const hasActiveWork = ofsWithActiveWork.has(o.id);
         const isDone = o.status === "completed";
-        const deadline = o.planned_end_date
-          ? new Date(o.planned_end_date)
-          : null;
+        const deadline = o.planned_end_date ? new Date(o.planned_end_date) : null;
         const daysLeft = deadline ? daysBetween(deadline.toISOString(), now) : null;
         const isLate =
           !isDone && deadline !== null && deadline.getTime() < now.getTime();
@@ -527,7 +554,6 @@ export function ManagerDashboardPage() {
         };
       });
 
-      // Sort: late first, then in_progress, then pending, then done
       const ofStatusOrder: Record<OfRow["status"], number> = {
         late: 0,
         in_progress: 1,
@@ -582,9 +608,7 @@ export function ManagerDashboardPage() {
           s.duration_seconds ??
           Math.max(
             0,
-            Math.floor(
-              (Date.now() - new Date(s.started_at).getTime()) / 1000,
-            ),
+            Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000),
           );
         hoursByDay.set(day, (hoursByDay.get(day) ?? 0) + secs / 3600);
       }
@@ -613,7 +637,7 @@ export function ManagerDashboardPage() {
       // ===== Step 9 — Projects =====
       const { data: projectsData } = await supabase
         .from("projects")
-        .select("id, name, status, planned_end_date, clients(name)")
+        .select("id, name, status, clients(name)")
         .eq("company_id", companyId)
         .neq("is_archived", true)
         .neq("status", "completed")
@@ -631,10 +655,7 @@ export function ManagerDashboardPage() {
               .neq("status", "cancelled")
           : { data: [] };
 
-      const piecesByProject = new Map<
-        string,
-        { total: number; done: number }
-      >();
+      const piecesByProject = new Map<string, { total: number; done: number }>();
       for (const p of (projPieces ?? []) as any[]) {
         if (!p.project_id) continue;
         const entry = piecesByProject.get(p.project_id) ?? { total: 0, done: 0 };
@@ -654,12 +675,6 @@ export function ManagerDashboardPage() {
               info.total > 0 ? Math.round((info.done / info.total) * 100) : 0,
             piecesDone: info.done,
             piecesTotal: info.total,
-            deadline: p.planned_end_date
-              ? new Date(p.planned_end_date).toLocaleDateString(i18n.language, {
-                  day: "2-digit",
-                  month: "short",
-                })
-              : "—",
           };
         }),
       );
@@ -667,7 +682,7 @@ export function ManagerDashboardPage() {
       // ===== Step 10 — Alerts =====
       const alertList: AlertItem[] = [];
 
-      // 10a. Réclamations non lues
+      // 10a. Réclamations non lues — informatif, non cliquable
       const { data: reclamations } = await supabase
         .from("workshop_reclamations")
         .select("id, message, status, created_at, workers(full_name), machines(name)")
@@ -686,11 +701,10 @@ export function ManagerDashboardPage() {
           }`,
           message: r.message,
           created_at: r.created_at,
-          link: "/reclamations",
         });
       }
 
-      // 10b. OF en retard
+      // 10b. OF en retard — cliquable → manufacturing_orders
       for (const o of ofList.filter((x) => x.status === "late").slice(0, 5)) {
         alertList.push({
           id: `of-${o.id}`,
@@ -703,11 +717,11 @@ export function ManagerDashboardPage() {
               : ""
           }`,
           created_at: new Date().toISOString(),
-          link: "/manufacturing_orders",
+          pageKey: "manufacturing_orders",
         });
       }
 
-      // 10c. Sessions suspectes (> 8h ouvertes)
+      // 10c. Sessions suspectes (> 8h) — cliquable → production_reports
       for (const s of (allActiveSessions ?? []) as any[]) {
         const hoursOpen =
           (Date.now() - new Date(s.started_at).getTime()) / (1000 * 60 * 60);
@@ -721,12 +735,12 @@ export function ManagerDashboardPage() {
             title: `Session suspecte · ${worker?.full_name ?? "—"}`,
             message: `${machine?.name ?? "—"} — ouverte depuis ${Math.round(hoursOpen)} h`,
             created_at: s.started_at,
-            link: "/production-reports/daily",
+            pageKey: "production_reports",
           });
         }
       }
 
-      // 10d. Machines en maintenance
+      // 10d. Machines en maintenance — cliquable → machines
       for (const m of (allMachinesData ?? []) as any[]) {
         if (m.current_status === "maintenance") {
           alertList.push({
@@ -736,12 +750,11 @@ export function ManagerDashboardPage() {
             title: `Maintenance · ${m.code}`,
             message: m.name ?? "—",
             created_at: new Date().toISOString(),
-            link: "/machines",
+            pageKey: "machines",
           });
         }
       }
 
-      // Sort alerts: danger first, then warning, then info
       const severityOrder: Record<AlertItem["severity"], number> = {
         danger: 0,
         warning: 1,
@@ -867,9 +880,7 @@ export function ManagerDashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* ============================================================ */}
-      {/* HEADER                                                       */}
-      {/* ============================================================ */}
+      {/* HEADER */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1
@@ -899,11 +910,8 @@ export function ManagerDashboardPage() {
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* KPI ROW                                                      */}
-      {/* ============================================================ */}
+      {/* KPI ROW */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {/* Machines en production */}
         <KpiCard
           icon={<Monitor size={20} />}
           iconColor="blue"
@@ -918,9 +926,16 @@ export function ManagerDashboardPage() {
               : 0
           }
           progressColor="green"
+          caption={
+            kpi.machinesTotal > kpi.machinesAvailable
+              ? `${kpi.machinesTotal - kpi.machinesAvailable} ${t(
+                  "dashboard.kpi.inMaintenance",
+                  { defaultValue: "en maintenance" },
+                )}`
+              : undefined
+          }
         />
 
-        {/* Opérateurs */}
         <KpiCard
           icon={<Users size={20} />}
           iconColor="purple"
@@ -935,9 +950,15 @@ export function ManagerDashboardPage() {
               : 0
           }
           progressColor="purple"
+          caption={
+            kpi.workersProductive > 0
+              ? `${kpi.workersProductive} ${t("dashboard.kpi.inProduction", {
+                  defaultValue: "en production",
+                })}`
+              : undefined
+          }
         />
 
-        {/* OF */}
         <KpiCard
           icon={<Package size={20} />}
           iconColor="green"
@@ -947,12 +968,13 @@ export function ManagerDashboardPage() {
           value={kpi.ofInProgress}
           caption={
             kpi.ofLate > 0
-              ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", { defaultValue: "en retard" })}`
+              ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", {
+                  defaultValue: "en retard",
+                })}`
               : undefined
           }
         />
 
-        {/* Rendement global */}
         <KpiCard
           icon={<TrendingUp size={20} />}
           iconColor="orange"
@@ -964,7 +986,6 @@ export function ManagerDashboardPage() {
           progressColor="green"
         />
 
-        {/* Alertes */}
         <KpiCard
           icon={<Bell size={20} />}
           iconColor={kpi.alertsCount > 0 ? "orange" : "green"}
@@ -980,9 +1001,7 @@ export function ManagerDashboardPage() {
         />
       </div>
 
-      {/* ============================================================ */}
-      {/* MAIN GRID : Chart + Machines + Alerts                        */}
-      {/* ============================================================ */}
+      {/* MAIN GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* Production Chart */}
         <Card className="lg:col-span-5">
@@ -1020,7 +1039,7 @@ export function ManagerDashboardPage() {
               >
                 <span
                   className="h-2 w-2 rounded-sm"
-                  style={{ backgroundColor: "var(--brand-orange, #f97316)" }}
+                  style={{ backgroundColor: "#f97316" }}
                 />
                 {t("dashboard.production.legendPieces", {
                   defaultValue: "Pièces terminées",
@@ -1061,6 +1080,7 @@ export function ManagerDashboardPage() {
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
+                    allowDecimals={false}
                   />
                   <Tooltip
                     contentStyle={{
@@ -1092,7 +1112,7 @@ export function ManagerDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Machines status */}
+        {/* Machines */}
         <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle size="md">
@@ -1101,13 +1121,11 @@ export function ManagerDashboardPage() {
               })}
             </CardTitle>
             <CardAction>
-              <Link
-                to="/machines"
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </Link>
+              <NavAction
+                pageKey="machines"
+                onNavigate={onNavigate}
+                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
+              />
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
@@ -1143,7 +1161,9 @@ export function ManagerDashboardPage() {
                 const hasContext =
                   m.current_project || m.current_piece || m.current_worker;
                 const showProgress =
-                  m.elapsed_minutes !== null && m.estimated_minutes !== null;
+                  m.elapsed_minutes !== null &&
+                  m.estimated_minutes !== null &&
+                  m.estimated_minutes > 0;
                 const progressPct = showProgress
                   ? Math.min(
                       100,
@@ -1246,9 +1266,7 @@ export function ManagerDashboardPage() {
             </CardTitle>
             {kpi.alertsCount > 0 && (
               <CardAction>
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-500/15 dark:text-red-300"
-                >
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-500/15 dark:text-red-300">
                   {kpi.alertsCount}
                 </span>
               </CardAction>
@@ -1292,39 +1310,53 @@ export function ManagerDashboardPage() {
                       ? "#f59e0b"
                       : "#3b82f6";
 
-                return (
-                  <li key={a.id}>
-                    <Link
-                      to={a.link}
-                      className="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--bg-muted)]"
+                const clickable = a.pageKey && onNavigate;
+                const content = (
+                  <>
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      style={{ backgroundColor: iconBg, color: iconColor }}
                     >
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                        style={{ backgroundColor: iconBg, color: iconColor }}
+                      <IconComp size={15} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="truncate text-xs font-bold"
+                        style={{ color: "var(--text-primary)" }}
                       >
-                        <IconComp size={15} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className="truncate text-xs font-bold"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          {a.title}
-                        </p>
-                        <p
-                          className="line-clamp-2 text-[11px]"
-                          style={{ color: "var(--text-tertiary)" }}
-                        >
-                          {a.message}
-                        </p>
-                      </div>
-                      <span
-                        className="shrink-0 text-[10px]"
+                        {a.title}
+                      </p>
+                      <p
+                        className="line-clamp-2 text-[11px]"
                         style={{ color: "var(--text-tertiary)" }}
                       >
-                        {timeAgo(a.created_at, i18n.language)}
-                      </span>
-                    </Link>
+                        {a.message}
+                      </p>
+                    </div>
+                    <span
+                      className="shrink-0 text-[10px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {timeAgo(a.created_at, i18n.language)}
+                    </span>
+                  </>
+                );
+
+                return (
+                  <li key={a.id}>
+                    {clickable ? (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate?.(a.pageKey!)}
+                        className="flex w-full items-start gap-3 px-5 py-2.5 text-start transition-colors hover:bg-[var(--bg-muted)]"
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      <div className="flex items-start gap-3 px-5 py-2.5">
+                        {content}
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -1333,9 +1365,7 @@ export function ManagerDashboardPage() {
         </Card>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECOND GRID : OF + Projects                                  */}
-      {/* ============================================================ */}
+      {/* SECOND GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
         {/* OF Table */}
         <Card className="lg:col-span-7">
@@ -1344,13 +1374,11 @@ export function ManagerDashboardPage() {
               {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
             </CardTitle>
             <CardAction>
-              <Link
-                to="/manufacturing_orders"
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </Link>
+              <NavAction
+                pageKey="manufacturing_orders"
+                onNavigate={onNavigate}
+                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
+              />
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
@@ -1519,13 +1547,11 @@ export function ManagerDashboardPage() {
               {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
             </CardTitle>
             <CardAction>
-              <Link
-                to="/projects"
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </Link>
+              <NavAction
+                pageKey="projects"
+                onNavigate={onNavigate}
+                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
+              />
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
@@ -1559,7 +1585,7 @@ export function ManagerDashboardPage() {
                       className="truncate text-[11px]"
                       style={{ color: "var(--text-tertiary)" }}
                     >
-                      {p.client} · <span dir="ltr">{p.deadline}</span>
+                      {p.client}
                     </p>
                     <div className="mt-1.5">
                       <ProgressBar value={p.progress} size="xs" />
