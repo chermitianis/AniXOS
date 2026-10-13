@@ -156,8 +156,6 @@ export function ManagerDashboardPage() {
     }
 
     try {
-      const today = localDateStr(new Date());
-
       // ===== Step 1 — Parallel base fetches =====
       const [
         { data: openShifts },
@@ -189,14 +187,8 @@ export function ManagerDashboardPage() {
           .select("id, code, name, machine_type, current_status")
           .eq("company_id", companyId)
           .eq("is_active", true),
-        supabase
-          .from("task_types")
-          .select("id, name")
-          .eq("company_id", companyId),
-        supabase
-          .from("stop_reasons")
-          .select("id, name")
-          .eq("company_id", companyId),
+        supabase.from("task_types").select("id, name").eq("company_id", companyId),
+        supabase.from("stop_reasons").select("id, name").eq("company_id", companyId),
       ]);
 
       // ===== Step 2 — Current piece per open shift =====
@@ -235,12 +227,15 @@ export function ManagerDashboardPage() {
         projectIds.length > 0
           ? supabase.from("projects").select("id, name, code").in("id", projectIds)
           : { data: [] },
+        // ⚠️ Pas de filtre planned_date — on prend le planning le plus récent,
+        // peu importe la date (le worker peut travailler sur une pièce planifiée hier).
         pieceIds.length > 0
           ? supabase
               .from("planning")
               .select("piece_task_id, worker_id, machine_id, planned_date")
               .in("piece_task_id", pieceIds)
-              .eq("planned_date", today)
+              .not("machine_id", "is", null)
+              .order("planned_date", { ascending: false })
           : { data: [] },
       ]);
 
@@ -264,11 +259,14 @@ export function ManagerDashboardPage() {
         ((allMachinesData ?? []) as any[]).map((m) => [m.id, m]),
       );
 
+      // planning key = worker::piece — garde le premier (le plus récent après ORDER DESC)
       const planningByKey = new Map<string, any>();
       for (const p of (planningsRes.data ?? []) as any[]) {
-        planningByKey.set(`${p.piece_task_id}::${p.worker_id}`, p);
+        const key = `${p.worker_id}::${p.piece_task_id}`;
+        if (!planningByKey.has(key)) planningByKey.set(key, p);
       }
 
+      // sessions key = worker::piece — première session active
       const sessionByKey = new Map<string, any>();
       for (const s of (allActiveSessions ?? []) as any[]) {
         if (!s.piece_task_id) continue;
@@ -286,17 +284,21 @@ export function ManagerDashboardPage() {
       const seenMachineIds = new Set<string>();
 
       for (const pw of currentPieces as any[]) {
-        const plan = planningByKey.get(`${pw.piece_task_id}::${pw.worker_id}`);
-        if (!plan || !plan.machine_id) continue;
-        if (seenMachineIds.has(plan.machine_id)) continue;
+        const key = `${pw.worker_id}::${pw.piece_task_id}`;
+        const plan = planningByKey.get(key);
+        const session = sessionByKey.get(key);
 
-        const machine = machineById.get(plan.machine_id);
+        // Résolution du machine_id : session en priorité, sinon planning
+        const machineId = session?.machine_id ?? plan?.machine_id ?? null;
+        if (!machineId) continue;
+        if (seenMachineIds.has(machineId)) continue;
+
+        const machine = machineById.get(machineId);
         if (!machine) continue;
 
         const piece = pieceById.get(pw.piece_task_id);
         const project = pw.project_id ? projectById.get(pw.project_id) : null;
         const worker = workerById.get(pw.worker_id);
-        const session = sessionByKey.get(`${pw.worker_id}::${pw.piece_task_id}`);
 
         let activity: string | null = null;
         let sessionKind: SessionKind = "none";
@@ -339,7 +341,7 @@ export function ManagerDashboardPage() {
                 : "idle",
           progress,
         });
-        seenMachineIds.add(machine.id);
+        seenMachineIds.add(machineId);
       }
 
       const machinesRunning = activeRows.length;
@@ -367,7 +369,7 @@ export function ManagerDashboardPage() {
         (ofData ?? []).filter((o: any) => o.status === "in_progress").length;
       const ofNew = (ofData ?? []).filter((o: any) => o.status === "ready").length;
 
-      // ===== Step 8 — Production chart (7 days) =====
+      // ===== Step 8 — Production chart =====
       const todayDate = new Date();
       const days: Date[] = [];
       for (let i = 6; i >= 0; i--) {
@@ -539,7 +541,7 @@ export function ManagerDashboardPage() {
   }, [load]);
 
   // --------------------------------------------------------------------------
-  // Live updates — écoute work_shifts + shift_piece_work + autres tables
+  // Live updates
   // --------------------------------------------------------------------------
   useEffect(() => {
     const companyId = staffUser?.company_id;
@@ -632,7 +634,9 @@ export function ManagerDashboardPage() {
             {t("nav.dashboard", { defaultValue: "Tableau de bord" })}
           </h1>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            {t("dashboard.subtitle", { defaultValue: "Vue d'ensemble de votre production" })}
+            {t("dashboard.subtitle", {
+              defaultValue: "Vue d'ensemble de votre production",
+            })}
           </p>
         </div>
         <div
@@ -827,7 +831,7 @@ export function ManagerDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Machine status — NEW : context affiché */}
+        {/* Machine status */}
         <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle size="md">
@@ -855,9 +859,7 @@ export function ManagerDashboardPage() {
                     : m.status === "warning"
                       ? m.activity ||
                         t("dashboard.machines.warning", { defaultValue: "En alerte" })
-                      : t("dashboard.machines.noActivity", {
-                          defaultValue: "Aucun",
-                        });
+                      : t("dashboard.machines.noActivity", { defaultValue: "Aucun" });
 
                 return (
                   <li
