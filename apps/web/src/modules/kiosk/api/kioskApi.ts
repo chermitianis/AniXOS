@@ -9,6 +9,9 @@
 //   - fetchWorkerPlanningQueue: tri par sequence_order.
 //   - fetchAllProjectsForWorker / searchPiecesInCompany / createEmergencyPieceTask.
 //   - fetchDayPlanningForKiosk: vue planning complète (jour) pour le Kiosk.
+//
+// إضافة 2026-10-14 :
+//   - extendWorkerShift: l'opérateur confirme qu'il continue après 8h.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -309,6 +312,30 @@ export async function endWorkerShift(shiftId: string, workerId: string): Promise
   }
   await enqueueSync("work_shifts", "update", closedShift as unknown as Record<string, unknown>);
   await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion (hors ligne)");
+}
+
+/**
+ * ✅ NEW (2026-10-14) — L'opérateur confirme qu'il continue de travailler
+ * au-delà de la durée standard de son shift. Met à jour `work_shifts.extended_at`
+ * (online ou enqueue offline). Une fois posé, le shift ne sera plus listé
+ * comme "suspect" dans le bandeau de Suivi OF.
+ */
+export async function extendWorkerShift(shiftId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  if (connectivityMonitor.getStatus()) {
+    const { error } = await supabase
+      .from("work_shifts")
+      .update({ extended_at: now })
+      .eq("id", shiftId)
+      .is("ended_at", null);
+    if (!error) return;
+  }
+
+  await enqueueSync("work_shifts", "update", {
+    id: shiftId,
+    extended_at: now,
+  } as unknown as Record<string, unknown>);
 }
 
 export async function fetchOpenShiftForWorker(workerId: string): Promise<WorkShift | null> {
@@ -1330,7 +1357,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
   if (!companyId) return [];
   if (!connectivityMonitor.getStatus()) return [];
 
-  // 1. Planning + joins
   const { data, error } = await supabase
     .from("planning")
     .select(
@@ -1353,7 +1379,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     return [];
   }
 
-  // 2. Cell workers pour la même date
   const { data: cwData } = await supabase
     .from("planning_cell_workers")
     .select("machine_id, shift_number, worker_id")
@@ -1372,7 +1397,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     cellWorkerIds.add(cw.worker_id);
   }
 
-  // 3. Noms des cell workers
   const workersMap = new Map<string, string>();
   for (const r of data as unknown as Array<{ workers: { id?: string; full_name?: string } | null }>) {
     if (r.workers?.id && r.workers.full_name) {
@@ -1390,7 +1414,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     }
   }
 
-  // 4. Opérations de chiffrage pour toutes les pièces du jour
   const pieceIds = Array.from(
     new Set(
       (data as unknown as Array<{ piece_task_id: string | null }>)
@@ -1419,7 +1442,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     }
   }
 
-  // 5. Construire les cartes
   const rows = data as unknown as Array<{
     id: string;
     machine_id: string | null;
