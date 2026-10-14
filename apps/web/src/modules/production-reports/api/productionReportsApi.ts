@@ -11,6 +11,9 @@
 //   - getPieceOperations renvoie désormais actual_seconds / actual_cost /
 //     actual_hourly_rate par opération, agrégés depuis work_sessions via
 //     of_work_packages (interface_type).
+//   - listCompletedPieces inclut désormais les pièces "partially_done" (une
+//     seule WP terminée) en plus des "completed" — permet au manager de voir
+//     les pièces dont une seule interface a été achevée.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -33,6 +36,7 @@ export interface PieceReportHeader {
   project_name: string;
   project_code: string | null;
   client_name: string | null;
+  /** "completed" | "partially_done" */
   production_status: string;
   completed_at: string | null;
   estimated_seconds: number;
@@ -62,7 +66,7 @@ export interface PieceOpRow {
   hourly_rate: number;
   interface_type: "cnc" | "classique";
   estimated_subtotal: number;
-  // ✨ NEW — Mesures réelles
+  // ✨ Mesures réelles
   /** Temps réel cumulé (production uniquement, non voided). */
   actual_seconds: number;
   /** Coût réel = Σ (durée × worker.hourly_cost). */
@@ -129,7 +133,7 @@ async function loadShiftHours(companyId: string): Promise<number> {
 }
 
 // ----------------------------------------------------------------------------
-// PIÈCES TERMINÉES
+// PIÈCES AVEC RAPPORT (completed + partially_done)
 // ----------------------------------------------------------------------------
 export async function listCompletedPieces(
   companyId: string,
@@ -137,12 +141,13 @@ export async function listCompletedPieces(
   const { data, error } = await supabase
     .from("pieces_tasks")
     .select(
-      "id, name, code, quantity, material, project_id, completed_at, " +
+      "id, name, code, quantity, material, project_id, completed_at, updated_at, production_status, " +
         "projects(id, name, code, client_id, clients(name))",
     )
     .eq("company_id", companyId)
-    .eq("production_status", "completed")
-    .order("completed_at", { ascending: false });
+    .in("production_status", ["completed", "partially_done"])
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false });
   if (error) throw error;
 
   const rows = (data ?? []) as Array<{
@@ -153,6 +158,8 @@ export async function listCompletedPieces(
     material: string | null;
     project_id: string;
     completed_at: string | null;
+    updated_at: string | null;
+    production_status: string;
     projects: {
       id: string;
       name: string;
@@ -220,7 +227,7 @@ export async function listCompletedPieces(
       project_name: r.projects?.name ?? "—",
       project_code: r.projects?.code ?? null,
       client_name: r.projects?.clients?.name ?? null,
-      production_status: "completed",
+      production_status: r.production_status,
       completed_at: r.completed_at,
       estimated_seconds: estimated.seconds,
       actual_seconds: actual.seconds,
@@ -549,8 +556,15 @@ export async function listDailyShifts(
 
   if (shiftIds.length > 0) {
     const [{ data: spwData }, { data: wsData }] = await Promise.all([
-      supabase.from("shift_piece_work").select("shift_id, piece_task_id").in("shift_id", shiftIds),
-      supabase.from("work_sessions").select("shift_id").in("shift_id", shiftIds).is("voided_at", null),
+      supabase
+        .from("shift_piece_work")
+        .select("shift_id, piece_task_id")
+        .in("shift_id", shiftIds),
+      supabase
+        .from("work_sessions")
+        .select("shift_id")
+        .in("shift_id", shiftIds)
+        .is("voided_at", null),
     ]);
     for (const r of (spwData ?? []) as { shift_id: string; piece_task_id: string }[]) {
       const set = piecesByShift.get(r.shift_id) ?? new Set();
