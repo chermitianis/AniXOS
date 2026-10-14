@@ -122,6 +122,53 @@ html.dark {
   }
 
   /* ══════════════════════════════════════════════════════════════════════
+     FALLBACK ULTRA-ROBUSTE — cible par attribut class (partiel)
+     Tailwind v4 peut générer des variantes avec opacité sous plusieurs
+     formes (escape \/50, color-mix, --tw-bg-opacity…). Ces selectors
+     utilisent [class*=""] pour matcher toutes les variantes possibles.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  /* Toute classe contenant "bg-slate-50/" ou "bg-slate-100/" avec un slash */
+  [class*="bg-slate-50/"],
+  [class*="bg-slate-100/"],
+  [class*="bg-slate-200/"],
+  [class*="bg-gray-50/"],
+  [class*="bg-gray-100/"],
+  [class*="bg-gray-200/"],
+  [class*="bg-zinc-50/"],
+  [class*="bg-zinc-100/"],
+  [class*="bg-neutral-50/"],
+  [class*="bg-neutral-100/"],
+  [class*="bg-stone-50/"],
+  [class*="bg-stone-100/"] {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  /* bg-white/* avec slash */
+  [class*="bg-white/"] {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+  }
+
+  /* Section headers : div avec border-t + fond subtil */
+  div[class*="border-t"][class*="bg-slate-"],
+  div[class*="border-t"][class*="bg-gray-"],
+  div[class*="border-t"][class*="bg-white"] {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  /* Fallback supplémentaire : div avec border-t et padding standard */
+  div[class*="border-t"][class*="p-4"][class*="bg-"] {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  /* Titres en majuscules → contraste renforcé */
+  h1[class*="uppercase"], h2[class*="uppercase"],
+  h3[class*="uppercase"], h4[class*="uppercase"],
+  h5[class*="uppercase"], h6[class*="uppercase"] {
+    color: var(--text-tertiary) !important;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
      FONDS COLORÉS (versions pastel → tint subtil sur fond sombre)
      ══════════════════════════════════════════════════════════════════════ */
   .bg-red-50      { background-color: rgba(239, 68, 68, 0.08) !important; }
