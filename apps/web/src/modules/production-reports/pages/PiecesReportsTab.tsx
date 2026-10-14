@@ -60,15 +60,6 @@ export function PiecesReportsTab() {
     return `${h}h ${String(m).padStart(2, "0")}`;
   }
 
-  function fmtHoursFromSeconds(s: number): string {
-    if (s <= 0) return "0.00h";
-    return `${(s / 3600).toFixed(2)}h`;
-  }
-
-  function fmtMoney(n: number): string {
-    return n.toFixed(2);
-  }
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20 text-slate-400">
@@ -145,7 +136,7 @@ export function PiecesReportsTab() {
                     }`}
                   >
                     {isOver ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                    {isOver ? "+" : ""}
+                    {isOver ? "+" : "−"}
                     {fmtSec(Math.abs(variance))}
                   </div>
                   <div className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
@@ -218,27 +209,37 @@ export function PiecesReportsTab() {
                   <h3 className="mt-4 mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                     {t("productionReports.pieces.operations")}
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {(ops[p.piece_task_id] ?? []).map((op) => {
                       const estCost = op.estimated_hours * op.hourly_rate;
                       const actualHours = op.actual_seconds / 3600;
                       const hasActual = op.actual_seconds > 0;
-                      const hoursEcart = actualHours - op.estimated_hours;
-                      const costEcart = op.actual_cost - estCost;
-                      const costOver = costEcart > 0;
+
+                      // Écart = estimé − réel. Positif = économie (vert),
+                      // négatif = dépassement (rouge).
+                      const hoursEcart = op.estimated_hours - actualHours;
+                      const costEcart = estCost - op.actual_cost;
+
+                      const isSaving = costEcart >= 0;
+                      const ecartClass = isSaving
+                        ? "text-green-600"
+                        : "text-red-600";
+                      const ecartBg = isSaving ? "bg-green-50" : "bg-red-50";
+
+                      const sign = (n: number) => (n >= 0 ? "+" : "−");
 
                       return (
                         <div
                           key={op.operation_id}
-                          className="rounded-lg border border-slate-200 bg-white p-3"
+                          className="rounded-lg border border-slate-200 bg-white p-4"
                         >
-                          {/* Header ligne : étape + interface */}
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-slate-700">
+                          {/* Header : étape + interface */}
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <span className="text-sm font-bold text-slate-800">
                               {op.label ?? op.stage}
                             </span>
                             <span
-                              className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                 op.interface_type === "cnc"
                                   ? "bg-amber-100 text-amber-800"
                                   : "bg-blue-100 text-blue-700"
@@ -248,99 +249,121 @@ export function PiecesReportsTab() {
                             </span>
                           </div>
 
-                          {/* 3 lignes : Estimé, Réel, Écart */}
-                          <div className="space-y-1 text-[11px]">
+                          {/* Grille 12 colonnes : Label | Durée | × | Taux | = | Montant */}
+                          <div className="space-y-2 text-xs">
                             {/* Estimé */}
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                            <div className="grid grid-cols-12 items-center gap-2">
+                              <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
                                 {t("productionReports.pieces.opEstimatedShort", {
                                   defaultValue: "Estimé",
                                 })}
-                              </span>
-                              <div className="flex flex-1 items-center justify-end gap-3 font-mono text-slate-600" dir="ltr">
-                                <span className="w-16 text-end">
-                                  {op.estimated_hours.toFixed(2)}h
-                                </span>
-                                <span className="w-4 text-center text-slate-400">×</span>
-                                <span className="w-16 text-end">
-                                  {op.hourly_rate.toFixed(2)}
-                                </span>
-                                <span className="w-4 text-center text-slate-400">=</span>
-                                <span className="w-20 text-end font-bold text-slate-700">
-                                  {fmtMoney(estCost)}
-                                </span>
+                              </div>
+                              <div
+                                className="col-span-2 text-end font-mono font-semibold text-slate-700"
+                                dir="ltr"
+                              >
+                                {op.estimated_hours.toFixed(2)}h
+                              </div>
+                              <div className="col-span-1 text-center text-slate-400">×</div>
+                              <div
+                                className="col-span-2 text-end font-mono font-semibold text-slate-700"
+                                dir="ltr"
+                              >
+                                {op.hourly_rate.toFixed(2)}
+                              </div>
+                              <div className="col-span-1 text-center text-slate-400">=</div>
+                              <div
+                                className="col-span-3 text-end font-mono font-bold text-slate-800"
+                                dir="ltr"
+                              >
+                                {estCost.toFixed(2)}
                               </div>
                             </div>
 
                             {/* Réel */}
                             {hasActual ? (
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                              <div className="grid grid-cols-12 items-center gap-2">
+                                <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
                                   {t("productionReports.pieces.opActualShort", {
                                     defaultValue: "Réel",
                                   })}
-                                </span>
-                                <div className="flex flex-1 items-center justify-end gap-3 font-mono text-slate-600" dir="ltr">
-                                  <span className="w-16 text-end">
-                                    {actualHours.toFixed(2)}h
-                                  </span>
-                                  <span className="w-4 text-center text-slate-400">×</span>
-                                  <span className="w-16 text-end">
-                                    {op.actual_hourly_rate != null
-                                      ? op.actual_hourly_rate.toFixed(2)
-                                      : "—"}
-                                  </span>
-                                  <span className="w-4 text-center text-slate-400">=</span>
-                                  <span className="w-20 text-end font-bold text-slate-700">
-                                    {fmtMoney(op.actual_cost)}
-                                  </span>
+                                </div>
+                                <div
+                                  className="col-span-2 text-end font-mono font-semibold text-slate-700"
+                                  dir="ltr"
+                                >
+                                  {actualHours.toFixed(2)}h
+                                </div>
+                                <div className="col-span-1 text-center text-slate-400">×</div>
+                                <div
+                                  className="col-span-2 text-end font-mono font-semibold text-slate-700"
+                                  dir="ltr"
+                                >
+                                  {op.actual_hourly_rate != null
+                                    ? op.actual_hourly_rate.toFixed(2)
+                                    : "0.00"}
+                                </div>
+                                <div className="col-span-1 text-center text-slate-400">=</div>
+                                <div
+                                  className="col-span-3 text-end font-mono font-bold text-slate-800"
+                                  dir="ltr"
+                                >
+                                  {op.actual_cost.toFixed(2)}
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                              <div className="grid grid-cols-12 items-center gap-2">
+                                <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
                                   {t("productionReports.pieces.opActualShort", {
                                     defaultValue: "Réel",
                                   })}
-                                </span>
-                                <span className="text-slate-400">—</span>
+                                </div>
+                                <div className="col-span-9 text-end text-slate-400">—</div>
                               </div>
                             )}
 
                             {/* Écart */}
                             {hasActual ? (
                               <div
-                                className={`flex items-center justify-between gap-2 border-t border-slate-100 pt-1 ${
-                                  costOver ? "text-red-600" : "text-green-600"
-                                }`}
+                                className={`grid grid-cols-12 items-center gap-2 rounded-md ${ecartBg} px-2 py-1.5 -mx-2`}
                               >
-                                <span className="w-14 font-semibold uppercase tracking-wide">
+                                <div
+                                  className={`col-span-3 font-bold uppercase tracking-wide ${ecartClass}`}
+                                >
                                   {t("productionReports.pieces.opEcartShort", {
                                     defaultValue: "Écart",
                                   })}
-                                </span>
-                                <div className="flex flex-1 items-center justify-end gap-3 font-mono" dir="ltr">
-                                  <span className="w-16 text-end">
-                                    {hoursEcart >= 0 ? "+" : ""}
-                                    {hoursEcart.toFixed(2)}h
-                                  </span>
-                                  <span className="w-4" />
-                                  <span className="w-16" />
-                                  <span className="w-4 text-center">=</span>
-                                  <span className="w-20 text-end font-bold">
-                                    {costEcart >= 0 ? "+" : ""}
-                                    {fmtMoney(costEcart)}
-                                  </span>
+                                </div>
+                                <div
+                                  className={`col-span-2 text-end font-mono font-bold ${ecartClass}`}
+                                  dir="ltr"
+                                >
+                                  {sign(hoursEcart)}
+                                  {Math.abs(hoursEcart).toFixed(2)}h
+                                </div>
+                                <div className="col-span-1 text-center" />
+                                <div className="col-span-2 text-center" />
+                                <div
+                                  className={`col-span-1 text-center font-bold ${ecartClass}`}
+                                >
+                                  =
+                                </div>
+                                <div
+                                  className={`col-span-3 text-end font-mono font-bold ${ecartClass}`}
+                                  dir="ltr"
+                                >
+                                  {sign(costEcart)}
+                                  {Math.abs(costEcart).toFixed(2)}
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-1">
-                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                              <div className="grid grid-cols-12 items-center gap-2">
+                                <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
                                   {t("productionReports.pieces.opEcartShort", {
                                     defaultValue: "Écart",
                                   })}
-                                </span>
-                                <span className="text-slate-400">—</span>
+                                </div>
+                                <div className="col-span-9 text-end text-slate-400">—</div>
                               </div>
                             )}
                           </div>
