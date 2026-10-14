@@ -14,6 +14,7 @@ import {
   Wrench,
   Bell,
   Timer,
+  ArrowLeft,
 } from "lucide-react";
 import {
   Bar,
@@ -42,7 +43,22 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
-type MachineDisplayStatus = "running" | "warning" | "occupied" | "idle" | "maintenance";
+type MachineDisplayStatus =
+  | "running"
+  | "warning"
+  | "occupied"
+  | "idle"
+  | "maintenance";
+
+type SessionKind = "production" | "downtime" | "none";
+
+type DashboardView =
+  | "home"
+  | "machines"
+  | "operators"
+  | "of"
+  | "projects"
+  | "alerts";
 
 interface MachineRow {
   id: string;
@@ -58,6 +74,20 @@ interface MachineRow {
   estimated_minutes: number | null;
 }
 
+interface WorkerDetailRow {
+  id: string;
+  full_name: string;
+  current_machine_code: string | null;
+  current_machine_name: string | null;
+  current_project: string | null;
+  current_piece: string | null;
+  session_kind: SessionKind;
+  activity: string | null;
+  session_started_at: string | null;
+  elapsed_minutes: number | null;
+  shift_started_at: string;
+}
+
 interface AlertItem {
   id: string;
   kind: "reclamation" | "of_late" | "session_suspect" | "maintenance";
@@ -65,7 +95,6 @@ interface AlertItem {
   title: string;
   message: string;
   created_at: string;
-  /** Si défini → l'alerte est cliquable et navigue vers cette page. */
   pageKey?: string;
 }
 
@@ -82,7 +111,6 @@ interface OfRow {
   product: string;
   quantity: number;
   progress: number;
-  /** Work packages : mesure de progression réelle. Attendu = 2 (cnc + classique). */
   wps_done: number;
   wps_total: number;
   status: "done" | "in_progress" | "late" | "partial" | "pending";
@@ -110,16 +138,6 @@ interface KpiData {
   workersTotal: number;
   globalEfficiency: number;
   alertsCount: number;
-}
-
-interface ManagerDashboardPageProps {
-  /**
-   * Navigation callback fourni par AdminHomePage.
-   * Si absent, les boutons "Voir tout" sont affichés en texte inactif.
-   * Clés attendues (voir navTree.ts) : "machines", "manufacturing_orders",
-   * "projects", "production_reports", …
-   */
-  onNavigate?: (pageKey: string) => void;
 }
 
 // ============================================================================
@@ -150,49 +168,108 @@ function daysBetween(fromIso: string, toDate: Date): number {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 }
 
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m}`;
+}
+
 // ============================================================================
-// Small UI helper — "Voir tout" button
+// Small UI components
 // ============================================================================
-function NavAction({
-  pageKey,
-  onNavigate,
-  label,
+function BackHeader({
+  title,
+  subtitle,
+  onBack,
+  badge,
+  dateStr,
+  timeStr,
 }: {
-  pageKey: string;
-  onNavigate?: (k: string) => void;
-  label: string;
+  title: string;
+  subtitle: string;
+  onBack: () => void;
+  badge?: string | number;
+  dateStr: string;
+  timeStr: string;
 }) {
-  if (!onNavigate) {
-    return (
-      <span
-        className="text-xs font-semibold"
-        style={{ color: "var(--text-tertiary)" }}
-      >
-        {label}
-      </span>
-    );
-  }
   return (
-    <button
-      type="button"
-      onClick={() => onNavigate(pageKey)}
-      className="text-xs font-semibold hover:underline"
-      style={{ color: "var(--accent-blue)" }}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-[var(--bg-muted)]"
+          style={{ borderColor: "var(--border-subtle)" }}
+          aria-label="Back"
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1
+              className="truncate text-xl font-black tracking-tight md:text-2xl"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {title}
+            </h1>
+            {badge !== undefined && badge !== "" && (
+              <span
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold"
+                style={{
+                  backgroundColor: "var(--bg-muted)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {badge}
+              </span>
+            )}
+          </div>
+          <p className="truncate text-sm" style={{ color: "var(--text-secondary)" }}>
+            {subtitle}
+          </p>
+        </div>
+      </div>
+      <div
+        className="flex items-center gap-4 text-sm"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <Calendar size={14} />
+          {dateStr}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <Clock size={14} />
+          {timeStr}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div
+      className="rounded-xl border border-dashed p-10 text-center text-sm"
+      style={{
+        backgroundColor: "var(--bg-card)",
+        borderColor: "var(--border-strong)",
+        color: "var(--text-tertiary)",
+      }}
     >
       {label}
-    </button>
+    </div>
   );
 }
 
 // ============================================================================
 // Component
 // ============================================================================
-export function ManagerDashboardPage({
-  onNavigate,
-}: ManagerDashboardPageProps = {}) {
+export function ManagerDashboardPage() {
   const { t, i18n } = useTranslation();
   const { staffUser } = useStaffAuth();
 
+  const [view, setView] = useState<DashboardView>("home");
   const [isLoading, setIsLoading] = useState(true);
   const [kpi, setKpi] = useState<KpiData>({
     machinesRunning: 0,
@@ -207,6 +284,7 @@ export function ManagerDashboardPage({
     alertsCount: 0,
   });
   const [machines, setMachines] = useState<MachineRow[]>([]);
+  const [workersDetail, setWorkersDetail] = useState<WorkerDetailRow[]>([]);
   const [production, setProduction] = useState<ProductionPoint[]>([]);
   const [ofRows, setOfRows] = useState<OfRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -364,7 +442,7 @@ export function ManagerDashboardPage({
         (m: any) => m.current_status !== "maintenance",
       ).length;
 
-      // ===== Step 6 — Build machine rows (ALL active machines) =====
+      // ===== Step 6 — Build machine rows =====
       const machineRowsMap = new Map<string, MachineRow>();
 
       for (const m of (allMachinesData ?? []) as any[]) {
@@ -394,7 +472,7 @@ export function ManagerDashboardPage({
 
         const machineRow = machineRowsMap.get(machineId);
         if (!machineRow) continue;
-        if (session) continue; // handled in next loop
+        if (session) continue;
 
         const piece = pieceById.get(pw.piece_task_id);
         const project = pw.project_id ? projectById.get(pw.project_id) : null;
@@ -410,7 +488,7 @@ export function ManagerDashboardPage({
           piece?.estimated_time_minutes ?? piece?.estimated_minutes ?? null;
       }
 
-      // Enrich with active sessions (highest priority)
+      // Enrich with active sessions
       for (const s of (allActiveSessions ?? []) as any[]) {
         if (!s.machine_id) continue;
         const machineRow = machineRowsMap.get(s.machine_id);
@@ -464,7 +542,73 @@ export function ManagerDashboardPage({
 
       setMachines(machineRows);
 
-      // ===== Step 7 — OF aggregation (via work packages) =====
+      // ===== Step 6b — Build workers detail rows =====
+      const workersRows: WorkerDetailRow[] = [];
+      for (const shift of (openShifts ?? []) as any[]) {
+        const worker = workerById.get(shift.worker_id);
+        if (!worker) continue;
+
+        const pw = pieceWorkByWorker.get(shift.worker_id);
+        const plan = pw
+          ? planningByKey.get(`${pw.worker_id}::${pw.piece_task_id}`)
+          : null;
+        const session = pw
+          ? sessionByKey.get(`${pw.worker_id}::${pw.piece_task_id}`)
+          : null;
+
+        const machineId = session?.machine_id ?? plan?.machine_id ?? null;
+        const machine = machineId ? machineById.get(machineId) : null;
+        const piece = pw ? pieceById.get(pw.piece_task_id) : null;
+        const project = pw?.project_id ? projectById.get(pw.project_id) : null;
+
+        let activity: string | null = null;
+        let sessionKind: SessionKind = "none";
+        let sessionStartedAt: string | null = null;
+        let elapsedMin: number | null = null;
+
+        if (session) {
+          sessionStartedAt = session.started_at;
+          elapsedMin = Math.floor(
+            (Date.now() - new Date(session.started_at).getTime()) / 60000,
+          );
+          if (session.session_type === "production") {
+            activity = taskTypeById.get(session.task_type_id ?? "") ?? null;
+            sessionKind = "production";
+          } else if (session.session_type === "downtime") {
+            activity = stopReasonById.get(session.stop_reason_id ?? "") ?? null;
+            sessionKind = "downtime";
+          }
+        }
+
+        workersRows.push({
+          id: worker.id,
+          full_name: worker.full_name ?? "—",
+          current_machine_code: machine?.code ?? null,
+          current_machine_name: machine?.name ?? null,
+          current_project: project?.name ?? null,
+          current_piece: piece?.name ?? null,
+          session_kind: sessionKind,
+          activity,
+          session_started_at: sessionStartedAt,
+          elapsed_minutes: elapsedMin,
+          shift_started_at: shift.started_at,
+        });
+      }
+
+      workersRows.sort((a, b) => {
+        const kindOrder: Record<SessionKind, number> = {
+          production: 0,
+          downtime: 1,
+          none: 2,
+        };
+        const so = kindOrder[a.session_kind] - kindOrder[b.session_kind];
+        if (so !== 0) return so;
+        return a.full_name.localeCompare(b.full_name);
+      });
+
+      setWorkersDetail(workersRows);
+
+      // ===== Step 7 — OF aggregation via WPs =====
       const { data: ofData } = await supabase
         .from("manufacturing_orders")
         .select(
@@ -476,7 +620,6 @@ export function ManagerDashboardPage({
       const allOfs = (ofData ?? []) as any[];
       const allOfIds = allOfs.map((o) => o.id);
 
-      // Work packages — la vraie métrique de progression (attendu : 2 par OF)
       const { data: wpsAllData } =
         allOfIds.length > 0
           ? await supabase
@@ -494,7 +637,6 @@ export function ManagerDashboardPage({
         wpsByOf.set(wp.manufacturing_order_id, entry);
       }
 
-      // Pièces → pour relier les sessions actives aux OFs
       const { data: ofPiecesData } =
         allOfIds.length > 0
           ? await supabase
@@ -580,9 +722,9 @@ export function ManagerDashboardPage({
             : a.days_left - b.days_left;
       });
 
-      setOfRows(ofList.slice(0, 8));
+      setOfRows(ofList);
 
-      // ===== Step 8 — Production chart (7 days) =====
+      // ===== Step 8 — Production chart =====
       const days: Date[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
@@ -652,7 +794,7 @@ export function ManagerDashboardPage({
         .neq("is_archived", true)
         .neq("status", "completed")
         .order("created_at", { ascending: false })
-        .limit(6);
+        .limit(50);
 
       const projectIdsList = (projectsData ?? []).map((p: any) => p.id);
       const { data: projPieces } =
@@ -692,14 +834,13 @@ export function ManagerDashboardPage({
       // ===== Step 10 — Alerts =====
       const alertList: AlertItem[] = [];
 
-      // 10a. Réclamations non lues
       const { data: reclamations } = await supabase
         .from("workshop_reclamations")
         .select("id, message, status, created_at, workers(full_name), machines(name)")
         .eq("company_id", companyId)
         .is("read_at", null)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(30);
 
       for (const r of (reclamations ?? []) as any[]) {
         alertList.push({
@@ -714,8 +855,7 @@ export function ManagerDashboardPage({
         });
       }
 
-      // 10b. OF en retard
-      for (const o of ofList.filter((x) => x.status === "late").slice(0, 5)) {
+      for (const o of ofList.filter((x) => x.status === "late").slice(0, 20)) {
         alertList.push({
           id: `of-${o.id}`,
           kind: "of_late",
@@ -727,11 +867,10 @@ export function ManagerDashboardPage({
               : ""
           }`,
           created_at: new Date().toISOString(),
-          pageKey: "manufacturing_orders",
+          pageKey: "production_dashboard",
         });
       }
 
-      // 10c. Sessions suspectes (> 8h)
       for (const s of (allActiveSessions ?? []) as any[]) {
         const hoursOpen =
           (Date.now() - new Date(s.started_at).getTime()) / (1000 * 60 * 60);
@@ -745,12 +884,10 @@ export function ManagerDashboardPage({
             title: `Session suspecte · ${worker?.full_name ?? "—"}`,
             message: `${machine?.name ?? "—"} — ouverte depuis ${Math.round(hoursOpen)} h`,
             created_at: s.started_at,
-            pageKey: "production_reports",
           });
         }
       }
 
-      // 10d. Machines en maintenance
       for (const m of (allMachinesData ?? []) as any[]) {
         if (m.current_status === "maintenance") {
           alertList.push({
@@ -760,7 +897,6 @@ export function ManagerDashboardPage({
             title: `Maintenance · ${m.code}`,
             message: m.name ?? "—",
             created_at: new Date().toISOString(),
-            pageKey: "machines",
           });
         }
       }
@@ -798,17 +934,13 @@ export function ManagerDashboardPage({
     }
   }, [staffUser?.company_id, i18n.language]);
 
-  // --------------------------------------------------------------------------
   // Initial load
-  // --------------------------------------------------------------------------
   useEffect(() => {
     setIsLoading(true);
     void load();
   }, [load]);
 
-  // --------------------------------------------------------------------------
   // Live updates
-  // --------------------------------------------------------------------------
   useEffect(() => {
     const companyId = staffUser?.company_id;
     if (!companyId) return;
@@ -851,9 +983,7 @@ export function ManagerDashboardPage({
     };
   }, [staffUser?.company_id, load]);
 
-  // --------------------------------------------------------------------------
-  // Helpers (render)
-  // --------------------------------------------------------------------------
+  // Render helpers
   const today = useMemo(
     () =>
       new Date().toLocaleDateString(i18n.language, {
@@ -875,7 +1005,7 @@ export function ManagerDashboardPage({
   );
 
   // --------------------------------------------------------------------------
-  // Render
+  // Loading state
   // --------------------------------------------------------------------------
   if (isLoading) {
     return (
@@ -889,6 +1019,794 @@ export function ManagerDashboardPage({
     );
   }
 
+  // ==========================================================================
+  // DETAIL VIEWS
+  // ==========================================================================
+  const renderMachinesDetail = () => {
+    const badgeLabel = (m: MachineRow): { variant: any; label: string } => {
+      switch (m.display_status) {
+        case "running":
+          return {
+            variant: "success",
+            label:
+              m.activity ||
+              t("dashboard.machines.running", { defaultValue: "En production" }),
+          };
+        case "warning":
+          return {
+            variant: "warning",
+            label:
+              m.activity ||
+              t("dashboard.machines.warning", { defaultValue: "En arrêt" }),
+          };
+        case "maintenance":
+          return {
+            variant: "danger",
+            label: t("dashboard.machines.maintenance", { defaultValue: "Maintenance" }),
+          };
+        case "occupied":
+          return {
+            variant: "neutral",
+            label: t("dashboard.machines.occupied", { defaultValue: "Occupée" }),
+          };
+        default:
+          return {
+            variant: "neutral",
+            label: t("dashboard.machines.idle", { defaultValue: "Disponible" }),
+          };
+      }
+    };
+
+    return (
+      <div className="space-y-5">
+        <BackHeader
+          title={t("dashboard.machines.detailTitle", {
+            defaultValue: "État des machines",
+          })}
+          subtitle={t("dashboard.machines.detailSubtitle", {
+            defaultValue: "Toutes les machines actives avec leur contexte complet",
+          })}
+          onBack={() => setView("home")}
+          badge={machines.length}
+          dateStr={today}
+          timeStr={currentTime}
+        />
+
+        {machines.length === 0 ? (
+          <EmptyState
+            label={t("setup.noDataYet", { defaultValue: "Aucune machine active" })}
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {machines.map((m) => {
+              const badge = badgeLabel(m);
+              const showProgress =
+                m.elapsed_minutes !== null &&
+                m.estimated_minutes !== null &&
+                m.estimated_minutes > 0;
+              const progressPct = showProgress
+                ? Math.min(
+                    100,
+                    Math.round(
+                      (m.elapsed_minutes! / m.estimated_minutes!) * 100,
+                    ),
+                  )
+                : 0;
+
+              return (
+                <Card key={m.id}>
+                  <CardBody>
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
+                        style={{
+                          backgroundColor: "var(--bg-muted)",
+                          color: "var(--text-tertiary)",
+                        }}
+                      >
+                        <Cog size={20} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="truncate text-base font-bold"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {m.code}
+                          </span>
+                          <Badge variant={badge.variant} size="sm" dot>
+                            {badge.label}
+                          </Badge>
+                        </div>
+                        <div
+                          className="truncate text-xs"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {m.name} · {m.model}
+                        </div>
+                      </div>
+                    </div>
+
+                    {(m.current_worker ||
+                      m.current_project ||
+                      m.current_piece) && (
+                      <div
+                        className="mt-3 space-y-1 rounded-lg border p-3 text-xs"
+                        style={{ borderColor: "var(--border-subtle)" }}
+                      >
+                        {m.current_worker && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.worker", {
+                                defaultValue: "Opérateur",
+                              })}
+                            </span>
+                            <span
+                              className="font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {m.current_worker}
+                            </span>
+                          </div>
+                        )}
+                        {m.current_project && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.project", {
+                                defaultValue: "Projet",
+                              })}
+                            </span>
+                            <span
+                              className="truncate font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {m.current_project}
+                            </span>
+                          </div>
+                        )}
+                        {m.current_piece && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.piece", {
+                                defaultValue: "Pièce",
+                              })}
+                            </span>
+                            <span
+                              className="truncate font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {m.current_piece}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {showProgress && m.display_status !== "idle" && (
+                      <div className="mt-3">
+                        <div
+                          className="mb-1 flex justify-between text-[11px]"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          <span>
+                            {formatDuration(m.elapsed_minutes!)} /{" "}
+                            {formatDuration(m.estimated_minutes!)}
+                          </span>
+                          <span>{progressPct}%</span>
+                        </div>
+                        <ProgressBar
+                          value={progressPct}
+                          color={
+                            m.display_status === "warning" ? "orange" : "green"
+                          }
+                          size="xs"
+                        />
+                      </div>
+                    )}
+                  </CardBody>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderOperatorsDetail = () => {
+    const kindBadge = (k: SessionKind): { variant: any; label: string } => {
+      switch (k) {
+        case "production":
+          return {
+            variant: "success",
+            label: t("dashboard.machines.running", { defaultValue: "En production" }),
+          };
+        case "downtime":
+          return {
+            variant: "warning",
+            label: t("dashboard.machines.warning", { defaultValue: "En arrêt" }),
+          };
+        default:
+          return {
+            variant: "neutral",
+            label: t("dashboard.operators.idle", { defaultValue: "Sans activité" }),
+          };
+      }
+    };
+
+    return (
+      <div className="space-y-5">
+        <BackHeader
+          title={t("dashboard.operators.detailTitle", {
+            defaultValue: "Opérateurs",
+          })}
+          subtitle={t("dashboard.operators.detailSubtitle", {
+            defaultValue: "Tous les opérateurs actuellement connectés",
+          })}
+          onBack={() => setView("home")}
+          badge={workersDetail.length}
+          dateStr={today}
+          timeStr={currentTime}
+        />
+
+        {workersDetail.length === 0 ? (
+          <EmptyState
+            label={t("dashboard.operators.empty", {
+              defaultValue: "Aucun opérateur connecté pour le moment",
+            })}
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {workersDetail.map((w) => {
+              const badge = kindBadge(w.session_kind);
+              const initials = w.full_name
+                .split(" ")
+                .map((x) => x[0])
+                .slice(0, 2)
+                .join("")
+                .toUpperCase();
+
+              return (
+                <Card key={w.id}>
+                  <CardBody>
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
+                        style={{ backgroundColor: "var(--brand-orange)" }}
+                      >
+                        {initials}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="truncate text-base font-bold"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {w.full_name}
+                          </span>
+                          <Badge variant={badge.variant} size="sm" dot>
+                            {badge.label}
+                          </Badge>
+                        </div>
+                        {w.current_machine_code && (
+                          <div
+                            className="truncate text-xs"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            {w.current_machine_code}
+                            {w.current_machine_name
+                              ? ` · ${w.current_machine_name}`
+                              : ""}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {(w.current_project ||
+                      w.current_piece ||
+                      w.activity) && (
+                      <div
+                        className="mt-3 space-y-1 rounded-lg border p-3 text-xs"
+                        style={{ borderColor: "var(--border-subtle)" }}
+                      >
+                        {w.current_project && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.project", {
+                                defaultValue: "Projet",
+                              })}
+                            </span>
+                            <span
+                              className="truncate font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {w.current_project}
+                            </span>
+                          </div>
+                        )}
+                        {w.current_piece && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.piece", {
+                                defaultValue: "Pièce",
+                              })}
+                            </span>
+                            <span
+                              className="truncate font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {w.current_piece}
+                            </span>
+                          </div>
+                        )}
+                        {w.activity && (
+                          <div className="flex justify-between gap-2">
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              {t("dashboard.machines.activity", {
+                                defaultValue: "Activité",
+                              })}
+                            </span>
+                            <span
+                              className="truncate font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {w.activity}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div
+                      className="mt-3 flex justify-between text-[11px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {w.elapsed_minutes !== null && (
+                        <span>
+                          {t("dashboard.operators.sessionDuration", {
+                            defaultValue: "Session",
+                          })}
+                          : {formatDuration(w.elapsed_minutes)}
+                        </span>
+                      )}
+                      <span>
+                        {t("dashboard.operators.shift", { defaultValue: "Shift" })}
+                        : {timeAgo(w.shift_started_at, i18n.language)}
+                      </span>
+                    </div>
+                  </CardBody>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderOfDetail = () => {
+    return (
+      <div className="space-y-5">
+        <BackHeader
+          title={t("dashboard.of.detailTitle", {
+            defaultValue: "Ordres de fabrication",
+          })}
+          subtitle={t("dashboard.of.detailSubtitle", {
+            defaultValue: "Tous les ordres de fabrication avec leur progression réelle",
+          })}
+          onBack={() => setView("home")}
+          badge={ofRows.length}
+          dateStr={today}
+          timeStr={currentTime}
+        />
+
+        <Card>
+          <CardBody className="!px-0 !pb-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                    {[
+                      t("dashboard.of.colNumber", { defaultValue: "N° OF" }),
+                      t("dashboard.of.colProject", { defaultValue: "Projet" }),
+                      t("dashboard.of.colProduct", { defaultValue: "Produit" }),
+                      t("dashboard.of.colQty", { defaultValue: "Qté" }),
+                      t("dashboard.of.colProgress", { defaultValue: "Progression" }),
+                      t("dashboard.of.colStatus", { defaultValue: "Statut" }),
+                      t("dashboard.of.colDeadline", { defaultValue: "Échéance" }),
+                    ].map((label, i) => (
+                      <th
+                        key={i}
+                        className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ofRows.map((of) => {
+                    const wpIncomplete = of.wps_total < 2;
+                    return (
+                      <tr
+                        key={of.id}
+                        style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                of.status === "done"
+                                  ? "bg-blue-500"
+                                  : of.status === "late"
+                                    ? "bg-red-500"
+                                    : of.status === "in_progress"
+                                      ? "bg-emerald-500"
+                                      : of.status === "partial"
+                                        ? "bg-amber-500"
+                                        : "bg-slate-400"
+                              }`}
+                            />
+                            <span
+                              className="font-mono text-xs font-semibold"
+                              style={{ color: "var(--text-primary)" }}
+                              dir="ltr"
+                            >
+                              {of.number}
+                            </span>
+                          </div>
+                        </td>
+                        <td
+                          className="px-3 py-3 text-xs"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {of.project_name}
+                        </td>
+                        <td
+                          className="px-3 py-3 text-xs"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {of.product}
+                        </td>
+                        <td
+                          className="px-3 py-3 text-center text-xs tabular-nums"
+                          style={{ color: "var(--text-secondary)" }}
+                          dir="ltr"
+                        >
+                          {of.quantity}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex min-w-[110px] items-center gap-2">
+                            <div className="flex-1">
+                              <ProgressBar value={of.progress} size="xs" />
+                            </div>
+                            {wpIncomplete && (
+                              <span
+                                title={t("dashboard.of.wpIncompleteHint", {
+                                  defaultValue:
+                                    "Work packages incomplets (attendu : cnc + classique)",
+                                })}
+                                className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold leading-none text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                              >
+                                !
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            className="mt-0.5 block text-[10px]"
+                            style={{ color: "var(--text-tertiary)" }}
+                            dir="ltr"
+                          >
+                            {of.wps_done}/{of.wps_total}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant={
+                              of.status === "done"
+                                ? "info"
+                                : of.status === "late"
+                                  ? "danger"
+                                  : of.status === "in_progress"
+                                    ? "success"
+                                    : of.status === "partial"
+                                      ? "warning"
+                                      : "neutral"
+                            }
+                            size="sm"
+                            dot
+                          >
+                            {of.status === "done"
+                              ? t("dashboard.of.done", { defaultValue: "Terminée" })
+                              : of.status === "late"
+                                ? t("dashboard.of.late", {
+                                    defaultValue: "En retard",
+                                  })
+                                : of.status === "in_progress"
+                                  ? t("dashboard.of.inProgress", {
+                                      defaultValue: "En cours",
+                                    })
+                                  : of.status === "partial"
+                                    ? t("dashboard.of.partial", {
+                                        defaultValue: "Partiel",
+                                      })
+                                    : t("dashboard.of.pending", {
+                                        defaultValue: "En attente",
+                                      })}
+                          </Badge>
+                        </td>
+                        <td
+                          className="px-4 py-3 text-xs"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          <span dir="ltr">{of.deadline}</span>
+                          {of.days_left !== null && of.status !== "done" && (
+                            <span
+                              className="mt-0.5 block text-[10px]"
+                              style={{
+                                color:
+                                  of.days_left < 0
+                                    ? "#ef4444"
+                                    : of.days_left <= 2
+                                      ? "#f59e0b"
+                                      : "var(--text-tertiary)",
+                              }}
+                              dir="ltr"
+                            >
+                              {of.days_left < 0
+                                ? `${Math.abs(of.days_left)} j`
+                                : `${of.days_left} j`}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {ofRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-5 py-6 text-center text-xs"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {t("setup.noDataYet", {
+                          defaultValue: "Aucun ordre de fabrication",
+                        })}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  };
+
+  const renderProjectsDetail = () => {
+    return (
+      <div className="space-y-5">
+        <BackHeader
+          title={t("dashboard.projects.detailTitle", {
+            defaultValue: "Projets en cours",
+          })}
+          subtitle={t("dashboard.projects.detailSubtitle", {
+            defaultValue: "Tous les projets actifs avec leur avancement",
+          })}
+          onBack={() => setView("home")}
+          badge={projects.length}
+          dateStr={today}
+          timeStr={currentTime}
+        />
+
+        {projects.length === 0 ? (
+          <EmptyState
+            label={t("setup.noDataYet", { defaultValue: "Aucun projet en cours" })}
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {projects.map((p) => (
+              <Card key={p.id}>
+                <CardBody>
+                  <div className="flex items-start gap-3">
+                    <div
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
+                      style={{
+                        backgroundColor: "var(--bg-muted)",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      <Package size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate text-base font-bold"
+                        style={{ color: "var(--text-primary)" }}
+                      >
+                        {p.name}
+                      </div>
+                      <div
+                        className="truncate text-xs"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {p.client}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div
+                      className="mb-1 flex justify-between text-[11px]"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      <span>
+                        {p.piecesDone}/{p.piecesTotal}{" "}
+                        {t("dashboard.projects.piecesShort", {
+                          defaultValue: "pièces",
+                        })}
+                      </span>
+                      <span className="font-bold">{p.progress}%</span>
+                    </div>
+                    <ProgressBar value={p.progress} size="sm" />
+                  </div>
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAlertsDetail = () => {
+    const grouped = {
+      danger: alerts.filter((a) => a.severity === "danger"),
+      warning: alerts.filter((a) => a.severity === "warning"),
+      info: alerts.filter((a) => a.severity === "info"),
+    };
+
+    const renderGroup = (
+      items: AlertItem[],
+      titleKey: string,
+      defaultTitle: string,
+      color: string,
+      bg: string,
+    ) => {
+      if (items.length === 0) return null;
+      return (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold"
+                style={{ backgroundColor: bg, color }}
+              >
+                {items.length}
+              </span>
+              <CardTitle size="md">
+                {t(titleKey, { defaultValue: defaultTitle })}
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardBody className="!px-0 !pb-2">
+            <ul>
+              {items.map((a, idx) => {
+                const IconComp =
+                  a.kind === "reclamation"
+                    ? Bell
+                    : a.kind === "of_late"
+                      ? AlertCircle
+                      : a.kind === "session_suspect"
+                        ? Timer
+                        : a.kind === "maintenance"
+                          ? Wrench
+                          : FileText;
+                return (
+                  <li
+                    key={a.id}
+                    style={{
+                      borderTop:
+                        idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                    }}
+                  >
+                    <div className="flex items-start gap-3 px-5 py-3">
+                      <div
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: bg, color }}
+                      >
+                        <IconComp size={15} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="truncate text-sm font-bold"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          {a.title}
+                        </p>
+                        <p
+                          className="text-xs"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {a.message}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 text-[11px]"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {timeAgo(a.created_at, i18n.language)}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardBody>
+        </Card>
+      );
+    };
+
+    return (
+      <div className="space-y-5">
+        <BackHeader
+          title={t("dashboard.alerts.detailTitle", { defaultValue: "Alertes" })}
+          subtitle={t("dashboard.alerts.detailSubtitle", {
+            defaultValue: "Toutes les alertes actives, classées par gravité",
+          })}
+          onBack={() => setView("home")}
+          badge={alerts.length}
+          dateStr={today}
+          timeStr={currentTime}
+        />
+
+        {alerts.length === 0 ? (
+          <EmptyState
+            label={t("dashboard.alerts.empty", {
+              defaultValue: "Aucune alerte — tout est sous contrôle.",
+            })}
+          />
+        ) : (
+          <div className="space-y-4">
+            {renderGroup(
+              grouped.danger,
+              "dashboard.alerts.groupDanger",
+              "Critiques",
+              "#ef4444",
+              "rgba(239, 68, 68, 0.12)",
+            )}
+            {renderGroup(
+              grouped.warning,
+              "dashboard.alerts.groupWarning",
+              "Avertissements",
+              "#f59e0b",
+              "rgba(245, 158, 11, 0.12)",
+            )}
+            {renderGroup(
+              grouped.info,
+              "dashboard.alerts.groupInfo",
+              "Informations",
+              "#3b82f6",
+              "rgba(59, 130, 246, 0.12)",
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ==========================================================================
+  // ROUTE
+  // ==========================================================================
+  if (view === "machines") return renderMachinesDetail();
+  if (view === "operators") return renderOperatorsDetail();
+  if (view === "of") return renderOfDetail();
+  if (view === "projects") return renderProjectsDetail();
+  if (view === "alerts") return renderAlertsDetail();
+
+  // ==========================================================================
+  // HOME VIEW
+  // ==========================================================================
   return (
     <div className="space-y-5">
       {/* HEADER */}
@@ -923,68 +1841,74 @@ export function ManagerDashboardPage({
 
       {/* KPI ROW */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <KpiCard
-          icon={<Monitor size={20} />}
-          iconColor="blue"
-          label={t("dashboard.kpi.machinesRunning", {
-            defaultValue: "Machines en production",
-          })}
-          value={kpi.machinesRunning}
-          total={kpi.machinesAvailable}
-          progress={
-            kpi.machinesAvailable > 0
-              ? Math.round((kpi.machinesRunning / kpi.machinesAvailable) * 100)
-              : 0
-          }
-          progressColor="green"
-          caption={
-            kpi.machinesTotal > kpi.machinesAvailable
-              ? `${kpi.machinesTotal - kpi.machinesAvailable} ${t(
-                  "dashboard.kpi.inMaintenance",
-                  { defaultValue: "en maintenance" },
-                )}`
-              : undefined
-          }
-        />
+        <div onClick={() => setView("machines")} className="cursor-pointer">
+          <KpiCard
+            icon={<Monitor size={20} />}
+            iconColor="blue"
+            label={t("dashboard.kpi.machinesRunning", {
+              defaultValue: "Machines en production",
+            })}
+            value={kpi.machinesRunning}
+            total={kpi.machinesAvailable}
+            progress={
+              kpi.machinesAvailable > 0
+                ? Math.round((kpi.machinesRunning / kpi.machinesAvailable) * 100)
+                : 0
+            }
+            progressColor="green"
+            caption={
+              kpi.machinesTotal > kpi.machinesAvailable
+                ? `${kpi.machinesTotal - kpi.machinesAvailable} ${t(
+                    "dashboard.kpi.inMaintenance",
+                    { defaultValue: "en maintenance" },
+                  )}`
+                : undefined
+            }
+          />
+        </div>
 
-        <KpiCard
-          icon={<Users size={20} />}
-          iconColor="purple"
-          label={t("dashboard.kpi.workersActive", {
-            defaultValue: "Opérateurs présents",
-          })}
-          value={kpi.workersPresent}
-          total={kpi.workersTotal}
-          progress={
-            kpi.workersTotal > 0
-              ? Math.round((kpi.workersPresent / kpi.workersTotal) * 100)
-              : 0
-          }
-          progressColor="purple"
-          caption={
-            kpi.workersProductive > 0
-              ? `${kpi.workersProductive} ${t("dashboard.kpi.inProduction", {
-                  defaultValue: "en production",
-                })}`
-              : undefined
-          }
-        />
+        <div onClick={() => setView("operators")} className="cursor-pointer">
+          <KpiCard
+            icon={<Users size={20} />}
+            iconColor="purple"
+            label={t("dashboard.kpi.workersActive", {
+              defaultValue: "Opérateurs présents",
+            })}
+            value={kpi.workersPresent}
+            total={kpi.workersTotal}
+            progress={
+              kpi.workersTotal > 0
+                ? Math.round((kpi.workersPresent / kpi.workersTotal) * 100)
+                : 0
+            }
+            progressColor="purple"
+            caption={
+              kpi.workersProductive > 0
+                ? `${kpi.workersProductive} ${t("dashboard.kpi.inProduction", {
+                    defaultValue: "en production",
+                  })}`
+                : undefined
+            }
+          />
+        </div>
 
-        <KpiCard
-          icon={<Package size={20} />}
-          iconColor="green"
-          label={t("dashboard.kpi.ofInProgress", {
-            defaultValue: "Ordres de fabrication",
-          })}
-          value={kpi.ofInProgress}
-          caption={
-            kpi.ofLate > 0
-              ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", {
-                  defaultValue: "en retard",
-                })}`
-              : undefined
-          }
-        />
+        <div onClick={() => setView("of")} className="cursor-pointer">
+          <KpiCard
+            icon={<Package size={20} />}
+            iconColor="green"
+            label={t("dashboard.kpi.ofInProgress", {
+              defaultValue: "Ordres de fabrication",
+            })}
+            value={kpi.ofInProgress}
+            caption={
+              kpi.ofLate > 0
+                ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", {
+                    defaultValue: "en retard",
+                  })}`
+                : undefined
+            }
+          />
+        </div>
 
         <KpiCard
           icon={<TrendingUp size={20} />}
@@ -997,24 +1921,26 @@ export function ManagerDashboardPage({
           progressColor="green"
         />
 
-        <KpiCard
-          icon={<Bell size={20} />}
-          iconColor={kpi.alertsCount > 0 ? "orange" : "green"}
-          label={t("dashboard.kpi.alertsActive", {
-            defaultValue: "Alertes actives",
-          })}
-          value={kpi.alertsCount}
-          caption={
-            kpi.alertsCount === 0
-              ? t("dashboard.kpi.allClear", { defaultValue: "Tout est calme" })
-              : undefined
-          }
-        />
+        <div onClick={() => setView("alerts")} className="cursor-pointer">
+          <KpiCard
+            icon={<Bell size={20} />}
+            iconColor={kpi.alertsCount > 0 ? "orange" : "green"}
+            label={t("dashboard.kpi.alertsActive", {
+              defaultValue: "Alertes actives",
+            })}
+            value={kpi.alertsCount}
+            caption={
+              kpi.alertsCount === 0
+                ? t("dashboard.kpi.allClear", { defaultValue: "Tout est calme" })
+                : undefined
+            }
+          />
+        </div>
       </div>
 
       {/* MAIN GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
-        {/* Production Chart */}
+        {/* Chart */}
         <Card className="lg:col-span-5">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -1123,7 +2049,7 @@ export function ManagerDashboardPage({
           </CardBody>
         </Card>
 
-        {/* Machines */}
+        {/* Machines (compact) */}
         <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle size="md">
@@ -1132,11 +2058,14 @@ export function ManagerDashboardPage({
               })}
             </CardTitle>
             <CardAction>
-              <NavAction
-                pageKey="machines"
-                onNavigate={onNavigate}
-                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
-              />
+              <button
+                type="button"
+                onClick={() => setView("machines")}
+                className="text-xs font-semibold hover:underline"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                {t("common.viewAll", { defaultValue: "Voir tout →" })}
+              </button>
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
@@ -1269,19 +2198,24 @@ export function ManagerDashboardPage({
           </CardBody>
         </Card>
 
-        {/* Alerts */}
+        {/* Alerts (compact) */}
         <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle size="md">
               {t("dashboard.alerts.title", { defaultValue: "Alertes" })}
             </CardTitle>
-            {kpi.alertsCount > 0 && (
-              <CardAction>
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-500/15 dark:text-red-300">
-                  {kpi.alertsCount}
-                </span>
-              </CardAction>
-            )}
+            <CardAction>
+              <button
+                type="button"
+                onClick={() => setView("alerts")}
+                className="text-xs font-semibold hover:underline"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                {kpi.alertsCount > 0
+                  ? t("common.viewAll", { defaultValue: "Voir tout →" })
+                  : ""}
+              </button>
+            </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-2">
             <ul className="max-h-[340px] space-y-1 overflow-y-auto">
@@ -1295,7 +2229,7 @@ export function ManagerDashboardPage({
                   })}
                 </li>
               )}
-              {alerts.slice(0, 8).map((a) => {
+              {alerts.slice(0, 6).map((a) => {
                 const IconComp =
                   a.kind === "reclamation"
                     ? Bell
@@ -1321,53 +2255,36 @@ export function ManagerDashboardPage({
                       ? "#f59e0b"
                       : "#3b82f6";
 
-                const clickable = a.pageKey && onNavigate;
-                const content = (
-                  <>
-                    <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                      style={{ backgroundColor: iconBg, color: iconColor }}
-                    >
-                      <IconComp size={15} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p
-                        className="truncate text-xs font-bold"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {a.title}
-                      </p>
-                      <p
-                        className="line-clamp-2 text-[11px]"
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        {a.message}
-                      </p>
-                    </div>
-                    <span
-                      className="shrink-0 text-[10px]"
-                      style={{ color: "var(--text-tertiary)" }}
-                    >
-                      {timeAgo(a.created_at, i18n.language)}
-                    </span>
-                  </>
-                );
-
                 return (
                   <li key={a.id}>
-                    {clickable ? (
-                      <button
-                        type="button"
-                        onClick={() => onNavigate?.(a.pageKey!)}
-                        className="flex w-full items-start gap-3 px-5 py-2.5 text-start transition-colors hover:bg-[var(--bg-muted)]"
+                    <div className="flex items-start gap-3 px-5 py-2.5">
+                      <div
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: iconBg, color: iconColor }}
                       >
-                        {content}
-                      </button>
-                    ) : (
-                      <div className="flex items-start gap-3 px-5 py-2.5">
-                        {content}
+                        <IconComp size={15} />
                       </div>
-                    )}
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="truncate text-xs font-bold"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          {a.title}
+                        </p>
+                        <p
+                          className="line-clamp-2 text-[11px]"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {a.message}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 text-[10px]"
+                        style={{ color: "var(--text-tertiary)" }}
+                      >
+                        {timeAgo(a.created_at, i18n.language)}
+                      </span>
+                    </div>
                   </li>
                 );
               })}
@@ -1378,18 +2295,21 @@ export function ManagerDashboardPage({
 
       {/* SECOND GRID */}
       <div className="grid gap-4 lg:grid-cols-12">
-        {/* OF Table */}
+        {/* OF (compact) */}
         <Card className="lg:col-span-7">
           <CardHeader>
             <CardTitle size="md">
               {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
             </CardTitle>
             <CardAction>
-              <NavAction
-                pageKey="manufacturing_orders"
-                onNavigate={onNavigate}
-                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
-              />
+              <button
+                type="button"
+                onClick={() => setView("of")}
+                className="text-xs font-semibold hover:underline"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                {t("common.viewAll", { defaultValue: "Voir tout →" })}
+              </button>
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
@@ -1419,7 +2339,7 @@ export function ManagerDashboardPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {ofRows.map((of) => {
+                  {ofRows.slice(0, 8).map((of) => {
                     const wpIncomplete = of.wps_total < 2;
                     return (
                       <tr
@@ -1575,23 +2495,26 @@ export function ManagerDashboardPage({
           </CardBody>
         </Card>
 
-        {/* Projects */}
+        {/* Projects (compact) */}
         <Card className="lg:col-span-5">
           <CardHeader>
             <CardTitle size="md">
               {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
             </CardTitle>
             <CardAction>
-              <NavAction
-                pageKey="projects"
-                onNavigate={onNavigate}
-                label={t("common.viewAll", { defaultValue: "Voir tout →" })}
-              />
+              <button
+                type="button"
+                onClick={() => setView("projects")}
+                className="text-xs font-semibold hover:underline"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                {t("common.viewAll", { defaultValue: "Voir tout →" })}
+              </button>
             </CardAction>
           </CardHeader>
           <CardBody className="!px-0 !pb-0">
             <ul className="max-h-[340px] overflow-y-auto">
-              {projects.map((p, idx) => (
+              {projects.slice(0, 6).map((p, idx) => (
                 <li
                   key={p.id}
                   className="flex items-center gap-3 px-5 py-3"
