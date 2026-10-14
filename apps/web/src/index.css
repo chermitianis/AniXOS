@@ -7,6 +7,9 @@
 @import "tailwindcss";
 @import "./design-tokens.css";
 
+/* Active la syntaxe `dark:` avec classe .dark sur <html> (au lieu de prefers-color-scheme) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================================================
    RESET / BASE
    ============================================================================ */
@@ -71,4 +74,95 @@ input:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--text-primary);
   -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset;
   transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ============================================================================
+   DARK MODE OVERRIDES — Uniformisation avec les design tokens
+   ----------------------------------------------------------------------------
+   Les pages legacy utilisent des classes Tailwind hardcoded (bg-white,
+   text-slate-700, border-slate-200, ...). Ces règles les remplacent
+   uniquement en mode sombre, pour aligner TOUTES les pages sur la même
+   palette (identiques à Dashboard).
+   ============================================================================ */
+html.dark {
+  /* ---- Fonds ---- */
+  .bg-white { background-color: var(--bg-card) !important; }
+  .bg-slate-50 { background-color: var(--bg-muted) !important; }
+  .bg-slate-100 { background-color: var(--bg-muted) !important; }
+  .bg-slate-200 { background-color: var(--border-subtle) !important; }
+  .bg-gray-50 { background-color: var(--bg-muted) !important; }
+  .bg-gray-100 { background-color: var(--bg-muted) !important; }
+
+  /* ---- Texte ---- */
+  .text-slate-900 { color: var(--text-primary) !important; }
+  .text-slate-800 { color: var(--text-primary) !important; }
+  .text-slate-700 { color: var(--text-primary) !important; }
+  .text-slate-600 { color: var(--text-secondary) !important; }
+  .text-slate-500 { color: var(--text-secondary) !important; }
+  .text-slate-400 { color: var(--text-tertiary) !important; }
+  .text-gray-900 { color: var(--text-primary) !important; }
+  .text-gray-800 { color: var(--text-primary) !important; }
+  .text-gray-700 { color: var(--text-primary) !important; }
+  .text-gray-500 { color: var(--text-secondary) !important; }
+
+  /* ---- Bordures ---- */
+  .border-slate-100 { border-color: var(--border-subtle) !important; }
+  .border-slate-200 { border-color: var(--border-subtle) !important; }
+  .border-slate-300 { border-color: var(--border-strong) !important; }
+  .border-gray-100 { border-color: var(--border-subtle) !important; }
+  .border-gray-200 { border-color: var(--border-subtle) !important; }
+
+  /* ---- Hover ---- */
+  .hover\:bg-slate-50:hover { background-color: var(--bg-card-hover) !important; }
+  .hover\:bg-slate-100:hover { background-color: var(--bg-card-hover) !important; }
+  .hover\:bg-gray-50:hover { background-color: var(--bg-card-hover) !important; }
+  .hover\:bg-gray-100:hover { background-color: var(--bg-card-hover) !important; }
+
+  /* ---- Divide (bordures internes des listes/tableaux) ---- */
+  .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--border-subtle) !important;
+  }
+  .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--border-subtle) !important;
+  }
+  .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--border-subtle) !important;
+  }
+  .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--border-subtle) !important;
+  }
+
+  /* ---- Formulaires ---- */
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-input);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-tertiary);
+  }
+  input:focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--border-focus);
+  }
+
+  /* ---- Tableaux ---- */
+  thead {
+    background-color: var(--bg-muted);
+  }
+  th {
+    color: var(--text-secondary);
+  }
+  tbody tr {
+    border-color: var(--border-subtle);
+  }
+
+  /* ---- Overlay modal ---- */
+  .bg-slate-950\/60 { background-color: rgba(0, 0, 0, 0.7) !important; }
+  .bg-slate-950\/70 { background-color: rgba(0, 0, 0, 0.75) !important; }
+  .bg-black\/50 { background-color: rgba(0, 0, 0, 0.7) !important; }
 }
