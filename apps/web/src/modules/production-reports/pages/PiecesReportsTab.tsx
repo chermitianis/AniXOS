@@ -60,6 +60,15 @@ export function PiecesReportsTab() {
     return `${h}h ${String(m).padStart(2, "0")}`;
   }
 
+  function fmtHoursFromSeconds(s: number): string {
+    if (s <= 0) return "0.00h";
+    return `${(s / 3600).toFixed(2)}h`;
+  }
+
+  function fmtMoney(n: number): string {
+    return n.toFixed(2);
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20 text-slate-400">
@@ -68,7 +77,13 @@ export function PiecesReportsTab() {
       </div>
     );
   }
-  if (error) return <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>;
+  if (error) {
+    return (
+      <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+        {error}
+      </div>
+    );
+  }
   if (pieces.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-400">
@@ -89,18 +104,33 @@ export function PiecesReportsTab() {
           const variance = p.actual_seconds - p.estimated_seconds;
           const isOver = variance > 0;
           return (
-            <li key={p.piece_task_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <li
+              key={p.piece_task_id}
+              className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+            >
               <button
                 type="button"
                 onClick={() => void toggleExpand(p.piece_task_id)}
                 className="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-slate-50"
               >
-                {isOpen ? <ChevronDown size={16} className="shrink-0 text-slate-400" /> : <ChevronRight size={16} className="shrink-0 text-slate-400" />}
+                {isOpen ? (
+                  <ChevronDown size={16} className="shrink-0 text-slate-400" />
+                ) : (
+                  <ChevronRight size={16} className="shrink-0 text-slate-400" />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-bold text-slate-800">{p.piece_name}</span>
-                    {p.piece_code && <span className="font-mono text-[10px] text-slate-400" dir="ltr">{p.piece_code}</span>}
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">Qté {p.quantity}</span>
+                    <span className="truncate text-sm font-bold text-slate-800">
+                      {p.piece_name}
+                    </span>
+                    {p.piece_code && (
+                      <span className="font-mono text-[10px] text-slate-400" dir="ltr">
+                        {p.piece_code}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      Qté {p.quantity}
+                    </span>
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                     <span>{p.project_name}</span>
@@ -109,9 +139,14 @@ export function PiecesReportsTab() {
                   </div>
                 </div>
                 <div className="shrink-0 text-end">
-                  <div className={`flex items-center justify-end gap-1 text-xs font-bold ${isOver ? "text-red-600" : "text-green-600"}`}>
+                  <div
+                    className={`flex items-center justify-end gap-1 text-xs font-bold ${
+                      isOver ? "text-red-600" : "text-green-600"
+                    }`}
+                  >
                     {isOver ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                    {isOver ? "+" : ""}{fmtSec(Math.abs(variance))}
+                    {isOver ? "+" : ""}
+                    {fmtSec(Math.abs(variance))}
                   </div>
                   <div className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
                     {fmtSec(p.actual_seconds)} / {fmtSec(p.estimated_seconds)}
@@ -121,58 +156,197 @@ export function PiecesReportsTab() {
 
               {isOpen && (
                 <div className="border-t border-slate-100 bg-slate-50/50 p-4">
+                  {/* ============================================ */}
+                  {/* DÉTAIL PAR PAQUET                            */}
+                  {/* ============================================ */}
                   <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                     {t("productionReports.pieces.workPackages")}
                   </h3>
                   {(wps[p.piece_task_id] ?? []).map((wp) => (
-                    <div key={wp.of_work_package_id} className="mb-2 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                    <div
+                      key={wp.of_work_package_id}
+                      className="mb-2 rounded-lg border border-slate-200 bg-white p-3 text-xs"
+                    >
                       <div className="mb-2 flex items-center gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          wp.interface_type === "cnc" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-700"
-                        }`}>{wp.interface_type.toUpperCase()}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          wp.status === "completed" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"
-                        }`}>{wp.status}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            wp.interface_type === "cnc"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-700"
+                          }`}
+                        >
+                          {wp.interface_type.toUpperCase()}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            wp.status === "completed"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {wp.status}
+                        </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-slate-600 sm:grid-cols-4">
-                        <Stat label={t("productionReports.pieces.estimated")} value={wp.estimated_hours > 0 ? `${wp.estimated_hours.toFixed(2)}h` : "—"} />
-                        <Stat label={t("productionReports.pieces.actual")} value={fmtSec(wp.actual_seconds)} />
-                        <Stat label={t("productionReports.pieces.sessions")} value={String(wp.sessions_count)} />
-                        <Stat label={t("productionReports.pieces.workers")} value={wp.worker_names ?? "—"} />
+                        <Stat
+                          label={t("productionReports.pieces.estimated")}
+                          value={
+                            wp.estimated_hours > 0
+                              ? `${wp.estimated_hours.toFixed(2)}h`
+                              : "—"
+                          }
+                        />
+                        <Stat
+                          label={t("productionReports.pieces.actual")}
+                          value={fmtSec(wp.actual_seconds)}
+                        />
+                        <Stat
+                          label={t("productionReports.pieces.sessions")}
+                          value={String(wp.sessions_count)}
+                        />
+                        <Stat
+                          label={t("productionReports.pieces.workers")}
+                          value={wp.worker_names ?? "—"}
+                        />
                       </div>
                     </div>
                   ))}
 
+                  {/* ============================================ */}
+                  {/* OPÉRATIONS — avec estimé / réel / écart     */}
+                  {/* ============================================ */}
                   <h3 className="mt-4 mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                     {t("productionReports.pieces.operations")}
                   </h3>
-                  <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
-                        <tr>
-                          <th className="px-2 py-1.5 text-start">{t("productionReports.pieces.opStage")}</th>
-                          <th className="px-2 py-1.5 text-start">{t("productionReports.pieces.opInterface")}</th>
-                          <th className="px-2 py-1.5 text-end">{t("productionReports.pieces.opEstimated")}</th>
-                          <th className="px-2 py-1.5 text-end">{t("productionReports.pieces.opRate")}</th>
-                          <th className="px-2 py-1.5 text-end">{t("productionReports.pieces.opSubtotal")}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {(ops[p.piece_task_id] ?? []).map((op) => (
-                          <tr key={op.operation_id}>
-                            <td className="px-2 py-1.5 text-slate-700">{op.label ?? op.stage}</td>
-                            <td className="px-2 py-1.5">
-                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
-                                op.interface_type === "cnc" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-700"
-                              }`}>{op.interface_type.toUpperCase()}</span>
-                            </td>
-                            <td className="px-2 py-1.5 text-end font-mono text-slate-600" dir="ltr">{op.estimated_hours.toFixed(2)}h</td>
-                            <td className="px-2 py-1.5 text-end font-mono text-slate-600" dir="ltr">{op.hourly_rate.toFixed(2)}</td>
-                            <td className="px-2 py-1.5 text-end font-mono font-bold text-slate-700" dir="ltr">{op.estimated_subtotal.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="space-y-2">
+                    {(ops[p.piece_task_id] ?? []).map((op) => {
+                      const estCost = op.estimated_hours * op.hourly_rate;
+                      const actualHours = op.actual_seconds / 3600;
+                      const hasActual = op.actual_seconds > 0;
+                      const hoursEcart = actualHours - op.estimated_hours;
+                      const costEcart = op.actual_cost - estCost;
+                      const costOver = costEcart > 0;
+
+                      return (
+                        <div
+                          key={op.operation_id}
+                          className="rounded-lg border border-slate-200 bg-white p-3"
+                        >
+                          {/* Header ligne : étape + interface */}
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-700">
+                              {op.label ?? op.stage}
+                            </span>
+                            <span
+                              className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                                op.interface_type === "cnc"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-blue-100 text-blue-700"
+                              }`}
+                            >
+                              {op.interface_type.toUpperCase()}
+                            </span>
+                          </div>
+
+                          {/* 3 lignes : Estimé, Réel, Écart */}
+                          <div className="space-y-1 text-[11px]">
+                            {/* Estimé */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                                {t("productionReports.pieces.opEstimatedShort", {
+                                  defaultValue: "Estimé",
+                                })}
+                              </span>
+                              <div className="flex flex-1 items-center justify-end gap-3 font-mono text-slate-600" dir="ltr">
+                                <span className="w-16 text-end">
+                                  {op.estimated_hours.toFixed(2)}h
+                                </span>
+                                <span className="w-4 text-center text-slate-400">×</span>
+                                <span className="w-16 text-end">
+                                  {op.hourly_rate.toFixed(2)}
+                                </span>
+                                <span className="w-4 text-center text-slate-400">=</span>
+                                <span className="w-20 text-end font-bold text-slate-700">
+                                  {fmtMoney(estCost)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Réel */}
+                            {hasActual ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                                  {t("productionReports.pieces.opActualShort", {
+                                    defaultValue: "Réel",
+                                  })}
+                                </span>
+                                <div className="flex flex-1 items-center justify-end gap-3 font-mono text-slate-600" dir="ltr">
+                                  <span className="w-16 text-end">
+                                    {actualHours.toFixed(2)}h
+                                  </span>
+                                  <span className="w-4 text-center text-slate-400">×</span>
+                                  <span className="w-16 text-end">
+                                    {op.actual_hourly_rate != null
+                                      ? op.actual_hourly_rate.toFixed(2)
+                                      : "—"}
+                                  </span>
+                                  <span className="w-4 text-center text-slate-400">=</span>
+                                  <span className="w-20 text-end font-bold text-slate-700">
+                                    {fmtMoney(op.actual_cost)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                                  {t("productionReports.pieces.opActualShort", {
+                                    defaultValue: "Réel",
+                                  })}
+                                </span>
+                                <span className="text-slate-400">—</span>
+                              </div>
+                            )}
+
+                            {/* Écart */}
+                            {hasActual ? (
+                              <div
+                                className={`flex items-center justify-between gap-2 border-t border-slate-100 pt-1 ${
+                                  costOver ? "text-red-600" : "text-green-600"
+                                }`}
+                              >
+                                <span className="w-14 font-semibold uppercase tracking-wide">
+                                  {t("productionReports.pieces.opEcartShort", {
+                                    defaultValue: "Écart",
+                                  })}
+                                </span>
+                                <div className="flex flex-1 items-center justify-end gap-3 font-mono" dir="ltr">
+                                  <span className="w-16 text-end">
+                                    {hoursEcart >= 0 ? "+" : ""}
+                                    {hoursEcart.toFixed(2)}h
+                                  </span>
+                                  <span className="w-4" />
+                                  <span className="w-16" />
+                                  <span className="w-4 text-center">=</span>
+                                  <span className="w-20 text-end font-bold">
+                                    {costEcart >= 0 ? "+" : ""}
+                                    {fmtMoney(costEcart)}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-1">
+                                <span className="w-14 font-semibold uppercase tracking-wide text-slate-400">
+                                  {t("productionReports.pieces.opEcartShort", {
+                                    defaultValue: "Écart",
+                                  })}
+                                </span>
+                                <span className="text-slate-400">—</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -187,7 +361,9 @@ export function PiecesReportsTab() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
       <div className="mt-0.5 truncate font-semibold text-slate-700">{value}</div>
     </div>
   );
