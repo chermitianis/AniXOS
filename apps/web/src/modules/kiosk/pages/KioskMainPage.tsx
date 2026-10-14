@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { useWorkerSession } from "../../../auth/WorkerSessionContext";
 import { useActiveTask } from "../hooks/useActiveTask";
 import { useWorkerPlanning } from "../hooks/useWorkerPlanning";
+import { useShiftOvertimeCheck } from "../hooks/useShiftOvertimeCheck";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
 import { TopNavBar } from "../components/TopNavBar";
 import { ContextBar } from "../components/ContextBar";
@@ -15,10 +16,12 @@ import { ProjectPieceSelectorModal } from "../components/ProjectPieceSelectorMod
 import { AddEmergencyPieceModal } from "../components/AddEmergencyPieceModal";
 import { SessionCorrectionModal } from "../components/SessionCorrectionModal";
 import { LogoutConfirmModal } from "../components/LogoutConfirmModal";
+import { ShiftExtensionModal } from "../components/ShiftExtensionModal";
 import { startCredentialsSync } from "../../../lib/credentialsSync";
 import { getStageInterface } from "../../nomenclature/lib/costingConstants";
 import {
   fetchPieceOperationsWithEstimate,
+  extendWorkerShift,
   type PieceOperationEstimate,
 } from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
@@ -28,7 +31,13 @@ export function KioskMainPage() {
 
   if (!activeWorker) return null;
 
-  return <KioskWorkspace worker={activeWorker} onLogout={logout} hasOpenPieceEvents={hasOpenPieceEvents} />;
+  return (
+    <KioskWorkspace
+      worker={activeWorker}
+      onLogout={logout}
+      hasOpenPieceEvents={hasOpenPieceEvents}
+    />
+  );
 }
 
 interface KioskWorkspaceProps {
@@ -47,6 +56,12 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
   const [pieceOperations, setPieceOperations] = useState<PieceOperationEstimate[]>([]);
+
+  // ✅ NEW — surveillance fin de shift (8h + 20 min sans confirmation)
+  const overtimeCheck = useShiftOvertimeCheck(
+    worker.shift_id,
+    worker.session_started_at,
+  );
 
   useEffect(() => {
     const stopCredentialsSync = startCredentialsSync();
@@ -80,7 +95,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   const { projectOptions, loadPiecesForOption, reload: reloadPlanning } = useWorkerPlanning(worker.id);
 
-  // Charger les opérations estimées à chaque changement de pièce
   useEffect(() => {
     let isMounted = true;
     if (!pieceTask?.id) {
@@ -95,10 +109,9 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     };
   }, [pieceTask?.id]);
 
-  // ✅ Filtrer les opérations par interface de la WP active
   const estimatedTotalMinutes = pieceOperations
     .filter((op) => {
-      if (!ofWorkPackageInterface) return true; // pas de WP → total global
+      if (!ofWorkPackageInterface) return true;
       return getStageInterface(op.stage) === ofWorkPackageInterface;
     })
     .reduce((sum, op) => sum + Math.round(op.estimated_hours * 60), 0);
@@ -118,11 +131,8 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     void reloadPlanning();
   }
 
-  /** ✅ NEW : après création d'une pièce d'urgence, on recharge le planning
-   *  et on ouvre le sélecteur pour permettre à l'opérateur de la choisir. */
   async function handleEmergencyPieceCreated(_pieceTaskId: string, _planningId: string) {
     await reloadPlanning();
-    // Ouvre le sélecteur pour que l'opérateur retrouve sa pièce dans la liste.
     setIsSelectorOpen(true);
   }
 
@@ -137,6 +147,12 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   async function confirmLogoutAnyway() {
     setIsLogoutConfirmOpen(false);
+    setIsLoggingOut(true);
+    await onLogout();
+  }
+
+  /** ✅ NEW — fin de shift depuis le modal overtime : logout direct. */
+  async function handleEndShiftFromOvertime() {
     setIsLoggingOut(true);
     await onLogout();
   }
@@ -211,7 +227,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         />
       )}
 
-      {/* ✅ NEW : Modal d'ajout d'une pièce d'urgence */}
       {isEmergencyOpen && (
         <AddEmergencyPieceModal
           workerId={worker.id}
@@ -240,6 +255,17 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         <LogoutConfirmModal
           onCancel={() => setIsLogoutConfirmOpen(false)}
           onConfirm={() => void confirmLogoutAnyway()}
+        />
+      )}
+
+      {/* ✅ NEW — Modal fin de shift (8h dépassées sans confirmation) */}
+      {overtimeCheck.shouldPrompt && worker.shift_id && (
+        <ShiftExtensionModal
+          shiftId={worker.shift_id}
+          hoursOpen={overtimeCheck.hoursOpen}
+          onExtended={overtimeCheck.markExtended}
+          onEndShift={handleEndShiftFromOvertime}
+          extendShift={extendWorkerShift}
         />
       )}
     </div>
