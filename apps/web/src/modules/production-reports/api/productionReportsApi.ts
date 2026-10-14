@@ -6,6 +6,11 @@
 // cappé à la durée standard du shift (company_work_settings.classique_shift_hours
 // ou fallback 8h). Tout ce qui suit la borne est ignoré — les données ne sont
 // plus fiables au-delà.
+//
+// Ajout 2026-10-14 (suite) :
+//   - getPieceOperations renvoie désormais actual_seconds / actual_cost /
+//     actual_hourly_rate par opération, agrégés depuis work_sessions via
+//     of_work_packages (interface_type).
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -57,6 +62,13 @@ export interface PieceOpRow {
   hourly_rate: number;
   interface_type: "cnc" | "classique";
   estimated_subtotal: number;
+  // ✨ NEW — Mesures réelles
+  /** Temps réel cumulé (production uniquement, non voided). */
+  actual_seconds: number;
+  /** Coût réel = Σ (durée × worker.hourly_cost). */
+  actual_cost: number;
+  /** Taux horaire réel moyen pondéré = actual_cost / (actual_seconds / 3600). */
+  actual_hourly_rate: number | null;
 }
 
 export interface ProjectCompletionHeader {
@@ -286,7 +298,10 @@ export async function getPieceWorkPackages(
     .eq("manufacturing_order_id", ofId);
 
   const estimatedByIface = new Map<string, number>();
-  for (const op of (ofOpsData ?? []) as { interface_type: string; estimated_hours: number }[]) {
+  for (const op of (ofOpsData ?? []) as {
+    interface_type: string;
+    estimated_hours: number;
+  }[]) {
     estimatedByIface.set(
       op.interface_type,
       (estimatedByIface.get(op.interface_type) ?? 0) + (op.estimated_hours ?? 0),
@@ -314,14 +329,15 @@ export async function getPieceOperations(
   companyId: string,
   pieceTaskId: string,
 ): Promise<PieceOpRow[]> {
+  // 1. Charger les opérations estimées
   const { data } = await supabase
     .from("piece_costing_operations")
     .select("id, stage, label, estimated_hours, hourly_rate, subtotal")
     .eq("company_id", companyId)
     .eq("piece_task_id", pieceTaskId)
     .order("sequence_order");
-  if (!data) return [];
-  return (data as Array<{
+
+  const operations: PieceOpRow[] = ((data ?? []) as Array<{
     id: string;
     stage: string;
     label: string | null;
@@ -334,9 +350,84 @@ export async function getPieceOperations(
     label: op.label,
     estimated_hours: op.estimated_hours,
     hourly_rate: op.hourly_rate,
-    interface_type: op.stage.toLowerCase().includes("cnc") ? "cnc" : "classique",
+    interface_type: (op.stage.toLowerCase().includes("cnc")
+      ? "cnc"
+      : "classique") as "cnc" | "classique",
     estimated_subtotal: Number(op.subtotal ?? 0),
+    actual_seconds: 0,
+    actual_cost: 0,
+    actual_hourly_rate: null,
   }));
+
+  if (operations.length === 0) return [];
+
+  // 2. Récupérer l'OF de la pièce
+  const { data: ofData } = await supabase
+    .from("manufacturing_orders")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("piece_task_id", pieceTaskId)
+    .maybeSingle();
+  const ofId = (ofData as { id: string } | null)?.id;
+  if (!ofId) return operations;
+
+  // 3. Récupérer les work packages (id + interface)
+  const { data: wpsData } = await supabase
+    .from("of_work_packages")
+    .select("id, interface_type")
+    .eq("company_id", companyId)
+    .eq("manufacturing_order_id", ofId);
+
+  const wpList = (wpsData ?? []) as Array<{ id: string; interface_type: string }>;
+  if (wpList.length === 0) return operations;
+
+  const allWpIds = wpList.map((w) => w.id);
+  const wpIdToInterface = new Map<string, string>();
+  for (const wp of wpList) wpIdToInterface.set(wp.id, wp.interface_type);
+
+  // 4. Récupérer toutes les sessions liées à ces WPs (production, non voided)
+  const { data: sessionsData } = await supabase
+    .from("work_sessions")
+    .select("of_work_package_id, duration_seconds, workers(hourly_cost)")
+    .eq("company_id", companyId)
+    .in("of_work_package_id", allWpIds)
+    .eq("session_type", "production")
+    .is("voided_at", null);
+
+  // 5. Agréger par interface_type (somme des secondes et coût)
+  const statsByInterface = new Map<string, { seconds: number; cost: number }>();
+
+  for (const s of (sessionsData ?? []) as Array<{
+    of_work_package_id: string | null;
+    duration_seconds: number | null;
+    workers: { hourly_cost?: number } | null;
+  }>) {
+    if (!s.of_work_package_id) continue;
+    const iface = wpIdToInterface.get(s.of_work_package_id);
+    if (!iface) continue;
+
+    const dur = s.duration_seconds ?? 0;
+    const rate = s.workers?.hourly_cost ?? 0;
+    const entry = statsByInterface.get(iface) ?? { seconds: 0, cost: 0 };
+    entry.seconds += dur;
+    entry.cost += (dur / 3600) * rate;
+    statsByInterface.set(iface, entry);
+  }
+
+  // 6. Fusionner avec les opérations
+  return operations.map((op) => {
+    const stats = statsByInterface.get(op.interface_type);
+    const actualSeconds = stats?.seconds ?? 0;
+    const actualCost = stats?.cost ?? 0;
+    const actualHourlyRate =
+      actualSeconds > 0 ? actualCost / (actualSeconds / 3600) : null;
+    return {
+      ...op,
+      actual_seconds: actualSeconds,
+      actual_cost: actualCost,
+      actual_hourly_rate: actualHourlyRate,
+    };
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -535,7 +626,7 @@ export async function getShiftEvents(
     is_force_closed: boolean;
   } | null;
 
-  const rows = ((data ?? []) as Array<{
+  const rows = (data ?? []) as Array<{
     id: string;
     session_type: string;
     started_at: string;
@@ -546,7 +637,7 @@ export async function getShiftEvents(
     stop_reasons: { name?: string } | null;
     pieces_tasks: { name?: string } | null;
     projects: { name?: string } | null;
-  }>);
+  }>;
 
   // Si force_closed : on cappe la fenêtre d'affichage
   let capMs: number | null = null;
