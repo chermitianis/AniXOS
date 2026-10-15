@@ -1,43 +1,53 @@
+// ============================================================================
+// apps/web/src/modules/settings/components/OdooIntegrationPanel.tsx
+//
+// Odoo integration panel — connection, modules, direction, automation.
+//
+// Fixes applied:
+//   1. handlePushNow: shows result feedback (was calling pushNow() silently)
+//   2. Imports SyncModule/DEFAULT_SYNC_MODULES from useOdooConfig (DRY)
+//   3. Renamed ALL_MODULES_OFF → INITIAL_SYNC_MODULES (clearer intent)
+//   4. Uses DEFAULT_SYNC_MODULES as fallback when config.sync_modules missing
+//   5. Displays config.version in the connected banner
+//   6. handleSaveAndActivate: shows success feedback
+//   7. OdooConfig.sync_modules uses the exported SyncModules type
+// ============================================================================
+
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Plug, PlugZap, Loader2, CheckCircle2, XCircle, Eye, EyeOff,
   Server, KeyRound, User, Database as DatabaseIcon,
-  Save, TestTube2, ShieldAlert, Crown, Send, RefreshCw, ChevronDown, ChevronUp,
+  Save, TestTube2, ShieldAlert, Crown, Send, RefreshCw,
+  ChevronDown, ChevronUp,
   Factory, FolderKanban, ClipboardList, Users, Users2, Calendar, Cog,
   Truck, FileText, Boxes, HardHat, ListChecks,
 } from "lucide-react";
-import { useOdooConfig } from "../hooks/useOdooConfig";
+import {
+  useOdooConfig,
+  DEFAULT_SYNC_MODULES,
+  ALL_SYNC_MODULES,
+  type SyncModule,
+  type SyncModules,
+  type SyncDirection,
+} from "../hooks/useOdooConfig";
 
-type SyncModule =
-  | "clients"
-  | "suppliers"
-  | "projects"
-  | "manufacturing_orders"
-  | "work_orders"
-  | "machines"
-  | "workcenters"
-  | "workers"
-  | "staff"
-  | "planning"
-  | "materials"
-  | "invoices";
-
-type SyncDirection = "pull" | "push" | "bidirectional";
-
+// ---------------------------------------------------------------------------
+// Form state
+// ---------------------------------------------------------------------------
 interface FormState {
   odoo_url: string;
   odoo_db: string;
   odoo_username: string;
   api_key: string;
-  sync_modules: Record<SyncModule, boolean>;
+  sync_modules: SyncModules;
   sync_direction: SyncDirection;
   auto_sync_enabled: boolean;
   auto_sync_interval_minutes: number;
   notify_on_error: boolean;
 }
 
-const ALL_MODULES_OFF: Record<SyncModule, boolean> = {
+const INITIAL_SYNC_MODULES: SyncModules = {
   clients: true,
   suppliers: false,
   projects: false,
@@ -57,36 +67,45 @@ const INITIAL_FORM: FormState = {
   odoo_db: "",
   odoo_username: "",
   api_key: "",
-  sync_modules: { ...ALL_MODULES_OFF },
+  sync_modules: { ...INITIAL_SYNC_MODULES },
   sync_direction: "pull",
   auto_sync_enabled: false,
   auto_sync_interval_minutes: 60,
   notify_on_error: true,
 };
 
-const SYNC_MODULES_UI: { key: SyncModule; icon: typeof Factory }[] = [
-  { key: "clients", icon: Users2 },
-  { key: "suppliers", icon: Truck },
-  { key: "invoices", icon: FileText },
-  { key: "projects", icon: FolderKanban },
-  { key: "manufacturing_orders", icon: ClipboardList },
-  { key: "work_orders", icon: ListChecks },
-  { key: "planning", icon: Calendar },
-  { key: "machines", icon: Cog },
-  { key: "workcenters", icon: Factory },
-  { key: "workers", icon: HardHat },
-  { key: "staff", icon: Users },
-  { key: "materials", icon: Boxes },
-];
+// ---------------------------------------------------------------------------
+// UI configuration — icons per module (order matches ALL_SYNC_MODULES)
+// ---------------------------------------------------------------------------
+const MODULE_ICONS: Record<SyncModule, typeof Factory> = {
+  clients: Users2,
+  suppliers: Truck,
+  invoices: FileText,
+  projects: FolderKanban,
+  manufacturing_orders: ClipboardList,
+  work_orders: ListChecks,
+  planning: Calendar,
+  machines: Cog,
+  workcenters: Factory,
+  workers: HardHat,
+  staff: Users,
+  materials: Boxes,
+};
 
 const SYNC_DIRECTIONS: SyncDirection[] = ["pull", "push", "bidirectional"];
 
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
 const ODOO_PRIMARY = "#714B67";
 const ODOO_LIGHT = "#9B6F94";
 const ODOO_GREEN = "#10b981";
 const ODOO_GREEN_DARK = "#059669";
 const ODOO_GREEN_BG = "#f0fdf4";
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export function OdooIntegrationPanel() {
   const { t } = useTranslation();
   const {
@@ -101,6 +120,7 @@ export function OdooIntegrationPanel() {
   const [isTogglingNow, setIsTogglingNow] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
+  // Hydrate form from config
   useEffect(() => {
     if (!config) return;
     setForm({
@@ -109,18 +129,8 @@ export function OdooIntegrationPanel() {
       odoo_username: config.odoo_username ?? "",
       api_key: "",
       sync_modules: {
-        clients: config.sync_modules?.clients ?? true,
-        suppliers: config.sync_modules?.suppliers ?? false,
-        projects: config.sync_modules?.projects ?? false,
-        manufacturing_orders: config.sync_modules?.manufacturing_orders ?? false,
-        work_orders: config.sync_modules?.work_orders ?? false,
-        machines: config.sync_modules?.machines ?? false,
-        workcenters: config.sync_modules?.workcenters ?? false,
-        workers: config.sync_modules?.workers ?? false,
-        staff: config.sync_modules?.staff ?? false,
-        planning: config.sync_modules?.planning ?? false,
-        materials: config.sync_modules?.materials ?? false,
-        invoices: config.sync_modules?.invoices ?? false,
+        ...DEFAULT_SYNC_MODULES,
+        ...(config.sync_modules ?? {}),
       },
       sync_direction: config.sync_direction ?? "pull",
       auto_sync_enabled: config.auto_sync_enabled ?? false,
@@ -142,6 +152,9 @@ export function OdooIntegrationPanel() {
     );
   }, [form, hasConfig]);
 
+  // -------------------------------------------------------------------------
+  // Field helpers
+  // -------------------------------------------------------------------------
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setTestResult(null);
@@ -154,6 +167,9 @@ export function OdooIntegrationPanel() {
     }));
   }
 
+  // -------------------------------------------------------------------------
+  // Toggle (activate / deactivate)
+  // -------------------------------------------------------------------------
   async function handleToggleClick() {
     if (isTogglingNow || isLoading) return;
 
@@ -183,6 +199,9 @@ export function OdooIntegrationPanel() {
     setTestResult(null);
   }
 
+  // -------------------------------------------------------------------------
+  // Save & activate
+  // -------------------------------------------------------------------------
   async function handleSaveAndActivate(e: FormEvent) {
     e.preventDefault();
     if (!isFormValid) return;
@@ -205,11 +224,14 @@ export function OdooIntegrationPanel() {
       }
     }
 
-    setTestResult(null);
+    setTestResult({ ok: true, message: t("odoo.saveSuccess") });
     setForm((prev) => ({ ...prev, api_key: "" }));
     setIsFormOpen(false);
   }
 
+  // -------------------------------------------------------------------------
+  // Test connection
+  // -------------------------------------------------------------------------
   async function handleTest() {
     if (!isFormValid) {
       setTestResult({ ok: false, message: t("odoo.testMissingFields") });
@@ -234,6 +256,9 @@ export function OdooIntegrationPanel() {
     setIsFormOpen((v) => !v);
   }
 
+  // -------------------------------------------------------------------------
+  // Pull now
+  // -------------------------------------------------------------------------
   async function handleSyncNow() {
     setTestResult(null);
     const result = await syncNow();
@@ -247,12 +272,30 @@ export function OdooIntegrationPanel() {
     }
   }
 
-  // ⚡ toggle visual : ON si actif OU formulaire ouvert (brouillon)
+  // -------------------------------------------------------------------------
+  // Push now — NEW: shows result feedback
+  // -------------------------------------------------------------------------
+  async function handlePushNow() {
+    setTestResult(null);
+    const result = await pushNow();
+    if (!result.success) {
+      setTestResult({ ok: false, message: result.error ?? t("odoo.pushError") });
+    } else {
+      setTestResult({
+        ok: true,
+        message: t("odoo.pushSuccess", { count: result.totalSynced ?? 0 }),
+      });
+    }
+  }
+
   const toggleVisualOn = isActive || isFormOpen;
 
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   return (
     <div className="space-y-5">
-      {/* Carte principale — fond vert clair si ON */}
+      {/* Main card */}
       <div
         className="overflow-hidden rounded-xl border-2 transition-colors"
         style={{
@@ -279,7 +322,6 @@ export function OdooIntegrationPanel() {
           }}
         >
           <div className="flex items-start gap-3">
-            {/* Icône Plug — vert si ON, gris si OFF */}
             <div
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow-sm transition-all"
               style={{
@@ -300,6 +342,9 @@ export function OdooIntegrationPanel() {
                   >
                     <CheckCircle2 size={10} />
                     {t("odoo.badgeConnected")}
+                    {config?.version && (
+                      <span className="opacity-90">· v{config.version}</span>
+                    )}
                   </span>
                 )}
               </h2>
@@ -348,7 +393,7 @@ export function OdooIntegrationPanel() {
           </div>
         </div>
 
-        {/* Bandeau source de vérité (si actif ET replié) */}
+        {/* Source of truth banner */}
         {isActive && !isFormOpen && (
           <div
             className="flex items-center justify-between gap-2 border-t px-5 py-2.5 text-xs"
@@ -369,11 +414,14 @@ export function OdooIntegrationPanel() {
                 <span className="text-[11px] opacity-70">
                   {t("odoo.lastSync")} : {new Date(config.last_sync_at).toLocaleString()}
                   {config.last_sync_status === "failed" && (
-                    <span className="ms-1 font-bold text-red-600">· {t("odoo.lastSyncFailed")}</span>
+                    <span className="ms-1 font-bold text-red-600">
+                      · {t("odoo.lastSyncFailed")}
+                    </span>
                   )}
                 </span>
               )}
-              {(config?.sync_direction === "pull" || config?.sync_direction === "bidirectional") && (
+              {(config?.sync_direction === "pull" ||
+                config?.sync_direction === "bidirectional") && (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -396,10 +444,10 @@ export function OdooIntegrationPanel() {
           </div>
         )}
 
-        {/* Formulaire */}
+        {/* Form */}
         {showForm && (
           <form onSubmit={handleSaveAndActivate} className="space-y-5 border-t border-slate-100 p-5">
-            {/* Identifiants */}
+            {/* Credentials */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 <Server size={13} />
@@ -488,40 +536,44 @@ export function OdooIntegrationPanel() {
               </div>
             </div>
 
-            {/* Modules */}
+            {/* Modules — iterates over ALL_SYNC_MODULES (12 keys) */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 <Plug size={13} />
                 {t("odoo.sectionModules")}
               </h3>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {SYNC_MODULES_UI.map(({ key, icon: Icon }) => (
-                  <label
-                    key={key}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs transition-all hover:bg-slate-50"
-                    style={
-                      form.sync_modules[key]
-                        ? { borderColor: ODOO_PRIMARY, background: `${ODOO_PRIMARY}08` }
-                        : undefined
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.sync_modules[key]}
-                      onChange={() => toggleModule(key)}
-                      className="h-3.5 w-3.5 rounded border-slate-300"
-                      style={{ accentColor: ODOO_PRIMARY }}
-                    />
-                    <Icon
-                      size={14}
-                      className={form.sync_modules[key] ? "" : "text-slate-400"}
-                      style={form.sync_modules[key] ? { color: ODOO_PRIMARY } : undefined}
-                    />
-                    <span className="text-xs font-medium text-slate-700">
-                      {t(`odoo.module.${key}`)}
-                    </span>
-                  </label>
-                ))}
+                {ALL_SYNC_MODULES.map((key) => {
+                  const Icon = MODULE_ICONS[key];
+                  const checked = form.sync_modules[key];
+                  return (
+                    <label
+                      key={key}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs transition-all hover:bg-slate-50"
+                      style={
+                        checked
+                          ? { borderColor: ODOO_PRIMARY, background: `${ODOO_PRIMARY}08` }
+                          : undefined
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleModule(key)}
+                        className="h-3.5 w-3.5 rounded border-slate-300"
+                        style={{ accentColor: ODOO_PRIMARY }}
+                      />
+                      <Icon
+                        size={14}
+                        className={checked ? "" : "text-slate-400"}
+                        style={checked ? { color: ODOO_PRIMARY } : undefined}
+                      />
+                      <span className="text-xs font-medium text-slate-700">
+                        {t(`odoo.module.${key}`)}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
@@ -536,7 +588,9 @@ export function OdooIntegrationPanel() {
                   <label
                     key={dir}
                     className={`flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2.5 transition-all ${
-                      form.sync_direction === dir ? "ring-1" : "border-slate-200 bg-white hover:bg-slate-50"
+                      form.sync_direction === dir
+                        ? "ring-1"
+                        : "border-slate-200 bg-white hover:bg-slate-50"
                     }`}
                     style={
                       form.sync_direction === dir
@@ -570,7 +624,7 @@ export function OdooIntegrationPanel() {
               </div>
             </div>
 
-            {/* Automatisation */}
+            {/* Automation */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 <RefreshCw size={13} />
@@ -627,7 +681,7 @@ export function OdooIntegrationPanel() {
               </div>
             </div>
 
-            {/* Résultat test */}
+            {/* Test result */}
             {testResult && (
               <div
                 className={`flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs ${
@@ -643,7 +697,7 @@ export function OdooIntegrationPanel() {
               </div>
             )}
 
-            {/* Boutons */}
+            {/* Actions */}
             <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4">
               <button
                 type="button"
@@ -687,9 +741,10 @@ export function OdooIntegrationPanel() {
         )}
       </div>
 
-      {/* Envoyer les rapports */}
+      {/* Push reports card */}
       {isActive &&
-        (config?.sync_direction === "push" || config?.sync_direction === "bidirectional") && (
+        (config?.sync_direction === "push" ||
+          config?.sync_direction === "bidirectional") && (
           <div
             className="flex items-center justify-between gap-3 rounded-xl border p-4"
             style={{ borderColor: `${ODOO_PRIMARY}40`, background: `${ODOO_PRIMARY}08` }}
@@ -708,7 +763,7 @@ export function OdooIntegrationPanel() {
             </div>
             <button
               type="button"
-              onClick={() => void pushNow()}
+              onClick={() => void handlePushNow()}
               disabled={isPushing}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm disabled:opacity-50"
               style={{ background: ODOO_PRIMARY }}
@@ -719,7 +774,7 @@ export function OdooIntegrationPanel() {
           </div>
         )}
 
-      {/* Note sécurité */}
+      {/* Security note */}
       <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-xs text-slate-500">
         <ShieldAlert size={14} className="mt-0.5 shrink-0 text-slate-400" />
         <span>{t("odoo.securityNote")}</span>
