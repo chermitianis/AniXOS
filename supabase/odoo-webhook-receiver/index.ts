@@ -7,7 +7,6 @@ const WEBHOOK_SECRET = Deno.env.get("ODOO_WEBHOOK_SECRET") ?? "anixos-webhook-se
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
-  // 1. التحقق من الأمان (Secret)
   const authHeader = req.headers.get("x-webhook-secret");
   if (authHeader !== WEBHOOK_SECRET) {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
@@ -15,15 +14,13 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    // Odoo يرسل: { model: 'project.project', record_id: 123, company_id: 'uuid' }
-    const { company_id } = body;
+    const { company_id } = body; // معرف الشركة في AniXOS
 
     if (!company_id) return new Response("Missing company_id", { status: 400 });
 
-    // 2. استدعاء دالة المزامنة فوراً (في الخلفية)
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     
-    // نستخدم الدالة التي أنشأناها في SQL (0097) لتشغيل Pull فوراً
+    // تشغيل Pull فوراً في الخلفية
     await admin.rpc("trigger_odoo_pull", { p_company_id: company_id });
 
     return new Response(JSON.stringify({ success: true, message: "Sync triggered" }), {
