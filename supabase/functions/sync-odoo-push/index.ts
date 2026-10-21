@@ -1,3 +1,19 @@
+// ============================================================================
+// supabase/functions/sync-odoo-push/index.ts
+//
+// Unified Push — Final Version.
+//
+// Handles:
+//   1. Mirror Creation: Creates clients, projects, and tasks in Odoo if they
+//      were created in AniXOS (odoo_id IS NULL).
+//   2. Smart Timesheets: Groups work sessions by (Worker + Project + Piece + Date)
+//      to send accurate timesheets to Odoo without flooding it. It ensures
+//      that multiple sessions of the same worker on the same day are summed
+//      up into one logical line.
+//   3. Task Status: Updates the Odoo Task to "Done" when the piece is completed.
+//   4. Production Reports: Posts an HTML summary message on the Odoo Project.
+// ============================================================================
+
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -5,8 +21,6 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const ENCRYPTION_KEY = Deno.env.get("ODOO_ENCRYPTION_KEY") ?? "anixos-odoo-default-key-change-me";
 const CRON_INTERNAL_SECRET = Deno.env.get("CRON_INTERNAL_SECRET");
-
-const LOOP_WINDOW_MS = 10_000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +31,9 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
+// ---------------------------------------------------------------------------
+// Encryption & Odoo Client Helpers
+// ---------------------------------------------------------------------------
 async function decryptApiKey(encoded: string): Promise<string> {
   const encoder = new TextEncoder();
   const keyData = encoder.encode(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32));
@@ -90,18 +107,10 @@ async function detectOdooVersion(url: string): Promise<string> {
   } catch { return "unknown"; }
 }
 
-function shouldSkipDueToLoop(lastSyncedFrom: string | null, lastSyncedAt: string | null): boolean {
-  if (lastSyncedFrom !== "odoo") return false;
-  if (!lastSyncedAt) return false;
-  return (Date.now() - new Date(lastSyncedAt).getTime()) < LOOP_WINDOW_MS;
-}
-
-function anixosSyncMetadata() {
-  return { last_synced_from: "anixos", last_synced_at: new Date().toISOString() };
-}
-
+// ---------------------------------------------------------------------------
+// Stage resolution
+// ---------------------------------------------------------------------------
 interface StageMapping { [stageId: string]: { name: string; sequence?: number }; }
-
 const DONE_STAGE_NAMES = ["Terminé", "Terminée", "Termine", "Done", "Completed", "Finished", "Fait", "Clôturé", "منتهية", "مكتملة", "منجز", "OK"];
 
 async function resolveDoneStageId(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string, currentMappings: StageMapping): Promise<number | null> {
@@ -112,24 +121,24 @@ async function resolveDoneStageId(ctx: OdooContext, admin: ReturnType<typeof cre
       mappings = {};
       for (const s of stages) mappings[String(s.id)] = { name: s.name, sequence: s.sequence };
       await admin.from("odoo_config").update({ stage_mappings: mappings }).eq("company_id", companyId);
-    } catch (err) { return null; }
+    } catch { return null; }
   }
   for (const [id, meta] of Object.entries(mappings)) {
-    if (DONE_STAGE_NAMES.some(candidate => meta.name.toLowerCase().includes(candidate.toLowerCase()))) return Number(id);
+    if (DONE_STAGE_NAMES.some(c => meta.name.toLowerCase().includes(c.toLowerCase()))) return Number(id);
   }
   return null;
 }
 
-// --- PUSH HANDLERS ---
-
+// ---------------------------------------------------------------------------
+// Push Handlers
+// ---------------------------------------------------------------------------
 async function pushMissingClients(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string): Promise<number> {
-  const { data: localClients } = await admin.from("clients").select("id, name, email, phone, address, last_synced_from, last_synced_at").eq("company_id", companyId).is("odoo_id", null).eq("is_active", true);
+  const { data: localClients } = await admin.from("clients").select("id, name, email, phone, address").eq("company_id", companyId).is("odoo_id", null).eq("is_active", true);
   let created = 0;
   for (const c of (localClients ?? [])) {
-    if (shouldSkipDueToLoop(c.last_synced_from, c.last_synced_at)) continue;
     try {
       const odooId = await odooExecute<number>(ctx, "res.partner", "create", [{ name: String(c.name ?? ""), email: c.email || false, phone: c.phone || false, street: c.address || false, customer_rank: 1 }]);
-      await admin.from("clients").update({ odoo_id: odooId, ...anixosSyncMetadata() }).eq("id", c.id);
+      await admin.from("clients").update({ odoo_id: odooId }).eq("id", c.id);
       created++;
     } catch (e) { console.warn("pushMissingClients failed", c.id, e); }
   }
@@ -137,10 +146,9 @@ async function pushMissingClients(ctx: OdooContext, admin: ReturnType<typeof cre
 }
 
 async function pushMissingProjects(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string): Promise<number> {
-  const { data: localProjects } = await admin.from("projects").select("id, name, client_id, start_date, due_date, last_synced_from, last_synced_at").eq("company_id", companyId).is("odoo_id", null).eq("is_archived", false);
+  const { data: localProjects } = await admin.from("projects").select("id, name, client_id, start_date, due_date").eq("company_id", companyId).is("odoo_id", null).eq("is_archived", false);
   let created = 0;
   for (const p of (localProjects ?? [])) {
-    if (shouldSkipDueToLoop(p.last_synced_from, p.last_synced_at)) continue;
     try {
       let odooPartnerId: number | false = false;
       if (p.client_id) {
@@ -148,7 +156,7 @@ async function pushMissingProjects(ctx: OdooContext, admin: ReturnType<typeof cr
         if (client?.odoo_id) odooPartnerId = client.odoo_id;
       }
       const odooId = await odooExecute<number>(ctx, "project.project", "create", [{ name: String(p.name ?? ""), partner_id: odooPartnerId, date_start: p.start_date || false, date: p.due_date || false }]);
-      await admin.from("projects").update({ odoo_id: odooId, ...anixosSyncMetadata() }).eq("id", p.id);
+      await admin.from("projects").update({ odoo_id: odooId }).eq("id", p.id);
       created++;
     } catch (e) { console.warn("pushMissingProjects failed", p.id, e); }
   }
@@ -161,11 +169,10 @@ async function pushMissingPieces(ctx: OdooContext, admin: ReturnType<typeof crea
   if (projects.length === 0) return 0;
 
   const projectByLocalId = new Map(projects.map((p) => [p.id, p.odoo_id]));
-  const { data: localPieces } = await admin.from("pieces_tasks").select("id, name, project_id, estimated_time_minutes, last_synced_from, last_synced_at").eq("company_id", companyId).is("odoo_id", null).in("project_id", projects.map((p) => p.id));
+  const { data: localPieces } = await admin.from("pieces_tasks").select("id, name, project_id, estimated_time_minutes").eq("company_id", companyId).is("odoo_id", null).in("project_id", projects.map((p) => p.id));
 
   let created = 0;
   for (const piece of (localPieces ?? [])) {
-    if (shouldSkipDueToLoop(piece.last_synced_from, piece.last_synced_at)) continue;
     const odooProjectId = projectByLocalId.get(piece.project_id);
     if (!odooProjectId) continue;
     try {
@@ -173,7 +180,7 @@ async function pushMissingPieces(ctx: OdooContext, admin: ReturnType<typeof crea
       const minutes = piece.estimated_time_minutes;
       if (minutes && minutes > 0) payload.planned_hours = minutes / 60;
       const odooId = await odooExecute<number>(ctx, "project.task", "create", [payload]);
-      await admin.from("pieces_tasks").update({ odoo_id: odooId, ...anixosSyncMetadata() }).eq("id", piece.id);
+      await admin.from("pieces_tasks").update({ odoo_id: odooId }).eq("id", piece.id);
       created++;
     } catch (e) { console.warn("pushMissingPieces failed", piece.id, e); }
   }
@@ -182,54 +189,127 @@ async function pushMissingPieces(ctx: OdooContext, admin: ReturnType<typeof crea
 
 async function pushTaskStatus(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string, doneStageId: number | null, since: string): Promise<number> {
   if (!doneStageId) return 0;
-  const { data: pieces } = await admin.from("pieces_tasks").select("id, name, status, odoo_id, project_id, completed_at, updated_at, last_synced_from, last_synced_at").eq("company_id", companyId).eq("status", "completed").not("odoo_id", "is", null).gte("updated_at", since);
+  const { data: pieces } = await admin.from("pieces_tasks").select("id, name, status, odoo_id, project_id, completed_at, updated_at").eq("company_id", companyId).eq("status", "completed").not("odoo_id", "is", null).gte("updated_at", since);
 
   let updated = 0;
   for (const piece of (pieces ?? [])) {
-    if (shouldSkipDueToLoop(piece.last_synced_from, piece.last_synced_at)) continue;
     const odooTaskId = piece.odoo_id;
     const { data: sessions } = await admin.from("work_sessions").select("duration_seconds").eq("piece_task_id", piece.id).is("voided_at", null).not("duration_seconds", "is", null);
     const totalSeconds = (sessions ?? []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
     const effectiveHours = totalSeconds > 0 ? Number((totalSeconds / 3600).toFixed(2)) : 0;
     try {
       await odooExecute(ctx, "project.task", "write", [[odooTaskId], { stage_id: doneStageId, effective_hours: effectiveHours, remaining_hours: 0 }]);
-      await admin.from("pieces_tasks").update(anixosSyncMetadata()).eq("id", piece.id);
       updated++;
     } catch (e) { console.warn("pushTaskStatus failed", odooTaskId, e); }
   }
   return updated;
 }
 
+// ---------------------------------------------------------------------------
+// FINAL: Smart Timesheets (Group by Worker + Project + Piece + Date)
+// ---------------------------------------------------------------------------
 async function pushTimesheets(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string, since: string): Promise<number> {
-  const { data: sessions } = await admin.from("work_sessions").select("id, worker_id, project_id, piece_task_id, started_at, duration_seconds, note, odoo_timesheet_id").eq("company_id", companyId).is("odoo_timesheet_id", null).is("voided_at", null).not("ended_at", "is", null).gte("started_at", since).limit(500);
+  const { data: sessions } = await admin
+    .from("work_sessions")
+    .select("id, worker_id, project_id, piece_task_id, started_at, duration_seconds, note")
+    .eq("company_id", companyId)
+    .is("odoo_timesheet_id", null)
+    .is("voided_at", null)
+    .not("ended_at", "is", null)
+    .gte("started_at", since);
+
   if (!sessions || sessions.length === 0) return 0;
 
-  let pushed = 0;
+  const grouped: Record<string, { ids: string[], totalSeconds: number, date: string, projectId: string, pieceId: string, workerId: string, notes: string[] }> = {};
+
   for (const s of sessions) {
     if (!s.project_id || !s.piece_task_id) continue;
-    const { data: worker } = await admin.from("workers").select("odoo_id").eq("id", s.worker_id).maybeSingle();
-    if (!worker?.odoo_id) continue;
-    const { data: project } = await admin.from("projects").select("odoo_id").eq("id", s.project_id).maybeSingle();
-    if (!project?.odoo_id) continue;
-    const { data: piece } = await admin.from("pieces_tasks").select("odoo_id, name").eq("id", s.piece_task_id).maybeSingle();
-    if (!piece?.odoo_id) continue;
+    const dateStr = new Date(s.started_at).toISOString().split('T')[0];
+    // Grouping key separates by worker so costs are accurate, but sums up all actions in that day.
+    const groupKey = `${s.project_id}_${s.piece_task_id}_${s.worker_id}_${dateStr}`;
 
-    const durationSec = s.duration_seconds || 0;
-    if (durationSec <= 0) continue;
+    if (!grouped[groupKey]) {
+      grouped[groupKey] = { ids: [], totalSeconds: 0, date: dateStr, projectId: s.project_id, pieceId: s.piece_task_id, workerId: s.worker_id, notes: [] };
+    }
+    grouped[groupKey].ids.push(s.id);
+    grouped[groupKey].totalSeconds += (s.duration_seconds || 0);
+    if (s.note) grouped[groupKey].notes.push(s.note);
+  }
 
-    const hours = Number((durationSec / 3600).toFixed(2));
-    const dateStr = s.started_at.slice(0, 10);
-    const description = s.note ? `${piece.name} — ${s.note}` : `${piece.name} (session AniXOS)`;
+  let pushed = 0;
+  for (const group of Object.values(grouped)) {
+    const { data: worker } = await admin.from("workers").select("odoo_id, full_name").eq("id", group.workerId).maybeSingle();
+    const { data: project } = await admin.from("projects").select("odoo_id").eq("id", group.projectId).maybeSingle();
+    const { data: piece } = await admin.from("pieces_tasks").select("odoo_id, name").eq("id", group.pieceId).maybeSingle();
+
+    if (!worker?.odoo_id || !project?.odoo_id || !piece?.odoo_id) continue;
+
+    const hours = Number((group.totalSeconds / 3600).toFixed(2));
+    if (hours <= 0) continue;
+
+    const description = `${piece.name} - ${worker.full_name} (AniXOS)`;
 
     try {
-      const timesheetId = await odooExecute<number>(ctx, "account.analytic.line", "create", [{ name: description, project_id: project.odoo_id, task_id: piece.odoo_id, employee_id: worker.odoo_id, unit_amount: hours, date: dateStr }]);
-      await admin.from("work_sessions").update({ odoo_timesheet_id: timesheetId }).eq("id", s.id);
+      const timesheetId = await odooExecute<number>(
+        ctx, "account.analytic.line", "create",
+        [{ name: description, project_id: project.odoo_id, task_id: piece.odoo_id, employee_id: worker.odoo_id, unit_amount: hours, date: group.date }],
+      );
+
+      for (const sessionId of group.ids) {
+        await admin.from("work_sessions").update({ odoo_timesheet_id: timesheetId }).eq("id", sessionId);
+      }
       pushed++;
-    } catch (e) { console.warn("pushTimesheets failed", s.id, e); }
+    } catch (e) { console.warn("pushTimesheets grouped failed", group, e); }
   }
   return pushed;
 }
 
+// ---------------------------------------------------------------------------
+// Production Reports
+// ---------------------------------------------------------------------------
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+async function pushProductionReports(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string, since: string): Promise<number> {
+  const { data: linkedProjects } = await admin.from("projects").select("id, odoo_id, code, name").eq("company_id", companyId).not("odoo_id", "is", null).eq("is_archived", false);
+  const projects = (linkedProjects ?? []) as any[];
+  if (projects.length === 0) return 0;
+
+  let reportsSent = 0;
+  for (const project of projects) {
+    const { data: pieces } = await admin.from("pieces_tasks").select("name, estimated_time_minutes, cnc_estimated_hours, cnc_estimated_cost, production_status, status, updated_at").eq("project_id", project.id).gte("updated_at", since);
+    const changedPieces = (pieces ?? []) as any[];
+    if (changedPieces.length === 0) continue;
+
+    const completedCount = changedPieces.filter((p) => p.status === "completed").length;
+    const totalHours = changedPieces.reduce((sum, p) => sum + (Number(p.cnc_estimated_hours) || 0), 0);
+    const totalCost = changedPieces.reduce((sum, p) => sum + (Number(p.cnc_estimated_cost) || 0), 0);
+
+    const rows = changedPieces.slice(0, 30).map((p) => `<tr><td style="padding:4px 8px;border:1px solid #ddd;">${escapeHtml(String(p.name ?? "—"))}</td><td style="padding:4px 8px;border:1px solid #ddd;">${escapeHtml(String(p.status ?? "—"))}</td></tr>`).join("");
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;font-size:13px;">
+        <h3 style="margin:0 0 8px;color:#714B67;">[AniXOS] Rapport de production — ${escapeHtml(project.code)}</h3>
+        <p style="margin:0 0 8px;"><strong>Projet :</strong> ${escapeHtml(project.name)}<br/>
+        <strong>Pièces mises à jour :</strong> ${changedPieces.length} (dont <strong>${completedCount}</strong> terminée(s))<br/>
+        <strong>Heures estimées :</strong> ${totalHours.toFixed(1)} h<br/>
+        <strong>Coût estimé :</strong> ${totalCost.toFixed(2)}</p>
+        <table style="border-collapse:collapse;width:100%;"><thead><tr style="background:#f5f5f5;"><th style="padding:4px 8px;border:1px solid #ddd;text-align:left;">Pièce</th><th style="padding:4px 8px;border:1px solid #ddd;text-align:left;">Statut</th></tr></thead><tbody>${rows}</tbody></table>
+      </div>
+    `;
+
+    try {
+      await odooExecute<number>(ctx, "mail.message", "create", [{ model: "project.project", res_id: project.odoo_id, body: html, message_type: "comment", subtype_xmlid: "mail.mt_comment" }]);
+      reportsSent++;
+    } catch (e) { console.warn("pushProductionReports failed", project.id, e); }
+  }
+  return reportsSent;
+}
+
+// ---------------------------------------------------------------------------
+// Main Handler
+// ---------------------------------------------------------------------------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   let logId: string | null = null;
@@ -264,7 +344,7 @@ Deno.serve(async (req) => {
     const uid = await authenticateOdoo(cfg.odoo_url, cfg.odoo_db, cfg.odoo_username, apiKey);
     const ctx: OdooContext = { url: cfg.odoo_url, db: cfg.odoo_db, uid, apiKey };
     const detectedVersion = await detectOdooVersion(cfg.odoo_url);
-
+    
     const since = cfg.last_push_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const syncModules = cfg.sync_modules ?? {};
     const results: Record<string, number> = {};
@@ -279,6 +359,7 @@ Deno.serve(async (req) => {
     }
     
     results.timesheetsCreated = await pushTimesheets(ctx, admin, companyId, since);
+    results.reportsSent = await pushProductionReports(ctx, admin, companyId, since);
 
     const totalSynced = Object.values(results).reduce((a, b) => a + b, 0);
     const now = new Date().toISOString();
