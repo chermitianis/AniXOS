@@ -1,0 +1,155 @@
+📘 دليل المزامنة التلقائية بين AniXOS و Odoo
+هذا الدليل يشرح كيفية عمل المزامنة التلقائية (Real-time Sync) في الاتجاهين، وكيفية إعدادها خطوة بخطوة.
+
+🏗️ 1. كيف تعمل المزامنة؟
+المزامنة تعتمد على 3 طبقات لضمان الموثوقية:
+
+AniXOS ➔ Odoo (فوري): يتم عبر Postgres Triggers في Supabase (أضفناها في Migration 0097). أي تعديل في AniXOS يُرسل إشارة فورية إلى Odoo عبر Edge Functions.
+
+Odoo ➔ AniXOS (فوري): يتم عبر Odoo Automation Rules (Webhooks). أي إضافة في Odoo تُرسل إشارة إلى Supabase لتشغيل الـ Pull فوراً.
+
+المزامنة الاحتياطية (كل 30 دقيقة): يعمل pg_cron في Supabase كشبكة أمان (Reconciliation) لسحب أي بيانات فاتت بسبب انقطاع الشبكة.
+
+🔄 2. إعدادات AniXOS ➔ Odoo (Push) - مكتمل
+هذا الجزء يعمل تلقائياً بالفعل بفضل Migration 0097.
+
+ملاحظة: يرجى التأكد من أنك قمت بتعيين الـ Secrets في Supabase (SQL Editor):
+
+sql
+ALTER DATABASE postgres SET app.supabase_project_ref = 'your-project-ref';
+ALTER DATABASE postgres SET app.odoo_cron_secret = 'your-cron-secret';
+⚡ 3. إعدادات Odoo ➔ AniXOS (Pull) - الفوري (Webhooks)
+لجعل Odoo يُبلغ AniXOS فوراً عند إنشاء أو تعديل أي شيء، اتبع الخطوات التالية:
+
+الخطوة 3.1: إنشاء Edge Function في Supabase
+المسار: supabase/functions/odoo-webhook-receiver/index.ts
+
+انسخ هذا الكود وانشره في Supabase:
+
+typescript
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const WEBHOOK_SECRET = Deno.env.get("ODOO_WEBHOOK_SECRET") ?? "anixos-webhook-secret";
+
+Deno.serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+
+  // التحقق من الأمان
+  const authHeader = req.headers.get("x-webhook-secret");
+  if (authHeader !== WEBHOOK_SECRET) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+    const { company_id } = body; 
+
+    if (!company_id) return new Response("Missing company_id", { status: 400 });
+
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    
+    // تشغيل Pull في الخلفية فوراً
+    await admin.rpc("trigger_odoo_pull", { p_company_id: company_id });
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+  }
+});
+⚠️ هام: تأكد من إضافة المتغير ODOO_WEBHOOK_SECRET في إعدادات Supabase Secrets بقيمة anixos-webhook-secret.
+
+الخطوة 3.2: إعداد Odoo (Server Actions)
+نحتاج لإنشاء Action في Odoo يقوم بإرسال الإشارة لـ Supabase.
+
+اذهب إلى Settings ➔ Technical ➔ Actions ➔ Server Actions.
+
+اضغط Nouveau.
+
+املأ الحقول:
+
+Name: Sync to AniXOS
+
+Model: Project (سنقوم بإنشاء واحد آخر للمهام لاحقاً)
+
+Action To Do: Execute Python Code
+
+ضع هذا الكود (مع استبدال القيم):
+
+python
+import requests
+
+# ⚠️ استبدل YOUR_PROJECT_REF برابط مشروعك في Supabase
+url = "https://[YOUR_PROJECT_REF].supabase.co/functions/v1/odoo-webhook-receiver"
+
+headers = {
+    "Content-Type": "application/json",
+    "x-webhook-secret": "anixos-webhook-secret"
+}
+
+# ⚠️ استبدل YOUR_COMPANY_UUID بمعرف الشركة في Supabase (جدول companies)
+payload = {
+    "company_id": "YOUR_COMPANY_UUID"
+}
+
+try:
+    requests.post(url, json=payload, headers=headers, timeout=5)
+except Exception as e:
+    pass # نتجاهل الخطأ حتى لا يتعطل Odoo
+احفظ.
+
+الخطوة 3.3: ربط الـ Action بـ Automation Rule في Odoo
+الآن سنجعل Odoo يُشغّل الـ Action تلقائياً عند كل حدث.
+
+اذهب إلى Settings ➔ Technical ➔ Automation ➔ Automation Rules.
+
+اضغط Nouveau.
+
+املأ الحقول:
+
+Name: Auto Sync Projects to AniXOS
+
+Model: Project
+
+Trigger: On Creation and Update (عند الإنشاء والتعديل)
+
+Action: اختر Sync to AniXOS (الذي أنشأناه في الخطوة السابقة).
+
+احفظ.
+
+الخطوة 3.4: تكرار نفس الإعداد للجداول الأخرى
+كرر الخطوة 3.2 و 3.3 للجداول التالية لضمان مزامنة فورية لكل شيء:
+
+الجدول في Odoo	Model Name	الغرض
+Contacts	res.partner	مزامنة العملاء الجدد
+Tasks	project.task	مزامنة القطع المُضافة في Odoo
+Employees	hr.employee	مزامنة الموظفين الجدد
+Equipment	maintenance.equipment	مزامنة الآلات الجديدة
+(ملاحظة: يمكنك إنشاء Server Action واحد فقط واستخدامه في كل الـ Automation Rules، لكن يجب تغيير الـ Model في كل Automation Rule).
+
+🛠️ 4. التحقق من نجاح المزامنة
+بمجرد تطبيق الخطوات أعلاه، جرّب السيناريو التالي:
+
+أنشئ مشروعاً جديداً في Odoo.
+
+لا تلمس AniXOS. فقط افتح المتصفح على صفحة Projets à étudier.
+
+ستجد المشروع قد ظهر خلال 1-2 ثانية.
+
+في حال حدوث خطأ:
+تحقق من سجلات Odoo (Settings ➔ Technical ➔ Logging).
+
+تحقق من سجلات Supabase Edge Functions.
+
+تأكد من أن الـ company_id صحيح في كود Python.
+
+تأكد من نشر odoo-webhook-receiver بنجاح.
+
+🎯 الخلاصة:
+
+Push: يعمل تلقائياً (Triggers).
+
+Pull: يحتاج لتطبيق الـ Webhooks أعلاه (مرة واحدة فقط).
