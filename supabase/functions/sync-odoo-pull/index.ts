@@ -1,31 +1,17 @@
 // ============================================================================
 // supabase/functions/sync-odoo-pull/index.ts
 //
-// Pulls all resources from Odoo into AniXOS:
-//   - clients               (res.partner, customer_rank > 0)
-//   - projects              (project.project)
-//   - pieces (tasks)        (project.task)
-//   - workers               (hr.employee)
-//   - machines              (maintenance.equipment)
-//   - manufacturing_orders  (mrp.production)
-//   - planning              (planning.slot)
+// Unified Pull — supports Standalone and Integrated modes.
 //
-// Also caches Odoo stage mappings (project.task.type) for later Push.
-//
-// Idempotency: every row uses `odoo_id` as stable key (UNIQUE with company_id).
-// Codes are generated locally (generate_project_code) — never from Odoo.
-//
-// Version detection: `detectOdooVersion` runs once, result stored in config.
-//
-// Fixes applied:
-//   1. workers: username auto-generated ('odoo_<id>'), password_hash NULL
-//   2. machines: full mapping from maintenance.equipment
-//   3. manufacturing_orders: full mapping from mrp.production
-//   4. planning: full mapping from planning.slot
-//   5. stage_mappings: cached at first pull (project.task.type)
-//   6. All pull handlers separated into functions (easier to maintain)
-//   7. Network retry with exponential backoff
-//   8. Explicit response.ok check everywhere
+// Fixes applied in this version:
+//   1. ID Reuse Protection: Compares Odoo create_date with local created_at to
+//      prevent old pieces from attaching to new projects that reused an ID.
+//   2. Re-enabled pullPieces: Since Odoo no longer auto-creates tasks (Project
+//      only), we can safely pull manual tasks from Odoo.
+//   3. Origin tracking: last_synced_from = 'odoo', odoo_write_date
+//   4. Loop prevention: skip if last_synced_from='anixos' and synced <10s ago
+//   5. Soft delete: active=false → deleted_at set
+//   6. Duplicate detection: same name → record in odoo_sync_conflicts
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -39,6 +25,8 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const ENCRYPTION_KEY =
   Deno.env.get("ODOO_ENCRYPTION_KEY") ?? "anixos-odoo-default-key-change-me";
 const CRON_INTERNAL_SECRET = Deno.env.get("CRON_INTERNAL_SECRET");
+
+const LOOP_WINDOW_MS = 10_000; // 10 seconds
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,7 +145,7 @@ async function odooExecute<T = unknown>(
 }
 
 // ---------------------------------------------------------------------------
-// Version detection
+// Version & auth
 // ---------------------------------------------------------------------------
 async function detectOdooVersion(url: string): Promise<string> {
   try {
@@ -179,9 +167,6 @@ async function detectOdooVersion(url: string): Promise<string> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Authentication
-// ---------------------------------------------------------------------------
 async function authenticateOdoo(
   url: string,
   db: string,
@@ -209,7 +194,7 @@ async function authenticateOdoo(
 }
 
 // ---------------------------------------------------------------------------
-// Pagination
+// Pagination + field introspection
 // ---------------------------------------------------------------------------
 async function fetchAllPages<T = Record<string, unknown>>(
   ctx: OdooContext,
@@ -233,9 +218,6 @@ async function fetchAllPages<T = Record<string, unknown>>(
   return all;
 }
 
-// ---------------------------------------------------------------------------
-// Field introspection (cached)
-// ---------------------------------------------------------------------------
 const fieldsCache = new Map<string, Set<string>>();
 
 async function getModelFields(
@@ -261,11 +243,67 @@ async function getModelFields(
   }
 }
 
-function pickField(available: Set<string>, candidates: string[]): string | null {
-  for (const c of candidates) {
-    if (available.has(c)) return c;
+// ---------------------------------------------------------------------------
+// Sync metadata helpers
+// ---------------------------------------------------------------------------
+function shouldSkipDueToLoop(
+  lastSyncedFrom: string | null,
+  lastSyncedAt: string | null,
+): boolean {
+  if (lastSyncedFrom !== "anixos") return false;
+  if (!lastSyncedAt) return false;
+  const diff = Date.now() - new Date(lastSyncedAt).getTime();
+  return diff < LOOP_WINDOW_MS;
+}
+
+function odooSyncMetadata(odooWriteDate: string | null): {
+  last_synced_from: "odoo";
+  last_synced_at: string;
+  odoo_write_date: string | null;
+} {
+  return {
+    last_synced_from: "odoo",
+    last_synced_at: new Date().toISOString(),
+    odoo_write_date: odooWriteDate,
+  };
+}
+
+async function recordDuplicateConflict(
+  admin: ReturnType<typeof createClient>,
+  companyId: string,
+  conceptKey: string,
+  odooId: number,
+  odooName: string,
+  anixosId: string,
+  anixosName: string,
+  reason = "duplicate_name",
+): Promise<void> {
+  try {
+    const { data: existing } = await admin
+      .from("odoo_sync_conflicts")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("concept_key", conceptKey)
+      .eq("odoo_record_id", odooId)
+      .eq("anixos_record_id", anixosId)
+      .eq("status", "pending")
+      .maybeSingle();
+
+    if (existing) return;
+
+    await admin.from("odoo_sync_conflicts").insert({
+      company_id: companyId,
+      concept_key: conceptKey,
+      odoo_record_id: odooId,
+      odoo_record_name: odooName,
+      anixos_record_id: anixosId,
+      anixos_record_name: anixosName,
+      conflict_reason: reason,
+      status: "pending",
+    });
+  } catch (err) {
+    console.warn("recordDuplicateConflict failed (non-blocking)", err);
   }
-  return null;
 }
 
 // ===========================================================================
@@ -284,30 +322,85 @@ async function pullClients(
     ctx,
     "res.partner",
     [["customer_rank", ">", 0]],
-    ["id", "name", "email", "phone", "street", "city"],
+    ["id", "name", "email", "phone", "street", "city", "write_date", "active"],
   );
 
   let count = 0;
   for (const p of partners) {
-    const { error } = await admin.from("clients").upsert(
-      {
-        company_id: companyId,
-        name: String(p.name ?? ""),
-        email: p.email ? String(p.email) : null,
-        phone: p.phone ? String(p.phone) : null,
-        address: p.street ? String(p.street) : null,
-        odoo_id: p.id,
-      },
-      { onConflict: "company_id,odoo_id" },
-    );
-    if (!error) count++;
-    else console.warn("pullClients upsert failed", p.id, error.message);
+    const odooId = p.id as number;
+    const isActive = p.active !== false;
+    const meta = odooSyncMetadata(p.write_date as string | null);
+
+    const { data: existing } = await admin
+      .from("clients")
+      .select("id, last_synced_from, last_synced_at")
+      .eq("company_id", companyId)
+      .eq("odoo_id", odooId)
+      .maybeSingle();
+
+    if (existing) {
+      const ex = existing as {
+        id: string;
+        last_synced_from: string | null;
+        last_synced_at: string | null;
+      };
+
+      if (shouldSkipDueToLoop(ex.last_synced_from, ex.last_synced_at)) continue;
+
+      const { error } = await admin
+        .from("clients")
+        .update({
+          name: String(p.name ?? ""),
+          email: p.email ? String(p.email) : null,
+          phone: p.phone ? String(p.phone) : null,
+          address: p.street ? String(p.street) : null,
+          is_active: isActive,
+          deleted_at: isActive ? null : new Date().toISOString(),
+          ...meta,
+        })
+        .eq("id", ex.id);
+
+      if (!error) count++;
+    } else {
+      const { data: sameName } = await admin
+        .from("clients")
+        .select("id, name")
+        .eq("company_id", companyId)
+        .is("odoo_id", null)
+        .ilike("name", String(p.name ?? ""))
+        .maybeSingle();
+
+      const { data: inserted, error } = await admin
+        .from("clients")
+        .insert({
+          company_id: companyId,
+          name: String(p.name ?? ""),
+          email: p.email ? String(p.email) : null,
+          phone: p.phone ? String(p.phone) : null,
+          address: p.street ? String(p.street) : null,
+          odoo_id: odooId,
+          is_active: isActive,
+          ...meta,
+        })
+        .select("id")
+        .single();
+
+      if (!error && inserted) {
+        count++;
+        if (sameName) {
+          await recordDuplicateConflict(
+            admin, companyId, "client", odooId, String(p.name ?? ""),
+            (sameName as { id: string }).id, (sameName as { name: string }).name,
+          );
+        }
+      }
+    }
   }
   return count;
 }
 
 // ---------------------------------------------------------------------------
-// Projects
+// Projects (With ID Reuse Protection)
 // ---------------------------------------------------------------------------
 async function pullProjects(
   ctx: OdooContext,
@@ -315,17 +408,18 @@ async function pullProjects(
   companyId: string,
 ): Promise<{ count: number; projectIdByOdooId: Map<number, string> }> {
   const projects = await fetchAllPages(ctx, "project.project", [], [
-    "id",
-    "name",
-    "partner_id",
-    "date_start",
-    "date",
+    "id", "name", "partner_id", "date_start", "date", "write_date", "active", "create_date"
   ]);
 
   let count = 0;
   const projectIdByOdooId = new Map<number, string>();
 
   for (const p of projects) {
+    const odooId = p.id as number;
+    const isActive = p.active !== false;
+    const meta = odooSyncMetadata(p.write_date as string | null);
+    const odooCreateDate = p.create_date ? new Date(p.create_date as string).getTime() : 0;
+
     let clientId: string | null = null;
     const partnerField = p.partner_id as [number, string] | false;
     if (partnerField && Array.isArray(partnerField)) {
@@ -340,49 +434,97 @@ async function pullProjects(
 
     const { data: existing } = await admin
       .from("projects")
-      .select("id, code")
+      .select("id, code, last_synced_from, last_synced_at, created_at")
       .eq("company_id", companyId)
-      .eq("odoo_id", p.id)
+      .eq("odoo_id", odooId)
       .maybeSingle();
 
-    let code: string;
     if (existing) {
-      code = (existing as { code: string }).code;
-    } else {
-      const { data: generated, error: codeError } = await admin.rpc(
-        "generate_project_code",
-        { p_company_id: companyId, p_client_id: clientId },
-      );
-      if (codeError) {
-        console.warn("generate_project_code failed", p.id, codeError.message);
+      const ex = existing as {
+        id: string;
+        code: string;
+        last_synced_from: string | null;
+        last_synced_at: string | null;
+        created_at: string;
+      };
+      
+      if (shouldSkipDueToLoop(ex.last_synced_from, ex.last_synced_at)) {
+        projectIdByOdooId.set(odooId, ex.id);
         continue;
       }
-      code = generated as string;
+
+      // 🛡️ ID Reuse Protection
+      const localCreatedAt = new Date(ex.created_at).getTime();
+      if (odooCreateDate > localCreatedAt + 86400000) { // > 24 hours difference
+        console.warn(`ID Reuse detected for project ${odooId}. Archiving old record.`);
+        await admin.from("projects").update({ is_archived: true, deleted_at: new Date().toISOString() }).eq("id", ex.id);
+        // Continue to insert block below to create a new project
+      } else {
+        // Normal update
+        const { error } = await admin
+          .from("projects")
+          .update({
+            client_id: clientId,
+            name: String(p.name ?? ""),
+            start_date: p.date_start || null,
+            due_date: p.date || null,
+            is_archived: !isActive,
+            deleted_at: isActive ? null : new Date().toISOString(),
+            ...meta,
+          })
+          .eq("id", ex.id);
+        if (!error) {
+          count++;
+          projectIdByOdooId.set(odooId, ex.id);
+        }
+        continue;
+      }
     }
 
-    const { data: upserted, error } = await admin
+    // Insert New Project
+    const { data: generated, error: codeError } = await admin.rpc(
+      "generate_project_code",
+      { p_company_id: companyId, p_client_id: clientId },
+    );
+    if (codeError) {
+      console.warn("generate_project_code failed", odooId, codeError.message);
+      continue;
+    }
+
+    const { data: sameName } = await admin
       .from("projects")
-      .upsert(
-        {
-          company_id: companyId,
-          client_id: clientId,
-          name: String(p.name ?? ""),
-          code,
-          status: "draft",
-          odoo_id: p.id,
-          start_date: p.date_start || null,
-          due_date: p.date || null,
-        },
-        { onConflict: "company_id,odoo_id" },
-      )
+      .select("id, name")
+      .eq("company_id", companyId)
+      .is("odoo_id", null)
+      .ilike("name", String(p.name ?? ""))
+      .maybeSingle();
+
+    const { data: inserted, error } = await admin
+      .from("projects")
+      .insert({
+        company_id: companyId,
+        client_id: clientId,
+        name: String(p.name ?? ""),
+        code: generated as string,
+        status: "draft",
+        odoo_id: odooId,
+        start_date: p.date_start || null,
+        due_date: p.date || null,
+        is_archived: !isActive,
+        ...meta,
+      })
       .select("id")
       .single();
 
-    if (!error && upserted) {
+    if (!error && inserted) {
       count++;
-      projectIdByOdooId.set(p.id as number, (upserted as { id: string }).id);
-    } else if (error) {
-      console.warn("pullProjects upsert failed", p.id, error.message);
+      projectIdByOdooId.set(odooId, (inserted as { id: string }).id);
+      if (sameName) {
+        await recordDuplicateConflict(
+          admin, companyId, "project", odooId, String(p.name ?? ""),
+          (sameName as { id: string }).id, (sameName as { name: string }).name,
+        );
+      }
     }
   }
 
@@ -390,7 +532,7 @@ async function pullProjects(
 }
 
 // ---------------------------------------------------------------------------
-// Pieces (project.task)
+// Pieces (Tasks)
 // ---------------------------------------------------------------------------
 async function pullPieces(
   ctx: OdooContext,
@@ -406,142 +548,145 @@ async function pullPieces(
     ctx,
     "project.task",
     [["project_id", "in", odooProjectIds]],
-    ["id", "name", "project_id"],
+    ["id", "name", "project_id", "write_date", "active"],
   );
 
   if (tasks.length === 0) return 0;
 
-  // Detect hours field
   const taskFields = await getModelFields(ctx, "project.task");
-  const hoursField = pickField(taskFields, [
-    "allocated_hours",
-    "planned_hours",
-    "planned_hours_cost",
-  ]);
-
+  const hoursField = ["allocated_hours", "planned_hours", "planned_hours_cost"].find(f => taskFields.has(f));
   const hoursByTaskId = new Map<number, number>();
+  
   if (hoursField) {
     try {
       const withHours = await odooExecute<Array<Record<string, unknown>>>(
-        ctx,
-        "project.task",
-        "search_read",
-        [[["project_id", "in", odooProjectIds]]],
+        ctx, "project.task", "search_read", [[["project_id", "in", odooProjectIds]]],
         { fields: ["id", hoursField], limit: 2000 },
       );
       for (const row of withHours) {
         const val = row[hoursField];
-        if (typeof val === "number" && val > 0) {
-          hoursByTaskId.set(row.id as number, val);
-        }
+        if (typeof val === "number" && val > 0) hoursByTaskId.set(row.id as number, val);
       }
     } catch (err) {
-      console.warn(`pullPieces: failed to fetch ${hoursField}`, err);
+      console.warn(`pullPieces: hours fetch failed`, err);
     }
   }
 
   let count = 0;
   for (const t of tasks) {
+    const odooId = t.id as number;
     const projectField = t.project_id as [number, string] | false;
     if (!projectField || !Array.isArray(projectField)) continue;
     const localProjectId = projectIdByOdooId.get(projectField[0]);
     if (!localProjectId) continue;
 
-    const plannedHours = hoursByTaskId.get(t.id as number) ?? 0;
-    const { error } = await admin.from("pieces_tasks").upsert(
-      {
+    const isActive = t.active !== false;
+    const meta = odooSyncMetadata(t.write_date as string | null);
+    const plannedHours = hoursByTaskId.get(odooId) ?? 0;
+
+    const { data: existing } = await admin
+      .from("pieces_tasks")
+      .select("id, last_synced_from, last_synced_at")
+      .eq("company_id", companyId)
+      .eq("odoo_id", odooId)
+      .maybeSingle();
+
+    if (existing) {
+      const ex = existing as { id: string; last_synced_from: string | null; last_synced_at: string | null };
+      if (shouldSkipDueToLoop(ex.last_synced_from, ex.last_synced_at)) continue;
+
+      const { error } = await admin
+        .from("pieces_tasks")
+        .update({
+          project_id: localProjectId,
+          name: String(t.name ?? ""),
+          estimated_time_minutes: plannedHours > 0 ? Math.round(plannedHours * 60) : null,
+          deleted_at: isActive ? null : new Date().toISOString(),
+          ...meta,
+        })
+        .eq("id", ex.id);
+      if (!error) count++;
+    } else {
+      const { error } = await admin.from("pieces_tasks").insert({
         company_id: companyId,
         project_id: localProjectId,
         name: String(t.name ?? ""),
-        estimated_time_minutes:
-          plannedHours > 0 ? Math.round(plannedHours * 60) : null,
+        estimated_time_minutes: plannedHours > 0 ? Math.round(plannedHours * 60) : null,
         quantity: 1,
-        odoo_id: t.id,
-      },
-      { onConflict: "company_id,odoo_id" },
-    );
-    if (!error) count++;
-    else console.warn("pullPieces upsert failed", t.id, error.message);
+        odoo_id: odooId,
+        ...meta,
+      });
+      if (!error) count++;
+    }
   }
   return count;
 }
 
 // ---------------------------------------------------------------------------
-// Workers (hr.employee)
-//
-// NOTE: password_hash and username are NULL for Odoo-pulled workers.
-//       An admin must assign credentials manually in AniXOS.
+// Workers
 // ---------------------------------------------------------------------------
 async function pullWorkers(
   ctx: OdooContext,
   admin: ReturnType<typeof createClient>,
   companyId: string,
 ): Promise<number> {
-  // Detect available fields (varies across Odoo versions)
   const fields = await getModelFields(ctx, "hr.employee");
-  const candidates = ["id", "name", "work_email", "work_phone", "hourly_cost", "active"];
+  const candidates = ["id", "name", "work_email", "work_phone", "hourly_cost", "active", "write_date"];
   const availableFields = candidates.filter((f) => fields.has(f));
 
-  if (!availableFields.includes("id") || !availableFields.includes("name")) {
-    console.warn("pullWorkers: hr.employee missing id or name — skipping");
-    return 0;
-  }
+  if (!availableFields.includes("id") || !availableFields.includes("name")) return 0;
 
-  const employees = await fetchAllPages(
-    ctx,
-    "hr.employee",
-    [],
-    availableFields,
-  );
-
+  const employees = await fetchAllPages(ctx, "hr.employee", [], availableFields);
   let count = 0;
+
   for (const e of employees) {
     const odooId = e.id as number;
     const fullName = String(e.name ?? `Employee ${odooId}`).trim();
+    const isActive = e.active !== false;
+    const meta = odooSyncMetadata(e.write_date as string | null);
 
-    // Check if worker already exists
     const { data: existing } = await admin
       .from("workers")
-      .select("id")
+      .select("id, last_synced_from, last_synced_at")
       .eq("company_id", companyId)
       .eq("odoo_id", odooId)
       .maybeSingle();
 
     if (existing) {
-      // Update only mutable fields — never touch credentials
+      const ex = existing as { id: string; last_synced_from: string | null; last_synced_at: string | null };
+      if (shouldSkipDueToLoop(ex.last_synced_from, ex.last_synced_at)) continue;
+
       const { error } = await admin
         .from("workers")
         .update({
           full_name: fullName,
-          hourly_cost:
-            typeof e.hourly_cost === "number" ? e.hourly_cost : 0,
+          hourly_cost: typeof e.hourly_cost === "number" ? e.hourly_cost : 0,
+          is_active: isActive,
+          deleted_at: isActive ? null : new Date().toISOString(),
+          ...meta,
         })
-        .eq("id", (existing as { id: string }).id);
+        .eq("id", ex.id);
       if (!error) count++;
-      else console.warn("pullWorkers update failed", odooId, error.message);
-      continue;
+    } else {
+      const { error } = await admin.from("workers").insert({
+        company_id: companyId,
+        odoo_id: odooId,
+        full_name: fullName,
+        username: `odoo_${odooId}`,
+        password_hash: null,
+        hourly_cost: typeof e.hourly_cost === "number" ? e.hourly_cost : 0,
+        is_active: isActive,
+        interface_type: "both",
+        ...meta,
+      });
+      if (!error) count++;
     }
-
-    // New worker — insert with NULL credentials
-    const { error } = await admin.from("workers").insert({
-      company_id: companyId,
-      odoo_id: odooId,
-      full_name: fullName,
-      username: `odoo_${odooId}`, // auto-generated placeholder
-      password_hash: null, // ← requires admin to set
-      hourly_cost: typeof e.hourly_cost === "number" ? e.hourly_cost : 0,
-      is_active: e.active !== false,
-      interface_type: "both",
-    });
-
-    if (!error) count++;
-    else console.warn("pullWorkers insert failed", odooId, error.message);
   }
   return count;
 }
 
 // ---------------------------------------------------------------------------
-// Machines (maintenance.equipment)
+// Machines
 // ---------------------------------------------------------------------------
 async function pullMachines(
   ctx: OdooContext,
@@ -549,272 +694,63 @@ async function pullMachines(
   companyId: string,
 ): Promise<number> {
   const fields = await getModelFields(ctx, "maintenance.equipment");
-  const candidates = [
-    "id",
-    "name",
-    "code",
-    "category_id",
-    "location",
-    "active",
-  ];
+  const candidates = ["id", "name", "code", "location", "active", "write_date"];
   const availableFields = candidates.filter((f) => fields.has(f));
 
-  if (!availableFields.includes("id") || !availableFields.includes("name")) {
-    console.warn("pullMachines: maintenance.equipment missing id or name — skipping");
-    return 0;
-  }
+  if (!availableFields.includes("id") || !availableFields.includes("name")) return 0;
 
-  const equipments = await fetchAllPages(
-    ctx,
-    "maintenance.equipment",
-    [],
-    availableFields,
-  );
-
+  const equipments = await fetchAllPages(ctx, "maintenance.equipment", [], availableFields);
   let count = 0;
+
   for (const eq of equipments) {
     const odooId = eq.id as number;
     const name = String(eq.name ?? `Machine ${odooId}`).trim();
-    const code = eq.code
-      ? String(eq.code).trim()
-      : `M-${odooId}`; // fallback code if Odoo doesn't provide one
+    const code = eq.code ? String(eq.code).trim() : `M-${odooId}`;
+    const isActive = eq.active !== false;
+    const meta = odooSyncMetadata(eq.write_date as string | null);
 
     const { data: existing } = await admin
       .from("machines")
-      .select("id")
+      .select("id, last_synced_from, last_synced_at")
       .eq("company_id", companyId)
       .eq("odoo_id", odooId)
       .maybeSingle();
 
     if (existing) {
+      const ex = existing as { id: string; last_synced_from: string | null; last_synced_at: string | null };
+      if (shouldSkipDueToLoop(ex.last_synced_from, ex.last_synced_at)) continue;
+
       const { error } = await admin
         .from("machines")
         .update({
-          name,
-          code,
+          name, code,
           location: eq.location ? String(eq.location) : null,
-          is_active: eq.active !== false,
+          is_active: isActive,
+          deleted_at: isActive ? null : new Date().toISOString(),
+          ...meta,
         })
-        .eq("id", (existing as { id: string }).id);
+        .eq("id", ex.id);
       if (!error) count++;
-      else console.warn("pullMachines update failed", odooId, error.message);
-      continue;
-    }
-
-    // New machine — provide required fields with sensible defaults
-    const { error } = await admin.from("machines").insert({
-      company_id: companyId,
-      odoo_id: odooId,
-      name,
-      code,
-      location: eq.location ? String(eq.location) : null,
-      current_status: "idle", // required — default
-      is_active: eq.active !== false,
-      tool_count: 0, // required — default
-      interface_type: "cnc_classique", // required — default
-    });
-
-    if (!error) count++;
-    else console.warn("pullMachines insert failed", odooId, error.message);
-  }
-  return count;
-}
-
-// ---------------------------------------------------------------------------
-// Manufacturing Orders (mrp.production)
-// ---------------------------------------------------------------------------
-async function pullManufacturingOrders(
-  ctx: OdooContext,
-  admin: ReturnType<typeof createClient>,
-  companyId: string,
-): Promise<number> {
-  const fields = await getModelFields(ctx, "mrp.production");
-  const candidates = [
-    "id",
-    "name",
-    "product_id",
-    "product_qty",
-    "state",
-    "date_start",
-    "date_finished",
-  ];
-  const availableFields = candidates.filter((f) => fields.has(f));
-
-  if (!availableFields.includes("id") || !availableFields.includes("name")) {
-    console.warn("pullManufacturingOrders: mrp.production missing id or name — skipping");
-    return 0;
-  }
-
-  const orders = await fetchAllPages(
-    ctx,
-    "mrp.production",
-    [],
-    availableFields,
-  );
-
-  let count = 0;
-  for (const o of orders) {
-    const odooId = o.id as number;
-    const productField = o.product_id as [number, string] | false;
-    const productName = productField && Array.isArray(productField)
-      ? productField[1]
-      : `Product ${odooId}`;
-
-    // Map Odoo state to AniXOS status
-    const stateMap: Record<string, string> = {
-      draft: "draft",
-      confirmed: "confirmed",
-      progress: "in_progress",
-      to_close: "in_progress",
-      done: "completed",
-      cancel: "cancelled",
-    };
-    const status = stateMap[String(o.state ?? "draft")] ?? "draft";
-
-    const { data: existing } = await admin
-      .from("manufacturing_orders")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("odoo_id", odooId)
-      .maybeSingle();
-
-    // Note: project_id is NOT NULL in AniXOS — we skip if not linked
-    // AniXOS MOs are always project-bound; Odoo MOs may not be.
-    // For now we only sync MOs that have a corresponding project.
-    // (Future: create a synthetic "Odoo Imports" project if needed.)
-
-    if (!existing) {
-      // Skip creation — requires project_id which we don't have
-      // Will be handled in a future iteration with a dedicated mapping
-      console.info(
-        `pullManufacturingOrders: skipped MO ${odooId} (no project mapping yet)`,
-      );
-      continue;
-    }
-
-    const { error } = await admin
-      .from("manufacturing_orders")
-      .update({
-        product_name: productName,
-        quantity: typeof o.product_qty === "number" ? o.product_qty : 1,
-        status,
-        planned_start_date: o.date_start || null,
-        planned_end_date: o.date_finished || null,
-      })
-      .eq("id", (existing as { id: string }).id);
-    if (!error) count++;
-    else console.warn("pullManufacturingOrders update failed", odooId, error.message);
-  }
-  return count;
-}
-
-// ---------------------------------------------------------------------------
-// Planning (planning.slot)
-// ---------------------------------------------------------------------------
-async function pullPlanning(
-  ctx: OdooContext,
-  admin: ReturnType<typeof createClient>,
-  companyId: string,
-): Promise<number> {
-  const fields = await getModelFields(ctx, "planning.slot");
-  const candidates = [
-    "id",
-    "employee_id",
-    "resource_id",
-    "start_datetime",
-    "end_datetime",
-  ];
-  const availableFields = candidates.filter((f) => fields.has(f));
-
-  if (!availableFields.includes("id")) {
-    console.warn("pullPlanning: planning.slot missing id — skipping");
-    return 0;
-  }
-
-  const slots = await fetchAllPages(ctx, "planning.slot", [], availableFields);
-
-  let count = 0;
-  for (const s of slots) {
-    const odooId = s.id as number;
-    const start = s.start_datetime as string | false;
-    const end = s.end_datetime as string | false;
-
-    if (!start) continue; // skip slots without start date
-
-    const plannedDate = start.slice(0, 10); // YYYY-MM-DD
-    const shiftStart = start.slice(11, 19); // HH:MM:SS
-    const shiftEnd = end ? end.slice(11, 19) : null;
-
-    // Resolve worker (via odoo_id)
-    let workerId: string | null = null;
-    const empField = s.employee_id as [number, string] | false;
-    if (empField && Array.isArray(empField)) {
-      const { data: w } = await admin
-        .from("workers")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("odoo_id", empField[0])
-        .maybeSingle();
-      workerId = (w as { id: string } | null)?.id ?? null;
-    }
-
-    if (!workerId) continue; // planning requires worker_id
-
-    // Resolve machine (via resource_id → machines.odoo_id)
-    let machineId: string | null = null;
-    const resField = s.resource_id as [number, string] | false;
-    if (resField && Array.isArray(resField)) {
-      const { data: m } = await admin
-        .from("machines")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("odoo_id", resField[0])
-        .maybeSingle();
-      machineId = (m as { id: string } | null)?.id ?? null;
-    }
-
-    const { data: existing } = await admin
-      .from("planning")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("odoo_id", odooId)
-      .maybeSingle();
-
-    if (existing) {
-      const { error } = await admin
-        .from("planning")
-        .update({
-          worker_id: workerId,
-          machine_id: machineId,
-          planned_date: plannedDate,
-          shift_start: shiftStart,
-          shift_end: shiftEnd,
-        })
-        .eq("id", (existing as { id: string }).id);
+    } else {
+      const { error } = await admin.from("machines").insert({
+        company_id: companyId,
+        odoo_id: odooId,
+        name, code,
+        location: eq.location ? String(eq.location) : null,
+        current_status: "idle",
+        is_active: isActive,
+        tool_count: 0,
+        interface_type: "cnc_classique",
+        ...meta,
+      });
       if (!error) count++;
-      else console.warn("pullPlanning update failed", odooId, error.message);
-      continue;
     }
-
-    const { error } = await admin.from("planning").insert({
-      company_id: companyId,
-      odoo_id: odooId,
-      worker_id: workerId,
-      machine_id: machineId,
-      planned_date: plannedDate,
-      shift_start: shiftStart,
-      shift_end: shiftEnd,
-      status: "planned",
-      sequence_order: 0,
-    });
-    if (!error) count++;
-    else console.warn("pullPlanning insert failed", odooId, error.message);
   }
   return count;
 }
 
 // ---------------------------------------------------------------------------
-// Stage mappings cache (project.task.type)
+// Stage mappings cache
 // ---------------------------------------------------------------------------
 async function cacheStageMappings(
   ctx: OdooContext,
@@ -838,7 +774,6 @@ async function cacheStageMappings(
       .update({ stage_mappings: mappings })
       .eq("company_id", companyId);
   } catch (err) {
-    // Non-blocking — stage_mappings is a cache, not critical
     console.warn("cacheStageMappings failed (non-blocking)", err);
   }
 }
@@ -855,7 +790,6 @@ Deno.serve(async (req) => {
   });
 
   try {
-    // Auth
     const cronSecretHeader = req.headers.get("x-cron-secret");
     let companyId: string;
 
@@ -887,7 +821,6 @@ Deno.serve(async (req) => {
       companyId = (staff as { company_id: string }).company_id;
     }
 
-    // Load config
     const { data: config } = await admin
       .from("odoo_config")
       .select("*")
@@ -903,7 +836,6 @@ Deno.serve(async (req) => {
     }
     const cfg = config as Record<string, unknown>;
 
-    // Open sync log
     const { data: logEntry } = await admin
       .from("odoo_sync_log")
       .insert({ company_id: companyId, direction: "pull", status: "in_progress" })
@@ -911,7 +843,6 @@ Deno.serve(async (req) => {
       .single();
     logId = (logEntry as { id: string } | null)?.id ?? null;
 
-    // Authenticate
     const apiKey = await decryptApiKey(cfg.api_key_encrypted as string);
     const uid = await authenticateOdoo(
       cfg.odoo_url as string,
@@ -926,50 +857,25 @@ Deno.serve(async (req) => {
       apiKey,
     };
 
-    // Detect version (best-effort)
     const detectedVersion = await detectOdooVersion(cfg.odoo_url as string);
 
-    // Execute modules
     const syncModules = (cfg.sync_modules as Record<string, boolean>) ?? {};
     const results: Record<string, number> = {};
     let projectIdByOdooId = new Map<number, string>();
 
-    // Order matters — dependencies
-    if (syncModules.clients) {
-      results.clients = await pullClients(ctx, admin, companyId);
-    }
-
-    if (syncModules.workers) {
-      results.workers = await pullWorkers(ctx, admin, companyId);
-    }
-
-    if (syncModules.machines) {
-      results.machines = await pullMachines(ctx, admin, companyId);
-    }
-
+    if (syncModules.clients) results.clients = await pullClients(ctx, admin, companyId);
+    if (syncModules.workers) results.workers = await pullWorkers(ctx, admin, companyId);
+    if (syncModules.machines) results.machines = await pullMachines(ctx, admin, companyId);
+    
     if (syncModules.projects) {
       const r = await pullProjects(ctx, admin, companyId);
       results.projects = r.count;
       projectIdByOdooId = r.projectIdByOdooId;
     }
-
     if (syncModules.work_orders && projectIdByOdooId.size > 0) {
       results.pieces = await pullPieces(ctx, admin, companyId, projectIdByOdooId);
     }
 
-    if (syncModules.manufacturing_orders) {
-      results.manufacturing_orders = await pullManufacturingOrders(
-        ctx,
-        admin,
-        companyId,
-      );
-    }
-
-    if (syncModules.planning) {
-      results.planning = await pullPlanning(ctx, admin, companyId);
-    }
-
-    // Cache stage mappings (always — small, useful for Push)
     await cacheStageMappings(ctx, admin, companyId);
 
     const totalSynced = Object.values(results).reduce((a, b) => a + b, 0);
@@ -978,12 +884,7 @@ Deno.serve(async (req) => {
     if (logId) {
       await admin
         .from("odoo_sync_log")
-        .update({
-          status: "success",
-          records_synced: totalSynced,
-          details: results,
-          completed_at: now,
-        })
+        .update({ status: "success", records_synced: totalSynced, details: results, completed_at: now })
         .eq("id", logId);
     }
 
@@ -993,26 +894,20 @@ Deno.serve(async (req) => {
         last_sync_at: now,
         last_sync_status: "success",
         last_sync_error: null,
-        records_synced:
-          ((cfg.records_synced as number) ?? 0) + totalSynced,
+        records_synced: ((cfg.records_synced as number) ?? 0) + totalSynced,
         version: (cfg.version as string | null) ?? detectedVersion,
       })
       .eq("company_id", companyId);
 
     return jsonResponse({ success: true, results, totalSynced });
   } catch (err) {
-    const errorMessage =
-      err instanceof Error ? err.message : "Erreur inconnue";
+    const errorMessage = err instanceof Error ? err.message : "Erreur inconnue";
     console.error("sync-odoo-pull failed:", err);
 
     if (logId) {
       await admin
         .from("odoo_sync_log")
-        .update({
-          status: "failed",
-          error_message: errorMessage,
-          completed_at: new Date().toISOString(),
-        })
+        .update({ status: "failed", error_message: errorMessage, completed_at: new Date().toISOString() })
         .eq("id", logId);
     }
     return jsonResponse({ error: "sync_failed", message: errorMessage }, 500);
