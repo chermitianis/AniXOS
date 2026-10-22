@@ -10,9 +10,10 @@
 //   4. testConnection: returns `version` and `uid` for UI display
 //   5. Exported SyncModule/SyncModules/SyncDirection types for shared use
 //   6. Added explicit company_id filter (defensive clarity, RLS is primary guard)
+//   7. AUTO-SYNC: Added background polling (every 30s) while app is open.
 // ============================================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,9 @@ export function useOdooConfig() {
   const [isPushing, setIsPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // مرجع لتجنب تكرار المزامنة إذا كانت قيد التشغيل
+  const isAutoSyncing = useRef(false);
+
   // -------------------------------------------------------------------------
   // Load
   // -------------------------------------------------------------------------
@@ -160,8 +164,6 @@ export function useOdooConfig() {
     setIsLoading(true);
     setError(null);
     try {
-      // RLS on odoo_config restricts rows to the caller's company + is_owner.
-      // `.maybeSingle()` is safe here: at most one row per company_id (UNIQUE).
       const { data, error: fetchError } = await supabase
         .from("odoo_config")
         .select("*")
@@ -180,6 +182,40 @@ export function useOdooConfig() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // -------------------------------------------------------------------------
+  // Auto-Sync Background Polling (كل 30 ثانية)
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    // لا تقم بالجدولة إذا لم تكن الميزة نشطة أو لم يتم تحميل الإعدادات
+    if (!config?.is_active) return;
+
+    const interval = setInterval(async () => {
+      // تجنب التشغيل المتزامن (إذا كان هناك مزامنة قيد التنفيذ)
+      if (isAutoSyncing.current) return;
+      isAutoSyncing.current = true;
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+
+        // استدعاء الـ Pull في الخلفية
+        await supabase.functions.invoke("sync-odoo-pull", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        // تحديث الواجهة لإظهار آخر وقت مزامنة
+        await reload();
+      } catch (err) {
+        console.warn("Auto-sync background pull failed", err);
+      } finally {
+        isAutoSyncing.current = false;
+      }
+    }, 30000); // 30 ثانية
+
+    return () => clearInterval(interval);
+  }, [config?.is_active, reload]);
 
   // -------------------------------------------------------------------------
   // Save (upsert)
@@ -337,9 +373,6 @@ export function useOdooConfig() {
 
   // -------------------------------------------------------------------------
   // Push (AniXOS → Odoo)
-  //
-  // Edge Function returns: { success, results, totalSynced }.
-  // Previous version read `data.sent` (undefined) — this is now fixed.
   // -------------------------------------------------------------------------
   const pushNow = useCallback(async (): Promise<SyncPushResult> => {
     setIsPushing(true);
