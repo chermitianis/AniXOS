@@ -10,12 +10,11 @@ export function OdooAutoSync() {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        // التحقق من أن الميزة نشطة في قاعدة البيانات
+        // جلب الإعدادات مباشرة بدون الحاجة لـ company_id (بفضل RLS)
         const { data: config } = await supabase
           .from("odoo_config")
           .select("is_active")
-          .eq("company_id", session.user.user_metadata?.company_id) // أو الطريقة التي تستخدمها لجلب الشركة
-          .maybeSingle();
+          .maybeSingle(); // RLS ستجلب صف الشركة الخاص بالمستخدم فقط
 
         if (!config?.is_active) return;
 
@@ -44,5 +43,5 @@ export function OdooAutoSync() {
     };
   }, []);
 
-  return null; // لا يعرض أي واجهة
+  return null;
 }
