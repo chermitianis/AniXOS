@@ -209,31 +209,31 @@ async function pushTaskStatus(ctx: OdooContext, admin: ReturnType<typeof createC
 // FINAL: Smart Timesheets (Group by Worker + Project + Piece + Date)
 // ---------------------------------------------------------------------------
 async function pushTimesheets(ctx: OdooContext, admin: ReturnType<typeof createClient>, companyId: string, since: string): Promise<number> {
+  // نجلب كل الجلسات التي لم تُرسل
   const { data: sessions } = await admin
     .from("work_sessions")
-    .select("id, worker_id, project_id, piece_task_id, started_at, duration_seconds, note")
+    .select("id, worker_id, project_id, piece_task_id, started_at, duration_seconds")
     .eq("company_id", companyId)
     .is("odoo_timesheet_id", null)
     .is("voided_at", null)
-    .not("ended_at", "is", null)
-    .gte("started_at", since);
+    .not("ended_at", "is", null);
 
   if (!sessions || sessions.length === 0) return 0;
 
-  const grouped: Record<string, { ids: string[], totalSeconds: number, date: string, projectId: string, pieceId: string, workerId: string, notes: string[] }> = {};
+  // التجميع: (المشروع + القطعة + العامل + التاريخ)
+  // لاحظ أننا أزلنا task_type_id لكي نجمع كل الأنشطة
+  const grouped: Record<string, { ids: string[], totalSeconds: number, date: string, projectId: string, pieceId: string, workerId: string }> = {};
 
   for (const s of sessions) {
     if (!s.project_id || !s.piece_task_id) continue;
     const dateStr = new Date(s.started_at).toISOString().split('T')[0];
-    // Grouping key separates by worker so costs are accurate, but sums up all actions in that day.
     const groupKey = `${s.project_id}_${s.piece_task_id}_${s.worker_id}_${dateStr}`;
 
     if (!grouped[groupKey]) {
-      grouped[groupKey] = { ids: [], totalSeconds: 0, date: dateStr, projectId: s.project_id, pieceId: s.piece_task_id, workerId: s.worker_id, notes: [] };
+      grouped[groupKey] = { ids: [], totalSeconds: 0, date: dateStr, projectId: s.project_id, pieceId: s.piece_task_id, workerId: s.worker_id };
     }
     grouped[groupKey].ids.push(s.id);
     grouped[groupKey].totalSeconds += (s.duration_seconds || 0);
-    if (s.note) grouped[groupKey].notes.push(s.note);
   }
 
   let pushed = 0;
@@ -247,7 +247,8 @@ async function pushTimesheets(ctx: OdooContext, admin: ReturnType<typeof createC
     const hours = Number((group.totalSeconds / 3600).toFixed(2));
     if (hours <= 0) continue;
 
-    const description = `${piece.name} - ${worker.full_name} (AniXOS)`;
+    // وصف بسيط: اسم القطعة + العامل
+    const description = `${piece.name} - ${worker.full_name} (Terminé)`;
 
     try {
       const timesheetId = await odooExecute<number>(
@@ -259,7 +260,7 @@ async function pushTimesheets(ctx: OdooContext, admin: ReturnType<typeof createC
         await admin.from("work_sessions").update({ odoo_timesheet_id: timesheetId }).eq("id", sessionId);
       }
       pushed++;
-    } catch (e) { console.warn("pushTimesheets grouped failed", group, e); }
+    } catch (e) { console.warn("pushTimesheets failed", e); }
   }
   return pushed;
 }
