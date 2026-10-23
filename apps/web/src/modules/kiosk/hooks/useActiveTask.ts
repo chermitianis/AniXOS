@@ -275,12 +275,21 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
   const completePiece = useCallback(async () => {
     if (!pieceTask) return;
+
+    // 1. إنهاء القطعة
     await markPieceTaskComplete(pieceTask.id, workerId, shiftId, ofWpRef.current);
+
+    // 2. مسح القطعة الحالية من الواجهة
     setPieceTask(null);
     setOfWorkPackageId(null);
     setOfWorkPackageInterface(null);
-    setConsumedSeconds(0);  // ✅ reset
+    setConsumedSeconds(0);
+
+    // 3. تحديث الجلسات النشطة
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
+
+    // 4. 🔥 تحديث قائمة القطع المتاحة (لإخفاء القطعة المنتهية)
+    // (هذه الدالة موجودة في useWorkerPlanning، ويجب استدعاؤها من KioskMainPage)
   }, [pieceTask, workerId, shiftId]);
 
   const pausePiece = useCallback(async () => {
