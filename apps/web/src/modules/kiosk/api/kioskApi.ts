@@ -2,16 +2,6 @@
 // kioskApi: طبقة وصول موحدة لبيانات الكشك (أونلاين أولاً، كاش أوفلاين تلقائياً)
 // كل دالة هنا: تحاول أونلاين → تُحدِّث الكاش المحلي عند النجاح → أو تقرأ من
 // الكاش مباشرة عند الانقطاع.
-//
-// إضافات 2026-10-02 :
-//   - Correction: planning.status utilise 'done' (contrainte DB).
-//   - fetchConsumedSecondsForPiece: temps consommé pour calcul du temps restant.
-//   - fetchWorkerPlanningQueue: tri par sequence_order.
-//   - fetchAllProjectsForWorker / searchPiecesInCompany / createEmergencyPieceTask.
-//   - fetchDayPlanningForKiosk: vue planning complète (jour) pour le Kiosk.
-//
-// إضافة 2026-10-14 :
-//   - extendWorkerShift: l'opérateur confirme qu'il continue après 8h.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -314,12 +304,6 @@ export async function endWorkerShift(shiftId: string, workerId: string): Promise
   await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion (hors ligne)");
 }
 
-/**
- * ✅ NEW (2026-10-14) — L'opérateur confirme qu'il continue de travailler
- * au-delà de la durée standard de son shift. Met à jour `work_shifts.extended_at`
- * (online ou enqueue offline). Une fois posé, le shift ne sera plus listé
- * comme "suspect" dans le bandeau de Suivi OF.
- */
 export async function extendWorkerShift(shiftId: string): Promise<void> {
   const now = new Date().toISOString();
 
@@ -586,6 +570,18 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     await updatePieceTaskStatusIfPending(input.pieceTaskId);
   }
 
+  // ✅ تسجيل حدث اختيار القطعة (بدء العمل)
+  if (input.pieceTaskId) {
+    await logActivity(
+      input.workerId,
+      newSession.id, // ربط الحدث بالجلسة
+      input.machineId,
+      "piece_started",
+      "بدء العمل على القطعة",
+      { piece_task_id: input.pieceTaskId, project_id: input.projectId } // حفظ القطعة في metadata
+    );
+  }
+
   return newSession;
 }
 
@@ -637,12 +633,16 @@ async function persistSessionChange(session: WorkSession, operation: "insert" | 
   await enqueueSync("work_sessions", operation, session as unknown as Record<string, unknown>);
 }
 
+/**
+ * ✅ تعديل: إضافة حقل metadata لدعم تسجيل القطعة
+ */
 async function logActivity(
   workerId: string,
   workSessionId: string | null,
   machineId: string | null,
   eventType: string,
   eventLabel: string,
+  metadata: Record<string, unknown> = {},
 ): Promise<void> {
   const companyId = await resolveCompanyId();
   const entry = {
@@ -653,7 +653,7 @@ async function logActivity(
     machine_id: machineId,
     event_type: eventType,
     event_label: eventLabel,
-    metadata: {},
+    metadata: metadata, // 👈 حفظ القطعة والبيانات هنا
     event_time: new Date().toISOString(),
   };
 
@@ -690,7 +690,7 @@ export async function markPieceTaskComplete(
         production_status: "completed",
       } as unknown as Record<string, unknown>);
     }
-    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)");
+    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)", { piece_task_id: pieceTaskId });
     return;
   }
 
@@ -768,13 +768,14 @@ export async function markPieceTaskComplete(
     null,
     allWpDone ? "piece_completed" : "package_completed",
     allWpDone ? "Pièce terminée ✓" : "Paquet terminé — en attente des autres paquets",
+    { piece_task_id: pieceTaskId } // 👈 تسجيل القطعة عند الانتهاء
   );
 }
 
 export async function pauseWorkOnPiece(pieceTaskId: string, workerId: string): Promise<void> {
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await updatePieceTaskStatusIfPending(pieceTaskId);
-  await logActivity(workerId, null, null, "piece_paused", "Mise en pause — travail toujours en cours");
+  await logActivity(workerId, null, null, "piece_paused", "Mise en pause — travail toujours en cours", { piece_task_id: pieceTaskId });
 }
 
 export async function updatePiecePhase(pieceTaskId: string, phase: number): Promise<void> {
