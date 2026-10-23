@@ -669,6 +669,58 @@ async function logActivity(
 // Terminer / À continuer
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// 1. الوقت المستهلك (بناءً على activity_log + work_sessions)
+// ---------------------------------------------------------------------------
+export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
+  const nowMs = Date.now();
+  const companyId = await resolveCompanyId();
+  if (!companyId) return 0;
+
+  // أ. جلب وقت البدء من activity_log (لحظة اختيار القطعة)
+  const { data: startEvents } = await supabase
+    .from("activity_log")
+    .select("event_time")
+    .eq("company_id", companyId)
+    .eq("event_type", "piece_started")
+    .contains("metadata", { piece_task_id: pieceTaskId })
+    .order("event_time", { ascending: true });
+
+  if (!startEvents || startEvents.length === 0) return 0;
+
+  const firstStartTime = new Date(startEvents[0].event_time).getTime();
+
+  // ب. جلب كل الجلسات (فترات العمل الفعلية) من work_sessions
+  const { data: sessions } = await supabase
+    .from("work_sessions")
+    .select("started_at, ended_at, duration_seconds")
+    .eq("company_id", companyId)
+    .eq("piece_task_id", pieceTaskId)
+    .is("voided_at", null);
+
+  let totalSeconds = 0;
+
+  if (sessions && sessions.length > 0) {
+    // إذا كانت هناك جلسات مسجلة، نجمع أوقاتها
+    for (const s of sessions) {
+      if (s.ended_at) {
+        totalSeconds += s.duration_seconds ?? Math.round((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000);
+      } else {
+        // جلسة مفتوحة الآن
+        totalSeconds += Math.round((nowMs - new Date(s.started_at).getTime()) / 1000);
+      }
+    }
+  } else {
+    // إذا لم تكن هناك جلسات (بسبب إزالة الأنشطة)، نحسب الفارق بين الآن ووقت البدء
+    totalSeconds = Math.round((nowMs - firstStartTime) / 1000);
+  }
+
+  return totalSeconds;
+}
+
+// ---------------------------------------------------------------------------
+// 2. إنهاء القطعة (تحديث planning إلى done + إخفاء القطعة)
+// ---------------------------------------------------------------------------
 export async function markPieceTaskComplete(
   pieceTaskId: string,
   workerId: string,
@@ -681,94 +733,42 @@ export async function markPieceTaskComplete(
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await closeShiftPieceWork(shiftId, pieceTaskId);
 
-  if (!connectivityMonitor.getStatus()) {
-    if (cachedPiece) {
-      await localDb.piecesTasks.put({ ...cachedPiece, status: "completed", production_status: "completed" });
-      await enqueueSync("pieces_tasks", "update", {
-        ...cachedPiece,
-        status: "completed",
-        production_status: "completed",
-      } as unknown as Record<string, unknown>);
-    }
-    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)", { piece_task_id: pieceTaskId });
-    return;
-  }
-
   const nowIso = new Date().toISOString();
+  const companyId = await resolveCompanyId();
 
-  if (ofWorkPackageId) {
-    await supabase
-      .from("of_work_packages")
-      .update({
-        status: "completed",
-        completed_at: nowIso,
-        completed_by_worker_id: workerId,
-      })
-      .eq("id", ofWorkPackageId);
-  }
-
-  let allWpDone = false;
-  let ofId: string | null = null;
-  if (ofWorkPackageId) {
-    const { data: wpRow } = await supabase
-      .from("of_work_packages")
-      .select("manufacturing_order_id")
-      .eq("id", ofWorkPackageId)
-      .maybeSingle();
-    ofId = (wpRow as { manufacturing_order_id: string | null } | null)?.manufacturing_order_id ?? null;
-
-    if (ofId) {
-      const { data: siblings } = await supabase
-        .from("of_work_packages")
-        .select("status")
-        .eq("manufacturing_order_id", ofId);
-      const all = (siblings ?? []) as { status: string }[];
-      allWpDone = all.length > 0 && all.every((w) => w.status === "completed");
-
-      if (allWpDone) {
-        await supabase
-          .from("manufacturing_orders")
-          .update({ status: "completed", completed_at: nowIso })
-          .eq("id", ofId);
-      } else {
-        await supabase
-          .from("manufacturing_orders")
-          .update({ status: "in_progress" })
-          .eq("id", ofId);
-      }
-    }
-  }
-
+  // تحديث حالة القطعة إلى completed
   await supabase
     .from("pieces_tasks")
     .update({
-      status: allWpDone ? "completed" : "in_progress",
-      production_status: allWpDone ? "completed" : "partially_done",
-      completed_at: allWpDone ? nowIso : null,
+      status: "completed",
+      production_status: "completed",
+      completed_at: nowIso,
     })
     .eq("id", pieceTaskId);
 
   await localDb.piecesTasks.update(pieceTaskId, {
-    status: allWpDone ? "completed" : "in_progress",
-    production_status: allWpDone ? "completed" : "partially_done",
-    completed_at: allWpDone ? nowIso : null,
+    status: "completed",
+    production_status: "completed",
+    completed_at: nowIso,
   });
 
+  // 🔥 التعديل الأهم: تحديث حالة planning إلى done لإخفاء القطعة من القائمة
   await supabase
     .from("planning")
-    .update({ status: "done" })
+    .update({ status: "done", completed_at: nowIso })
     .eq("piece_task_id", pieceTaskId)
     .eq("worker_id", workerId)
-    .eq("company_id", (await resolveCompanyId()) ?? "")
+    .eq("company_id", companyId ?? "")
     .in("status", ["scheduled", "in_progress"]);
 
+  // تسجيل الحدث
   await logActivity(
     workerId,
     null,
     null,
-    allWpDone ? "piece_completed" : "package_completed",
-    allWpDone ? "Pièce terminée ✓" : "Paquet terminé — en attente des autres paquets",
-    { piece_task_id: pieceTaskId } // 👈 تسجيل القطعة عند الانتهاء
+    "piece_completed",
+    "Pièce terminée ✓",
+    { piece_task_id: pieceTaskId }
   );
 }
 
@@ -1083,53 +1083,6 @@ export async function fetchOfWorkPackageById(
     .eq("id", id)
     .maybeSingle();
   return (data as { id: string; interface_type: "cnc" | "classique"; status: string } | null) ?? null;
-}
-
-export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
-  const nowMs = Date.now();
-
-  if (connectivityMonitor.getStatus()) {
-    const { data, error } = await supabase
-      .from("work_sessions")
-      .select("started_at, ended_at, duration_seconds, voided_at")
-      .eq("piece_task_id", pieceTaskId)
-      .is("voided_at", null);
-
-    if (!error && data) {
-      const rows = data as Array<{
-        started_at: string;
-        ended_at: string | null;
-        duration_seconds: number | null;
-        voided_at: string | null;
-      }>;
-      let total = 0;
-      for (const r of rows) {
-        if (r.voided_at) continue;
-        if (r.ended_at) {
-          total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
-        } else {
-          total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
-        }
-      }
-      return total;
-    }
-  }
-
-  const localRows = await localDb.workSessions
-    .where("piece_task_id")
-    .equals(pieceTaskId)
-    .toArray();
-
-  let total = 0;
-  for (const r of localRows) {
-    if (r.voided_at) continue;
-    if (r.ended_at) {
-      total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
-    } else {
-      total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
-    }
-  }
-  return total;
 }
 
 // ============================================================================
