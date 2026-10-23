@@ -349,12 +349,14 @@ export function DatabasePage() {
     }
   }
 
-  async function handleReset() {
+   async function handleReset() {
     if (!companyId) return;
     const toDelete = resetCategories.filter((table) => resetSelections[table]);
     if (toDelete.length === 0) return;
+    
     setIsResetting(true);
     setResetMessage(null);
+    
     try {
       for (const table of DELETE_ORDER) {
         if (!toDelete.includes(table)) continue;
@@ -363,6 +365,7 @@ export function DatabasePage() {
           console.warn(`[reset] ${table}:`, error.message);
         }
       }
+      
       // Vider les caches Dexie pour éviter toute réapparition de données locales
       await Promise.all([
         localDb.workers.clear(),
@@ -382,8 +385,13 @@ export function DatabasePage() {
         localDb.machineTools.clear(),
         localDb.workerCredentials.clear(),
       ]);
+      
       setResetMessage(t("database.resetSuccess"));
       setResetSelections({});
+      
+      // 🔥 التعديل هنا: إعادة تحميل الصفحة بالكامل لتحديث جميع البيانات في الواجهة
+      window.location.reload();
+
     } catch (err) {
       console.error("[reset]", err);
       setResetMessage(t("database.resetError"));
