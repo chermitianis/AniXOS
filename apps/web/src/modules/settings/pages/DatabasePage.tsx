@@ -349,7 +349,7 @@ export function DatabasePage() {
     }
   }
 
-    async function handleReset() {
+  async function handleReset() {
     if (!companyId) return;
     const toDelete = resetCategories.filter((table) => resetSelections[table]);
     if (toDelete.length === 0) return;
@@ -358,8 +358,7 @@ export function DatabasePage() {
     setResetMessage(null);
 
     try {
-      console.log("🔄 Starting reset for company:", companyId);
-      console.log("📋 Tables to delete:", toDelete);
+      console.log("🔥 [Reset] Starting reset for:", toDelete);
 
       // استدعاء الدالة RPC
       const { data, error } = await supabase.rpc("reset_company_data", {
@@ -368,23 +367,34 @@ export function DatabasePage() {
       });
 
       if (error) {
-        console.error("❌ RPC Error:", error);
+        console.error("❌ [Reset] RPC Error:", error);
         throw error;
       }
 
-      console.log("✅ RPC Success:", data);
+      console.log("✅ [Reset] RPC Success:", data);
 
       // مسح الكاش المحلي
-      await Promise.all([ /* ... نفس الكود ... */ ]);
+      await Promise.all([
+        localDb.workers.clear(), localDb.machines.clear(), localDb.projects.clear(),
+        localDb.piecesTasks.clear(), localDb.taskTypes.clear(), localDb.stopReasons.clear(),
+        localDb.planning.clear(), localDb.workShifts.clear(), localDb.shiftPieceWork.clear(),
+        localDb.workSessions.clear(), localDb.workSessionCorrections.clear(),
+        localDb.activityLog.clear(), localDb.pieceHandoffs.clear(),
+        localDb.workshopReclamations.clear(), localDb.machineTools.clear(),
+        localDb.workerCredentials.clear(),
+      ]);
+      
+      console.log("✅ [Reset] Local cache cleared");
 
       setResetMessage(t("database.resetSuccess"));
       setResetSelections({});
       
-      // إعادة تحميل الصفحة
-      window.location.reload(); 
+      // 🔥 التحديث القسري (بدون كاش)
+      console.log("🔄 [Reset] Reloading page...");
+      window.location.href = window.location.href; 
 
     } catch (err) {
-      console.error("❌ Reset failed:", err);
+      console.error("❌ [Reset] Failed:", err);
       setResetMessage(t("database.resetError"));
     } finally {
       setIsResetting(false);
