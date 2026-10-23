@@ -1,7 +1,5 @@
 // ============================================================================
 // kioskApi: طبقة وصول موحدة لبيانات الكشك (أونلاين أولاً، كاش أوفلاين تلقائياً)
-// كل دالة هنا: تحاول أونلاين → تُحدِّث الكاش المحلي عند النجاح → أو تقرأ من
-// الكاش مباشرة عند الانقطاع.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -574,11 +572,11 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   if (input.pieceTaskId) {
     await logActivity(
       input.workerId,
-      newSession.id, // ربط الحدث بالجلسة
+      newSession.id,
       input.machineId,
       "piece_started",
       "بدء العمل على القطعة",
-      { piece_task_id: input.pieceTaskId, project_id: input.projectId } // حفظ القطعة في metadata
+      { piece_task_id: input.pieceTaskId, project_id: input.projectId }
     );
   }
 
@@ -633,9 +631,6 @@ async function persistSessionChange(session: WorkSession, operation: "insert" | 
   await enqueueSync("work_sessions", operation, session as unknown as Record<string, unknown>);
 }
 
-/**
- * ✅ تعديل: إضافة حقل metadata لدعم تسجيل القطعة
- */
 async function logActivity(
   workerId: string,
   workSessionId: string | null,
@@ -653,7 +648,7 @@ async function logActivity(
     machine_id: machineId,
     event_type: eventType,
     event_label: eventLabel,
-    metadata: metadata, // 👈 حفظ القطعة والبيانات هنا
+    metadata: metadata,
     event_time: new Date().toISOString(),
   };
 
@@ -669,58 +664,6 @@ async function logActivity(
 // Terminer / À continuer
 // ============================================================================
 
-// ---------------------------------------------------------------------------
-// 1. الوقت المستهلك (بناءً على activity_log + work_sessions)
-// ---------------------------------------------------------------------------
-export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
-  const nowMs = Date.now();
-  const companyId = await resolveCompanyId();
-  if (!companyId) return 0;
-
-  // أ. جلب وقت البدء من activity_log (لحظة اختيار القطعة)
-  const { data: startEvents } = await supabase
-    .from("activity_log")
-    .select("event_time")
-    .eq("company_id", companyId)
-    .eq("event_type", "piece_started")
-    .contains("metadata", { piece_task_id: pieceTaskId })
-    .order("event_time", { ascending: true });
-
-  if (!startEvents || startEvents.length === 0) return 0;
-
-  const firstStartTime = new Date(startEvents[0].event_time).getTime();
-
-  // ب. جلب كل الجلسات (فترات العمل الفعلية) من work_sessions
-  const { data: sessions } = await supabase
-    .from("work_sessions")
-    .select("started_at, ended_at, duration_seconds")
-    .eq("company_id", companyId)
-    .eq("piece_task_id", pieceTaskId)
-    .is("voided_at", null);
-
-  let totalSeconds = 0;
-
-  if (sessions && sessions.length > 0) {
-    // إذا كانت هناك جلسات مسجلة، نجمع أوقاتها
-    for (const s of sessions) {
-      if (s.ended_at) {
-        totalSeconds += s.duration_seconds ?? Math.round((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000);
-      } else {
-        // جلسة مفتوحة الآن
-        totalSeconds += Math.round((nowMs - new Date(s.started_at).getTime()) / 1000);
-      }
-    }
-  } else {
-    // إذا لم تكن هناك جلسات (بسبب إزالة الأنشطة)، نحسب الفارق بين الآن ووقت البدء
-    totalSeconds = Math.round((nowMs - firstStartTime) / 1000);
-  }
-
-  return totalSeconds;
-}
-
-// ---------------------------------------------------------------------------
-// 2. إنهاء القطعة (تحديث planning إلى done + إخفاء القطعة)
-// ---------------------------------------------------------------------------
 export async function markPieceTaskComplete(
   pieceTaskId: string,
   workerId: string,
@@ -736,7 +679,7 @@ export async function markPieceTaskComplete(
   const nowIso = new Date().toISOString();
   const companyId = await resolveCompanyId();
 
-  // تحديث حالة القطعة إلى completed
+  // 1. تحديث حالة القطعة إلى completed
   await supabase
     .from("pieces_tasks")
     .update({
@@ -752,7 +695,7 @@ export async function markPieceTaskComplete(
     completed_at: nowIso,
   });
 
-  // 🔥 التعديل الأهم: تحديث حالة planning إلى done لإخفاء القطعة من القائمة
+  // 2. تحديث حالة planning إلى done (لإخفاء القطعة من القائمة)
   await supabase
     .from("planning")
     .update({ status: "done", completed_at: nowIso })
@@ -761,7 +704,30 @@ export async function markPieceTaskComplete(
     .eq("company_id", companyId ?? "")
     .in("status", ["scheduled", "in_progress"]);
 
-  // تسجيل الحدث
+  // 3. التحقق مما إذا كانت هذه هي القطعة الأخيرة في المشروع
+  let allPiecesDone = false;
+  if (cachedPiece) {
+    const { data: siblingPieces } = await supabase
+      .from("pieces_tasks")
+      .select("status")
+      .eq("project_id", cachedPiece.project_id);
+
+    if (siblingPieces && siblingPieces.length > 0) {
+      allPiecesDone = siblingPieces.every((p) => p.status === "completed");
+    }
+  }
+
+  // 4. إذا كانت جميع القطع منتهية، قم بتحديث حالة المشروع إلى completed
+  if (allPiecesDone && cachedPiece) {
+    await supabase
+      .from("projects")
+      .update({ status: "completed" })
+      .eq("id", cachedPiece.project_id);
+    
+    await localDb.projects.update(cachedPiece.project_id, { status: "completed" });
+  }
+
+  // 5. تسجيل الحدث
   await logActivity(
     workerId,
     null,
@@ -1083,6 +1049,50 @@ export async function fetchOfWorkPackageById(
     .eq("id", id)
     .maybeSingle();
   return (data as { id: string; interface_type: "cnc" | "classique"; status: string } | null) ?? null;
+}
+
+export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
+  const nowMs = Date.now();
+  const companyId = await resolveCompanyId();
+  if (!companyId) return 0;
+
+  // 1. محاولة القراءة من الخادم (Online)
+  if (connectivityMonitor.getStatus()) {
+    const { data: sessions, error } = await supabase
+      .from("work_sessions")
+      .select("started_at, ended_at, duration_seconds, voided_at")
+      .eq("piece_task_id", pieceTaskId)
+      .is("voided_at", null);
+
+    if (!error && sessions) {
+      let total = 0;
+      for (const r of sessions as any[]) {
+        if (r.ended_at) {
+          total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
+        } else {
+          total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
+        }
+      }
+      return total;
+    }
+  }
+
+  // 2. القراءة من الكاش المحلي (Offline)
+  const localRows = await localDb.workSessions
+    .where("piece_task_id")
+    .equals(pieceTaskId)
+    .toArray();
+
+  let total = 0;
+  for (const r of localRows) {
+    if (r.voided_at) continue;
+    if (r.ended_at) {
+      total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
+    } else {
+      total += Math.round((nowMs - new Date(r.started_at).getTime()) / 1000);
+    }
+  }
+  return total;
 }
 
 // ============================================================================
