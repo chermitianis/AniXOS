@@ -25,7 +25,7 @@ import {
   type PieceOperationEstimate,
 } from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
-import { OdooAutoSync } from "../../settings/components/OdooAutoSync"; // 👈 1. إضافة الاستيراد
+import { OdooAutoSync } from "../../settings/components/OdooAutoSync"; // 👈 استيراد المزامنة
 
 export function KioskMainPage() {
   const { activeWorker, logout, hasOpenPieceEvents } = useWorkerSession();
@@ -58,7 +58,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
   const [pieceOperations, setPieceOperations] = useState<PieceOperationEstimate[]>([]);
 
-  // ✅ NEW — surveillance fin de shift (8h + 20 min sans confirmation)
   const overtimeCheck = useShiftOvertimeCheck(
     worker.shift_id,
     worker.session_started_at,
@@ -124,7 +123,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   async function handleCompletePiece() {
     await completePiece();
-    void reloadPlanning();
+    void reloadPlanning(); // 👈 تحديث القائمة فوراً لإخفاء القطعة
   }
 
   async function handlePausePiece() {
@@ -152,7 +151,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     await onLogout();
   }
 
-  /** ✅ NEW — fin de shift depuis le modal overtime : logout direct. */
   async function handleEndShiftFromOvertime() {
     setIsLoggingOut(true);
     await onLogout();
@@ -160,8 +158,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
-      {/* 👈 2. إضافة المكون هنا ليعمل في الخلفية */}
-      <OdooAutoSync /> 
+      <OdooAutoSync /> {/* 👈 تفعيل المزامنة التلقائية */}
 
       <TopNavBar
         sessionStartedAt={worker.session_started_at}
@@ -262,7 +259,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         />
       )}
 
-      {/* ✅ NEW — Modal fin de shift (8h dépassées sans confirmation) */}
       {overtimeCheck.shouldPrompt && worker.shift_id && (
         <ShiftExtensionModal
           shiftId={worker.shift_id}
