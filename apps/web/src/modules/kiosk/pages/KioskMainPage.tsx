@@ -25,6 +25,7 @@ import {
   type PieceOperationEstimate,
 } from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
+import { OdooAutoSync } from "../../settings/components/OdooAutoSync"; // 👈 1. إضافة الاستيراد
 
 export function KioskMainPage() {
   const { activeWorker, logout, hasOpenPieceEvents } = useWorkerSession();
@@ -159,6 +160,9 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
+      {/* 👈 2. إضافة المكون هنا ليعمل في الخلفية */}
+      <OdooAutoSync /> 
+
       <TopNavBar
         sessionStartedAt={worker.session_started_at}
         workerId={worker.id}
