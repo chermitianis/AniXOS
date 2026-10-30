@@ -329,9 +329,12 @@ export function PlanningAdminPage() {
       const ofsReadyList: OfReadyForPlan[] = [];
       for (const of of ofs) {
         const wpsForOf = wps.filter((w) => w.manufacturing_order_id === of.id);
-        const unplannedWps = wpsForOf.filter((w) => !plannedWpIds.has(w.id));
-        if (unplannedWps.length === 0) continue;
+        
+        // 🛡️ لا نستبعد الحزم المجدولة، بل نعرضها كلها
+        if (wpsForOf.length === 0) continue;
+        
         const piece = of.piece_task_id ? piecesMap.get(of.piece_task_id) : undefined;
+        
         ofsReadyList.push({
           of_id: of.id,
           of_number: of.order_number,
@@ -343,7 +346,7 @@ export function PlanningAdminPage() {
           piece_task_id: of.piece_task_id,
           piece_code: piece?.code ?? null,
           piece_name: piece?.name ?? null,
-          work_packages: unplannedWps.map((w) => ({
+          work_packages: wpsForOf.map((w) => ({
             wp_id: w.id,
             interface_type: w.interface_type,
             label: w.label,
