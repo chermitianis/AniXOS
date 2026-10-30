@@ -36,9 +36,6 @@ function parseProjectName(projectName: string | undefined | null) {
   const match = projectName.match(/^([A-Z0-9]+)\s*-\s*(.+?)\s*-\s*(.+)$/);
   
   if (match) {
-    // match[1] = Code (S00010)
-    // match[2] = Client (client_odoo3)
-    // match[3] = Project Name (cheese_cacke)
     return { 
       projectName: match[3].trim(), 
       clientName: match[2].trim() 
@@ -48,16 +45,13 @@ function parseProjectName(projectName: string | undefined | null) {
   return { projectName, clientName: "" };
 }
 
-// ✅ تحديث مكوّن Field ليدعم سطراً ثانوياً (subValue)
 function Field({
   label,
   value,
-  subValue,
   action,
 }: {
   label: string;
   value: string;
-  subValue?: string;
   action?: { text: string; onClick: () => void };
 }) {
   return (
@@ -66,17 +60,9 @@ function Field({
         {label}
       </span>
       <div className="mt-0.5 flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-extrabold text-slate-800">
-            {value || "—"}
-          </div>
-          {/* ✅ عرض اسم العميل في سطر ثانوي */}
-          {subValue && (
-            <div className="truncate text-[10px] font-medium text-slate-500 mt-0.5">
-              {subValue}
-            </div>
-          )}
-        </div>
+        <span className="truncate text-sm font-extrabold text-slate-800">
+          {value || "—"}
+        </span>
         {action && (
           <button
             type="button"
@@ -196,14 +182,12 @@ export function ContextBar({
     pieceTask?.estimated_time_minutes ??
     0;
 
-  // ✅ Temps restant = estimation − temps consommé (en minutes)
   const consumedMin = consumedSeconds != null ? Math.round(consumedSeconds / 60) : 0;
   const remainingMin = estimatedMin > 0 ? estimatedMin - consumedMin : null;
   const isOverrun = remainingMin !== null && remainingMin <= 0;
 
   const wpActive = Boolean(ofWorkPackageId);
 
-  // ✅ استخدام الدالة الجديدة لاستخراج اسم المشروع والعميل
   const { projectName, clientName } = parseProjectName(project?.name);
 
   return (
@@ -247,14 +231,18 @@ export function ContextBar({
         </div>
       </div>
 
-      {/* ✅ اسم المشروع مع اسم العميل تحته */}
+      {/* ✅ اسم المشروع (في خانة مستقلة) */}
       <Field
         label={t("kiosk.projectName")}
         value={projectName}
-        subValue={clientName}
         action={{ text: t("kiosk.change"), onClick: onOpenSelector }}
       />
-      
+
+      {/* ✅ اسم العميل (في خانة مستقلة جديدة تحته) */}
+      {clientName && (
+        <Field label={t("kiosk.client", { defaultValue: "CLIENT" })} value={clientName} />
+      )}
+
       <Field label={t("kiosk.projectCode")} value={project?.code ?? "—"} />
 
       <Field label={t("kiosk.piece")} value={pieceTask?.name ?? "—"} />
@@ -269,7 +257,6 @@ export function ContextBar({
         value={formatMinutes(estimatedMin)}
       />
 
-      {/* ✅ Temps restant (vert si > 0, rouge si dépassé) */}
       {remainingMin !== null && (
         <div
           className={`flex min-w-[130px] flex-col rounded-xl border px-3 py-2 shadow-sm transition-colors ${
@@ -297,7 +284,6 @@ export function ContextBar({
         </div>
       )}
 
-      {/* ✅ Indicateur de work package active */}
       {wpActive && (
         <div className="flex min-w-[110px] flex-col rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 shadow-sm">
           <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
@@ -310,7 +296,6 @@ export function ContextBar({
         </div>
       )}
 
-      {/* ✅ NEW : Bouton "+ Pièce d'urgence" */}
       <button
         type="button"
         onClick={onAddEmergencyPiece}
