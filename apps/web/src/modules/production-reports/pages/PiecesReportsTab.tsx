@@ -2,16 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, Boxes, ChevronDown, ChevronRight, TrendingUp, TrendingDown,
-  Search, X, CheckCircle2, Clock,
+  Search, X, CheckCircle2, Clock, Calendar, User
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
   listCompletedPieces,
   getPieceWorkPackages,
   getPieceOperations,
+  getPieceSessions, // ✨ NEW
   type PieceReportHeader,
   type PieceWpRow,
   type PieceOpRow,
+  type PieceSessionRow, // ✨ NEW
 } from "../api/productionReportsApi";
 
 export function PiecesReportsTab() {
@@ -25,6 +27,7 @@ export function PiecesReportsTab() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [wps, setWps] = useState<Record<string, PieceWpRow[]>>({});
   const [ops, setOps] = useState<Record<string, PieceOpRow[]>>({});
+  const [sessions, setSessions] = useState<Record<string, PieceSessionRow[]>>({}); // ✨ NEW
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -51,6 +54,11 @@ export function PiecesReportsTab() {
       const o = await getPieceOperations(companyId, pieceId);
       setOps((prev) => ({ ...prev, [pieceId]: o }));
     }
+    // ✨ NEW: Fetch sessions
+    if (!sessions[pieceId]) {
+      const s = await getPieceSessions(companyId, pieceId);
+      setSessions((prev) => ({ ...prev, [pieceId]: s }));
+    }
   }
 
   function fmtSec(s: number): string {
@@ -62,7 +70,6 @@ export function PiecesReportsTab() {
     return `${h}h ${String(m).padStart(2, "0")}`;
   }
 
-  // ✅ Filtrage instantané par nom ou code (insensible à la casse)
   const filteredPieces = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return pieces;
@@ -91,9 +98,6 @@ export function PiecesReportsTab() {
 
   return (
     <div className="space-y-3">
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* BARRE DE RECHERCHE + COMPTEUR                                  */}
-      {/* ═══════════════════════════════════════════════════════════ */}
       <div className="space-y-2">
         <div className="relative">
           <Search
@@ -136,9 +140,6 @@ export function PiecesReportsTab() {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* ÉTATS VIDES                                                     */}
-      {/* ═══════════════════════════════════════════════════════════ */}
       {pieces.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-400">
           <Boxes size={32} className="mx-auto mb-2 text-slate-300" />
@@ -186,7 +187,6 @@ export function PiecesReportsTab() {
                           {p.piece_code}
                         </span>
                       )}
-                      {/* Badge statut : Terminée ou Partielle */}
                       {isFullyDone ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
                           <CheckCircle2 size={10} />
@@ -230,6 +230,51 @@ export function PiecesReportsTab() {
 
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-4">
+                    {/* ✨ NEW: Détail des sessions (comme Odoo) */}
+                    <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Détail des sessions
+                    </h3>
+                    <div className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 text-left text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2 font-semibold">Date</th>
+                            <th className="px-3 py-2 font-semibold">Employé</th>
+                            <th className="px-3 py-2 font-semibold">Description</th>
+                            <th className="px-3 py-2 text-end font-semibold">Temps passé</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(sessions[p.piece_task_id] ?? []).map((s, idx) => (
+                            <tr key={s.session_id} className="hover:bg-slate-50">
+                              <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                                <div className="flex items-center gap-1">
+                                  <Calendar size={12} className="text-slate-400" />
+                                  {new Date(s.started_at).toLocaleDateString('fr-FR', {
+                                    day: '2-digit',
+                                    month: 'short'
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-slate-700">
+                                <div className="flex items-center gap-1">
+                                  <User size={12} className="text-slate-400" />
+                                  {s.worker_name}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-slate-600">
+                                {p.piece_name} - {s.worker_name} - Session {idx + 1}
+                                {s.is_last && " (Terminé)"}
+                              </td>
+                              <td className="px-3 py-2 text-end font-mono font-semibold text-slate-700" dir="ltr">
+                                {fmtSec(s.duration_seconds)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
                     {/* DÉTAIL PAR PAQUET */}
                     <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                       {t("productionReports.pieces.workPackages")}
@@ -325,7 +370,6 @@ export function PiecesReportsTab() {
                             </div>
 
                             <div className="space-y-2 text-xs">
-                              {/* Estimé */}
                               <div className="grid grid-cols-12 items-center gap-2">
                                 <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
                                   {t("productionReports.pieces.opEstimatedShort", {
@@ -345,7 +389,6 @@ export function PiecesReportsTab() {
                                 </div>
                               </div>
 
-                              {/* Réel */}
                               {hasActual ? (
                                 <div className="grid grid-cols-12 items-center gap-2">
                                   <div className="col-span-3 font-semibold uppercase tracking-wide text-slate-400">
@@ -378,7 +421,6 @@ export function PiecesReportsTab() {
                                 </div>
                               )}
 
-                              {/* Écart */}
                               {hasActual ? (
                                 <div
                                   className={`grid grid-cols-12 items-center gap-2 rounded-md ${ecartBg} px-2 py-1.5 -mx-2`}
