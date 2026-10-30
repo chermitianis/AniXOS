@@ -79,6 +79,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const {
     machine,
     project,
+    clientName,
     pieceTask,
     ofWorkPackageId,
     ofWorkPackageInterface,
@@ -171,6 +172,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         worker={worker}
         machine={machine}
         project={project}
+        clientName={clientName}
         pieceTask={pieceTask}
         ofWorkPackageId={ofWorkPackageId}
         estimatedTotalMinutes={estimatedTotalMinutes || null}
