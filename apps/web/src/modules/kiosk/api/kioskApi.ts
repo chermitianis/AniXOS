@@ -536,6 +536,23 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   const companyId = await resolveCompanyId();
   if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
 
+  // 🛡️ الحماية الجذرية: إذا لم يتم تمرير pieceTaskId، نحاول جلبه من الـ Planning
+  let finalPieceTaskId = input.pieceTaskId;
+  if (!finalPieceTaskId && input.planningId) {
+    if (connectivityMonitor.getStatus()) {
+      const { data } = await supabase
+        .from("planning")
+        .select("piece_task_id")
+        .eq("id", input.planningId)
+        .maybeSingle();
+      finalPieceTaskId = (data as { piece_task_id: string | null } | null)?.piece_task_id ?? null;
+    } else {
+      // في وضع الأوفلاين، نحاول قراءتها من الكاش المحلي
+      const planningEntry = await localDb.planning.get(input.planningId);
+      finalPieceTaskId = planningEntry?.piece_task_id ?? null;
+    }
+  }
+
   const now = new Date().toISOString();
   const newSession: WorkSession = {
     id: crypto.randomUUID(),
@@ -544,7 +561,7 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     shift_id: input.shiftId,
     machine_id: input.machineId,
     project_id: input.projectId,
-    piece_task_id: input.pieceTaskId,
+    piece_task_id: finalPieceTaskId, // 👈 استخدام القيمة المحمية
     planning_id: input.planningId,
     of_work_package_id: input.ofWorkPackageId,
     session_type: input.sessionType,
@@ -564,19 +581,20 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   await localDb.workSessions.put(newSession);
   await persistSessionChange(newSession, "insert");
 
-  if (input.sessionType === "production" && input.pieceTaskId) {
-    await updatePieceTaskStatusIfPending(input.pieceTaskId);
+  // تحديث حالة القطعة إلى in_progress (باستخدام finalPieceTaskId)
+  if (input.sessionType === "production" && finalPieceTaskId) {
+    await updatePieceTaskStatusIfPending(finalPieceTaskId);
   }
 
-  // ✅ تسجيل حدث اختيار القطعة (بدء العمل)
-  if (input.pieceTaskId) {
+  // تسجيل حدث اختيار القطعة
+  if (finalPieceTaskId) {
     await logActivity(
       input.workerId,
       newSession.id,
       input.machineId,
       "piece_started",
       "بدء العمل على القطعة",
-      { piece_task_id: input.pieceTaskId, project_id: input.projectId }
+      { piece_task_id: finalPieceTaskId, project_id: input.projectId }
     );
   }
 
