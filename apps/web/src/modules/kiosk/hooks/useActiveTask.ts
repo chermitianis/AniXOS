@@ -1,16 +1,5 @@
 // ============================================================================
 // useActiveTask: القلب النابض لواجهة الكشك.
-// يدير: تعبئة السياق تلقائياً من المخطط، الاختيار اليدوي، وحتى 3 أحداث
-// نشطة بالتوازي.
-//
-// ⚠️ إضافة 2026-09-30 :
-//   - ofWorkPackageInterface : "cnc" | "classique" | null
-//     يُستخدم في KioskMainPage لفلترة الوقت التقديري.
-//
-// ⚠️ إضافة 2026-10-02 :
-//   - consumedSeconds : الوقت المستهلك على القطعة (production + downtime)
-//     من work_sessions، لحساب "الوقت المتبقي" في ContextBar.
-//     يُحدّث كل 30 ثانية تلقائياً أثناء وجود قطعة نشطة.
 // ============================================================================
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -29,7 +18,7 @@ import {
   openShiftPieceWork,
   switchShiftPiece,
   fetchOfWorkPackageById,
-  fetchConsumedSecondsForPiece,  // ✅ NEW
+  fetchConsumedSecondsForPiece,
 } from "../api/kioskApi";
 import type { PlanningProjectOption } from "./useWorkerPlanning";
 import type {
@@ -45,17 +34,16 @@ export type ToggleResult = { ok: true } | { ok: false; reason: "max_active" };
 export type WpInterface = "cnc" | "classique";
 
 const MAX_PHASE = 200;
-const CONSUMED_REFRESH_INTERVAL_MS = 30_000; // 30s
+const CONSUMED_REFRESH_INTERVAL_MS = 30_000;
 
 interface ActiveTaskState {
   machine: Machine | null;
   project: Project | null;
+  clientName: string | null; // ✅ NEW
   pieceTask: PieceTask | null;
   planningId: string | null;
   ofWorkPackageId: string | null;
-  /** ✅ interface de la WP active — pour filtrer l'estimation. */
   ofWorkPackageInterface: WpInterface | null;
-  /** ✅ NEW : temps consommé (secondes) sur la pièce active. */
   consumedSeconds: number;
   activeSessions: WorkSession[];
   isLoadingContext: boolean;
@@ -69,29 +57,27 @@ interface ActiveTaskState {
   pausePiece: () => Promise<void>;
   changePhase: (delta: number) => Promise<void>;
   refreshActiveSessions: () => Promise<void>;
-  /** ✅ NEW : force le recalcul de consumedSeconds. */
   refreshConsumedSeconds: () => Promise<void>;
 }
 
 export function useActiveTask(workerId: string, shiftId: string | null): ActiveTaskState {
   const [machine, setMachine] = useState<Machine | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+  const [clientName, setClientName] = useState<string | null>(null); // ✅ NEW
   const [pieceTask, setPieceTask] = useState<PieceTask | null>(null);
   const [planningId, setPlanningId] = useState<string | null>(null);
   const [ofWorkPackageId, setOfWorkPackageId] = useState<string | null>(null);
   const [ofWorkPackageInterface, setOfWorkPackageInterface] = useState<WpInterface | null>(null);
-  const [consumedSeconds, setConsumedSeconds] = useState<number>(0);  // ✅ NEW
+  const [consumedSeconds, setConsumedSeconds] = useState<number>(0);
   const [activeSessions, setActiveSessions] = useState<WorkSession[]>([]);
   const [isLoadingContext, setIsLoadingContext] = useState(true);
 
   const ofWpRef = useRef<string | null>(null);
   useEffect(() => { ofWpRef.current = ofWorkPackageId; }, [ofWorkPackageId]);
 
-  // Réf. sur l'id de la pièce active — pour éviter les dépendances cycliques
   const pieceIdRef = useRef<string | null>(null);
   useEffect(() => { pieceIdRef.current = pieceTask?.id ?? null; }, [pieceTask?.id]);
 
-  // ✅ NEW : recalcul de consumedSeconds pour la pièce active
   const refreshConsumedSeconds = useCallback(async () => {
     const pid = pieceIdRef.current;
     if (!pid) {
@@ -102,12 +88,10 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     setConsumedSeconds(seconds);
   }, []);
 
-  // ✅ NEW : rafraîchit consumedSeconds à chaque changement de pièce
   useEffect(() => {
     void refreshConsumedSeconds();
   }, [pieceTask?.id, refreshConsumedSeconds]);
 
-  // ✅ NEW : polling toutes les 30s pendant qu'une pièce est active
   useEffect(() => {
     if (!pieceTask?.id) return;
     const interval = setInterval(() => {
@@ -115,6 +99,28 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     }, CONSUMED_REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [pieceTask?.id, refreshConsumedSeconds]);
+
+  // ✅ دالة لجلب اسم العميل بناءً على client_id
+  const loadClientName = useCallback(async (clientId: string | null | undefined) => {
+    if (!clientId) {
+      setClientName(null);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("name")
+        .eq("id", clientId)
+        .maybeSingle();
+      if (!error && data) {
+        setClientName((data as { name: string }).name);
+      } else {
+        setClientName(null);
+      }
+    } catch {
+      setClientName(null);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -141,7 +147,9 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           const projectId = openSession?.project_id ?? planningFromId?.project_id ?? piece.project_id;
           setMachine(machineId ? await fetchMachineById(machineId) : null);
           setPieceTask(piece);
-          setProject(await fetchProjectById(projectId));
+          const proj = await fetchProjectById(projectId);
+          setProject(proj);
+          if (proj?.client_id) await loadClientName(proj.client_id); // ✅ جلب اسم العميل
 
           const wpId = openSession?.of_work_package_id ?? planningFromId?.of_work_package_id ?? null;
           setOfWorkPackageId(wpId);
@@ -172,6 +180,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         if (isMounted) {
           setMachine(machineData);
           setProject(projectData);
+          if (projectData?.client_id) await loadClientName(projectData.client_id); // ✅ جلب اسم العميل
           setPieceTask(pieceData);
           if (pieceData) {
             await openShiftPieceWork(shiftId, workerId, pieceData.id, pieceData.project_id);
@@ -184,7 +193,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
     void loadInitialContext();
     return () => { isMounted = false; };
-  }, [workerId, shiftId]);
+  }, [workerId, shiftId, loadClientName]);
 
   const selectPlanningOption = useCallback(
     async (option: PlanningProjectOption, piece: PieceTask | null) => {
@@ -194,6 +203,8 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
       const previousPieceId = pieceTask?.id ?? null;
 
       setProject(option.project);
+      if (option.project?.client_id) await loadClientName(option.project.client_id); // ✅ جلب اسم العميل
+      else setClientName(null);
       setPieceTask(piece);
       setPlanningId(matchingEntry?.id ?? null);
       setOfWorkPackageId(matchingEntry?.of_work_package_id ?? null);
@@ -215,7 +226,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         await switchShiftPiece(shiftId, workerId, previousPieceId, piece.id, piece.project_id);
       }
     },
-    [pieceTask, shiftId, workerId],
+    [pieceTask, shiftId, workerId, loadClientName],
   );
 
   const toggleProductionTask = useCallback(
@@ -234,7 +245,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           stopReasonId: null,
         });
         setActiveSessions(await fetchOpenSessionsForWorker(workerId));
-        // ✅ recalcul du temps consommé (une session vient de démarrer/terminer)
         await refreshConsumedSeconds();
         return { ok: true };
       } catch (err) {
@@ -262,7 +272,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           note,
         });
         setActiveSessions(await fetchOpenSessionsForWorker(workerId));
-        // ✅ recalcul du temps consommé
         await refreshConsumedSeconds();
         return { ok: true };
       } catch (err) {
@@ -275,28 +284,18 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
   const completePiece = useCallback(async () => {
     if (!pieceTask) return;
-
-    // 1. إنهاء القطعة
     await markPieceTaskComplete(pieceTask.id, workerId, shiftId, ofWpRef.current);
-
-    // 2. مسح القطعة الحالية من الواجهة
     setPieceTask(null);
     setOfWorkPackageId(null);
     setOfWorkPackageInterface(null);
     setConsumedSeconds(0);
-
-    // 3. تحديث الجلسات النشطة
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
-
-    // 4. 🔥 تحديث قائمة القطع المتاحة (لإخفاء القطعة المنتهية)
-    // (هذه الدالة موجودة في useWorkerPlanning، ويجب استدعاؤها من KioskMainPage)
   }, [pieceTask, workerId, shiftId]);
 
   const pausePiece = useCallback(async () => {
     if (!pieceTask) return;
     await pauseWorkOnPiece(pieceTask.id, workerId);
     setActiveSessions(await fetchOpenSessionsForWorker(workerId));
-    // ✅ recalcul après pause (sessions fermées)
     await refreshConsumedSeconds();
   }, [pieceTask, workerId, refreshConsumedSeconds]);
 
@@ -319,11 +318,12 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
   return {
     machine,
     project,
+    clientName, // ✅ NEW
     pieceTask,
     planningId,
     ofWorkPackageId,
     ofWorkPackageInterface,
-    consumedSeconds,  // ✅ NEW
+    consumedSeconds,
     activeSessions,
     isLoadingContext,
     setMachine,
@@ -336,6 +336,9 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     pausePiece,
     changePhase,
     refreshActiveSessions,
-    refreshConsumedSeconds,  // ✅ NEW
+    refreshConsumedSeconds,
   };
 }
+
+// ✅ Import supabase (nécessaire pour loadClientName)
+import { supabase } from "../../../lib/supabaseClient";
