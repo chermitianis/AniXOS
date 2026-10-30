@@ -1,40 +1,180 @@
-import { User, FolderKanban, Cpu, Hash, Package, Clock, Plus, Send, ArrowLeftRight } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Machine, Project, PieceTask } from "../../../shared/types/database";
+import {
+  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers, Plus,
+} from "lucide-react";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
-import type { WpInterface } from "../hooks/useActiveTask";
+import type { Machine, Project, PieceTask } from "../../../shared/types/database";
+import { MachineToolsModal } from "./MachineToolsModal";
+import { PassationPanel } from "./PassationPanel";
+import { usePieceHandoffsUnread } from "../hooks/usePieceHandoffsUnread";
 
 interface ContextBarProps {
   worker: ActiveWorkerProfile;
   machine: Machine | null;
   project: Project | null;
-  clientName: string | null; // ✅ NEW
   pieceTask: PieceTask | null;
-  ofWorkPackageId: string | null;
-  estimatedTotalMinutes: number | null;
-  consumedSeconds: number;
+  /** ✅ la work package actuellement sélectionnée (CNC / Classique). */
+  ofWorkPackageId?: string | null;
+  /** Temps total estimé pour la pièce (depuis piece_costing_operations). */
+  estimatedTotalMinutes?: number | null;
+  /** ✅ NEW : temps consommé (secondes) depuis la 1ère ouverture de la pièce. */
+  consumedSeconds?: number | null;
   onOpenSelector: () => void;
   onCompletePiece: () => void;
   onPausePiece: () => void;
   onChangePhase: (delta: number) => void;
+  /** ✅ NEW : ouvre le modal d'addition d'une pièce d'urgence. */
   onAddEmergencyPiece: () => void;
 }
 
-function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return "0 min";
-  const totalMinutes = Math.floor(seconds / 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
+/** ✅ دالة لتنظيف اسم المشروع واستخراج اسم العميل */
+function parseProjectName(projectName: string | undefined | null) {
+  if (!projectName) return { projectName: "—", clientName: "" };
+  
+  // النمط: CODE - CLIENT - PROJECT_NAME
+  const match = projectName.match(/^([A-Z0-9]+)\s*-\s*(.+?)\s*-\s*(.+)$/);
+  
+  if (match) {
+    // match[1] = Code (S00010)
+    // match[2] = Client (client_odoo3)
+    // match[3] = Project Name (cheese_cacke)
+    return { 
+      projectName: match[3].trim(), 
+      clientName: match[2].trim() 
+    };
+  }
+  
+  return { projectName, clientName: "" };
+}
+
+// ✅ تحديث مكوّن Field ليدعم سطراً ثانوياً (subValue)
+function Field({
+  label,
+  value,
+  subValue,
+  action,
+}: {
+  label: string;
+  value: string;
+  subValue?: string;
+  action?: { text: string; onClick: () => void };
+}) {
+  return (
+    <div className="flex min-w-[130px] flex-col rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm transition-colors hover:border-slate-300">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+        {label}
+      </span>
+      <div className="mt-0.5 flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-extrabold text-slate-800">
+            {value || "—"}
+          </div>
+          {/* ✅ عرض اسم العميل في سطر ثانوي */}
+          {subValue && (
+            <div className="truncate text-[10px] font-medium text-slate-500 mt-0.5">
+              {subValue}
+            </div>
+          )}
+        </div>
+        {action && (
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="flex shrink-0 items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+          >
+            <ArrowLeftRight size={12} />
+            {action.text}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DecisionButtons({
+  onCompletePiece,
+  onPausePiece,
+}: {
+  onCompletePiece: () => void;
+  onPausePiece: () => void;
+}) {
+  const { t } = useTranslation();
+  const [pendingAction, setPendingAction] = useState<"finish" | "pause" | null>(null);
+
+  function confirm() {
+    if (pendingAction === "finish") onCompletePiece();
+    if (pendingAction === "pause") onPausePiece();
+    setPendingAction(null);
+  }
+
+  return (
+    <>
+      <div className="ms-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPendingAction("finish")}
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-md shadow-emerald-200 transition-transform active:scale-95 hover:bg-emerald-700"
+        >
+          <CheckCircle2 size={18} /> {t("kiosk.finishPiece")}
+        </button>
+      </div>
+
+      {pendingAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95">
+            <h3 className="mb-2 text-lg font-black text-slate-900">
+              {pendingAction === "finish"
+                ? t("kiosk.finishConfirmTitle")
+                : t("kiosk.pauseConfirmTitle")}
+            </h3>
+            <p className="mb-6 text-sm font-medium text-slate-500">
+              {pendingAction === "finish"
+                ? t("kiosk.finishConfirmBody")
+                : t("kiosk.pauseConfirmBody")}
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingAction(null)}
+                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirm}
+                className={`flex-1 rounded-xl py-2.5 text-sm font-extrabold text-white shadow-lg ${
+                  pendingAction === "finish"
+                    ? "bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700"
+                    : "bg-amber-500 shadow-amber-200 hover:bg-amber-600"
+                }`}
+              >
+                {t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Formate un nombre de minutes en "Xh YYmin" — retourne "—" si 0/null. */
+function formatMinutes(min: number | null | undefined): string {
+  if (min === null || min === undefined) return "—";
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
   if (h === 0) return `${m} min`;
   if (m === 0) return `${h} h`;
-  return `${h} h ${m} min`;
+  return `${h} h ${m.toString().padStart(2, "0")}`;
 }
 
 export function ContextBar({
   worker,
   machine,
   project,
-  clientName, // ✅ NEW
   pieceTask,
   ofWorkPackageId,
   estimatedTotalMinutes,
@@ -46,150 +186,189 @@ export function ContextBar({
   onAddEmergencyPiece,
 }: ContextBarProps) {
   const { t } = useTranslation();
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
+  const [isPassationOpen, setIsPassationOpen] = useState(false);
+  const { unreadCount, refresh: refreshUnread } = usePieceHandoffsUnread(pieceTask?.id ?? null, worker.id);
 
-  const remainingMinutes =
-    estimatedTotalMinutes != null && estimatedTotalMinutes > 0
-      ? Math.max(0, estimatedTotalMinutes - Math.floor(consumedSeconds / 60))
-      : null;
+  const estimatedMin =
+    estimatedTotalMinutes ??
+    pieceTask?.estimated_minutes ??
+    pieceTask?.estimated_time_minutes ??
+    0;
 
-  const isPieceActive = pieceTask != null;
+  // ✅ Temps restant = estimation − temps consommé (en minutes)
+  const consumedMin = consumedSeconds != null ? Math.round(consumedSeconds / 60) : 0;
+  const remainingMin = estimatedMin > 0 ? estimatedMin - consumedMin : null;
+  const isOverrun = remainingMin !== null && remainingMin <= 0;
+
+  const wpActive = Boolean(ofWorkPackageId);
+
+  // ✅ استخدام الدالة الجديدة لاستخراج اسم المشروع والعميل
+  const { projectName, clientName } = parseProjectName(project?.name);
 
   return (
-    <div className="flex flex-wrap items-stretch gap-2 p-3">
-      {/* Opérateur */}
-      <div className="flex min-w-[130px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <User size={9} />
-          {t("kiosk.operator")}
-        </span>
-        <span className="truncate text-sm font-bold text-slate-800">{worker.full_name}</span>
-      </div>
+    <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-100/70 px-4 py-3">
+      <Field label={t("kiosk.operator")} value={worker.full_name} />
 
-      {/* Machine */}
-      <div className="flex min-w-[150px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <Cpu size={9} />
-          {t("kiosk.machine")}
-        </span>
-        {machine ? (
-          <button
-            type="button"
-            onClick={onOpenSelector}
-            className="flex items-center gap-1 truncate text-sm font-bold text-slate-800 hover:text-indigo-600"
-          >
-            {machine.name}
-            <ArrowLeftRight size={10} className="text-slate-400" />
-            <span className="text-[10px] font-normal text-slate-400">{t("kiosk.outils")}</span>
-          </button>
-        ) : (
-          <span className="truncate text-sm font-bold text-slate-400">{t("kiosk.notDefined")}</span>
-        )}
-      </div>
+      <Field
+        label={t("kiosk.machine")}
+        value={machine?.name ?? t("kiosk.noMachine")}
+        action={
+          machine
+            ? { text: t("kiosk.openTools"), onClick: () => setIsToolsOpen(true) }
+            : undefined
+        }
+      />
 
-      {/* Phase */}
-      <div className="flex min-w-[90px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <Hash size={9} />
+      <div className="flex min-w-[130px] flex-col rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
           {t("kiosk.phase")}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="mt-0.5 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => onChangePhase(-1)}
-            disabled={!isPieceActive}
-            className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+            disabled={!pieceTask || Number(pieceTask.phase ?? "1") <= 1}
+            className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-base font-black text-slate-700 shadow-inner transition hover:bg-slate-200 disabled:opacity-30"
           >
             −
           </button>
-          <span className="min-w-[20px] text-center text-sm font-bold text-slate-800">
-            {pieceTask?.phase ?? "—"}
+          <span className="text-sm font-black text-indigo-600">
+            {pieceTask?.phase ?? "1"}
           </span>
           <button
             type="button"
-            onClick={() => onChangePhase(+1)}
-            disabled={!isPieceActive}
-            className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+            onClick={() => onChangePhase(1)}
+            disabled={!pieceTask}
+            className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-base font-black text-slate-700 shadow-inner transition hover:bg-slate-200 disabled:opacity-30"
           >
             +
           </button>
         </div>
       </div>
 
-      {/* Client - ✅ NOUVELLE CASE */}
-      <div className="flex min-w-[150px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <User size={9} />
-          {t("kiosk.client")}
-        </span>
-        <span className="truncate text-sm font-bold text-slate-800">
-          {clientName ?? "—"}
-        </span>
-      </div>
+      {/* ✅ اسم المشروع مع اسم العميل تحته */}
+      <Field
+        label={t("kiosk.projectName")}
+        value={projectName}
+        subValue={clientName}
+        action={{ text: t("kiosk.change"), onClick: onOpenSelector }}
+      />
+      
+      <Field label={t("kiosk.projectCode")} value={project?.code ?? "—"} />
 
-      {/* Projet */}
-      <div className="flex min-w-[200px] flex-1 flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <FolderKanban size={9} />
-          {t("kiosk.projectName")}
-        </span>
-        {project ? (
-          <button
-            type="button"
-            onClick={onOpenSelector}
-            className="flex items-center gap-1 truncate text-sm font-bold text-slate-800 hover:text-indigo-600"
+      <Field label={t("kiosk.piece")} value={pieceTask?.name ?? "—"} />
+
+      <Field
+        label={t("kiosk.quantity")}
+        value={pieceTask?.quantity != null ? String(pieceTask.quantity) : "—"}
+      />
+
+      <Field
+        label={t("kiosk.estimation")}
+        value={formatMinutes(estimatedMin)}
+      />
+
+      {/* ✅ Temps restant (vert si > 0, rouge si dépassé) */}
+      {remainingMin !== null && (
+        <div
+          className={`flex min-w-[130px] flex-col rounded-xl border px-3 py-2 shadow-sm transition-colors ${
+            isOverrun
+              ? "border-red-300 bg-red-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
+          <span
+            className={`text-[10px] font-bold uppercase tracking-wider ${
+              isOverrun ? "text-red-600" : "text-emerald-600"
+            }`}
           >
-            {project.name}
-            <ArrowLeftRight size={10} className="text-slate-400" />
-            <span className="text-[10px] font-normal text-slate-400">{t("kiosk.change")}</span>
-          </button>
-        ) : (
-          <span className="truncate text-sm font-bold text-slate-400">{t("kiosk.noActiveProject")}</span>
-        )}
-      </div>
+            {t("kiosk.remainingTime")}
+          </span>
+          <span
+            className={`mt-0.5 truncate text-sm font-extrabold ${
+              isOverrun ? "text-red-700" : "text-emerald-700"
+            }`}
+          >
+            {isOverrun
+              ? `+${formatMinutes(Math.abs(remainingMin))}`
+              : formatMinutes(remainingMin)}
+          </span>
+        </div>
+      )}
 
-      {/* Code projet */}
-      <div className="flex min-w-[110px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{t("kiosk.projectCode")}</span>
-        <span className="font-mono text-sm font-bold text-slate-800" dir="ltr">
-          {project?.code ?? "—"}
-        </span>
-      </div>
+      {/* ✅ Indicateur de work package active */}
+      {wpActive && (
+        <div className="flex min-w-[110px] flex-col rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 shadow-sm">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+            <Layers size={10} />
+            {t("kiosk.workPackage")}
+          </span>
+          <span className="mt-0.5 text-xs font-bold text-indigo-700">
+            {t("kiosk.workPackageActive")}
+          </span>
+        </div>
+      )}
 
-      {/* Pièce */}
-      <div className="flex min-w-[120px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-          <Package size={9} />
-          {t("kiosk.piece")}
-        </span>
-        <span className="truncate text-sm font-bold text-slate-800">{pieceTask?.name ?? "—"}</span>
-      </div>
+      {/* ✅ NEW : Bouton "+ Pièce d'urgence" */}
+      <button
+        type="button"
+        onClick={onAddEmergencyPiece}
+        className="flex items-center gap-1.5 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50 px-3 py-2.5 text-xs font-black text-amber-700 transition hover:border-amber-500 hover:bg-amber-100 active:scale-95"
+        title={t("kiosk.addEmergency.buttonHint")}
+      >
+        <Plus size={16} />
+        {t("kiosk.addEmergency.button")}
+      </button>
 
-      {/* Quantité */}
-      <div className="flex min-w-[70px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{t("kiosk.quantity")}</span>
-        <span className="text-sm font-bold text-slate-800">{pieceTask?.quantity ?? "—"}</span>
-      </div>
+      {pieceTask && (
+        <button
+          type="button"
+          onClick={() => setIsPassationOpen(true)}
+          className="relative flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-black text-amber-950 shadow-md shadow-amber-200/60 transition hover:bg-amber-300 active:scale-95"
+        >
+          {unreadCount > 0 && (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-800 opacity-75"></span>
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-900"></span>
+            </span>
+          )}
+          <MessageSquareText size={16} />
+          {t("kiosk.passation")}
+          {unreadCount > 0 && (
+            <span className="rounded-full bg-amber-900 px-1.5 py-0.5 text-[10px] font-black text-white">
+              {unreadCount}
+            </span>
+          )}
+        </button>
+      )}
 
-      {/* Estimation */}
-      <div className="flex min-w-[90px] flex-col justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{t("kiosk.estimation")}</span>
-        <span className="text-sm font-bold text-slate-800">
-          {estimatedTotalMinutes != null && estimatedTotalMinutes > 0
-            ? formatDuration(estimatedTotalMinutes * 60)
-            : "—"}
-        </span>
-      </div>
+      {pieceTask && (
+        <DecisionButtons
+          onCompletePiece={onCompletePiece}
+          onPausePiece={onPausePiece}
+        />
+      )}
 
-      {/* Temps restant */}
-      <div className="flex min-w-[120px] flex-col justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5">
-        <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-emerald-700">
-          <Clock size={9} />
-          {t("kiosk.remainingTime")}
-        </span>
-        <span className="text-sm font-black text-emerald-700">
-          {remainingMinutes != null ? formatDuration(remainingMinutes * 60) : "—"}
-        </span>
-      </div>
+      {isToolsOpen && machine && (
+        <MachineToolsModal
+          machine={machine}
+          onClose={() => setIsToolsOpen(false)}
+        />
+      )}
+
+      {isPassationOpen && pieceTask && (
+        <PassationPanel
+          pieceTaskId={pieceTask.id}
+          projectId={project?.id ?? null}
+          shiftId={worker.shift_id}
+          workerId={worker.id}
+          onClose={() => {
+            setIsPassationOpen(false);
+            void refreshUnread();
+          }}
+        />
+      )}
     </div>
   );
 }
