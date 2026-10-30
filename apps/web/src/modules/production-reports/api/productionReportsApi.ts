@@ -1,26 +1,9 @@
 // ============================================================================
 // productionReportsApi — Rapports de production (pièces, projets, journaliers)
-// Filtré par company_id sur toutes les requêtes (C5).
-//
-// Règle 2026-10-14 : un shift fermé administrativement (is_force_closed) est
-// cappé à la durée standard du shift (company_work_settings.classique_shift_hours
-// ou fallback 8h). Tout ce qui suit la borne est ignoré — les données ne sont
-// plus fiables au-delà.
-//
-// Ajout 2026-10-14 (suite) :
-//   - getPieceOperations renvoie désormais actual_seconds / actual_cost /
-//     actual_hourly_rate par opération, agrégés depuis work_sessions via
-//     of_work_packages (interface_type).
-//   - listCompletedPieces inclut désormais les pièces "partially_done" (une
-//     seule WP terminée) en plus des "completed" — permet au manager de voir
-//     les pièces dont une seule interface a été achevée.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
 
-// ----------------------------------------------------------------------------
-// Constantes de capping
-// ----------------------------------------------------------------------------
 const DEFAULT_SHIFT_HOURS = 8;
 
 // ----------------------------------------------------------------------------
@@ -36,13 +19,23 @@ export interface PieceReportHeader {
   project_name: string;
   project_code: string | null;
   client_name: string | null;
-  /** "completed" | "partially_done" */
   production_status: string;
   completed_at: string | null;
   estimated_seconds: number;
   actual_seconds: number;
   estimated_cost: number;
   actual_cost: number;
+}
+
+// ✨ NEW: Interface pour les sessions détaillées (comme Odoo)
+export interface PieceSessionRow {
+  session_id: string;
+  worker_name: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number;
+  session_type: string;
+  is_last: boolean; // Pour afficher "(Terminé)" comme Odoo
 }
 
 export interface PieceWpRow {
@@ -66,15 +59,12 @@ export interface PieceOpRow {
   hourly_rate: number;
   interface_type: "cnc" | "classique";
   estimated_subtotal: number;
-  // ✨ Mesures réelles
-  /** Temps réel cumulé (production uniquement, non voided). */
   actual_seconds: number;
-  /** Coût réel = Σ (durée × worker.hourly_cost). */
   actual_cost: number;
-  /** Taux horaire réel moyen pondéré = actual_cost / (actual_seconds / 3600). */
   actual_hourly_rate: number | null;
 }
 
+// ... (باقي الواجهات ProjectCompletionHeader, DailyShiftRow, DailyEventRow تبقى كما هي)
 export interface ProjectCompletionHeader {
   project_id: string;
   project_code: string | null;
@@ -96,9 +86,7 @@ export interface DailyShiftRow {
   worker_name: string;
   started_at: string;
   ended_at: string | null;
-  /** Durée effective : cappée à shift_hours si is_force_closed. */
   duration_seconds: number;
-  /** Fin effective utilisée pour le calcul (cappée ou réelle). */
   effective_ended_at: string | null;
   pieces_count: number;
   events_count: number;
@@ -114,7 +102,6 @@ export interface DailyEventRow {
   project_name: string | null;
   started_at: string;
   ended_at: string | null;
-  /** Durée effective : cappée si dépasse la fenêtre du shift. */
   duration_seconds: number | null;
   note: string | null;
 }
@@ -133,19 +120,20 @@ async function loadShiftHours(companyId: string): Promise<number> {
 }
 
 // ----------------------------------------------------------------------------
-// PIÈCES AVEC RAPPORT (completed + partially_done)
+// PIÈCES AVEC RAPPORT
 // ----------------------------------------------------------------------------
 export async function listCompletedPieces(
   companyId: string,
 ): Promise<PieceReportHeader[]> {
+  // ✅ Fix: Prendre en compte 'status' ET 'production_status' pour éviter les conflits
   const { data, error } = await supabase
     .from("pieces_tasks")
     .select(
-      "id, name, code, quantity, material, project_id, completed_at, updated_at, production_status, " +
+      "id, name, code, quantity, material, project_id, completed_at, updated_at, production_status, status, " +
         "projects(id, name, code, client_id, clients(name))",
     )
     .eq("company_id", companyId)
-    .in("production_status", ["completed", "partially_done"])
+    .or("production_status.in.(completed,partially_done),status.eq.completed") // 👈 Correction ici
     .order("completed_at", { ascending: false, nullsFirst: false })
     .order("updated_at", { ascending: false });
   if (error) throw error;
@@ -160,6 +148,7 @@ export async function listCompletedPieces(
     completed_at: string | null;
     updated_at: string | null;
     production_status: string;
+    status: string;
     projects: {
       id: string;
       name: string;
@@ -227,7 +216,7 @@ export async function listCompletedPieces(
       project_name: r.projects?.name ?? "—",
       project_code: r.projects?.code ?? null,
       client_name: r.projects?.clients?.name ?? null,
-      production_status: r.production_status,
+      production_status: r.production_status || r.status, // Fallback
       completed_at: r.completed_at,
       estimated_seconds: estimated.seconds,
       actual_seconds: actual.seconds,
@@ -237,6 +226,43 @@ export async function listCompletedPieces(
   });
 }
 
+// ✨ NEW: Récupérer les sessions détaillées pour une pièce (comme Odoo)
+export async function getPieceSessions(
+  companyId: string,
+  pieceTaskId: string,
+): Promise<PieceSessionRow[]> {
+  const { data, error } = await supabase
+    .from("work_sessions")
+    .select("id, worker_id, started_at, ended_at, duration_seconds, session_type, workers(full_name)")
+    .eq("company_id", companyId)
+    .eq("piece_task_id", pieceTaskId)
+    .is("voided_at", null)
+    .order("started_at", { ascending: true });
+
+  if (error) throw error;
+
+  const sessions = (data ?? []) as Array<{
+    id: string;
+    worker_id: string;
+    started_at: string;
+    ended_at: string | null;
+    duration_seconds: number | null;
+    session_type: string;
+    workers: { full_name?: string } | null;
+  }>;
+
+  return sessions.map((s, index) => ({
+    session_id: s.id,
+    worker_name: s.workers?.full_name ?? "—",
+    started_at: s.started_at,
+    ended_at: s.ended_at,
+    duration_seconds: s.duration_seconds ?? 0,
+    session_type: s.session_type,
+    is_last: index === sessions.length - 1,
+  }));
+}
+
+// ... (باقي الدوال getPieceWorkPackages, getPieceOperations, listCompletedProjects, listDailyShifts, getShiftEvents تبقى كما هي)
 export async function getPieceWorkPackages(
   companyId: string,
   pieceTaskId: string,
@@ -336,7 +362,6 @@ export async function getPieceOperations(
   companyId: string,
   pieceTaskId: string,
 ): Promise<PieceOpRow[]> {
-  // 1. Charger les opérations estimées
   const { data } = await supabase
     .from("piece_costing_operations")
     .select("id, stage, label, estimated_hours, hourly_rate, subtotal")
@@ -368,7 +393,6 @@ export async function getPieceOperations(
 
   if (operations.length === 0) return [];
 
-  // 2. Récupérer l'OF de la pièce
   const { data: ofData } = await supabase
     .from("manufacturing_orders")
     .select("id")
@@ -378,7 +402,6 @@ export async function getPieceOperations(
   const ofId = (ofData as { id: string } | null)?.id;
   if (!ofId) return operations;
 
-  // 3. Récupérer les work packages (id + interface)
   const { data: wpsData } = await supabase
     .from("of_work_packages")
     .select("id, interface_type")
@@ -392,7 +415,6 @@ export async function getPieceOperations(
   const wpIdToInterface = new Map<string, string>();
   for (const wp of wpList) wpIdToInterface.set(wp.id, wp.interface_type);
 
-  // 4. Récupérer toutes les sessions liées à ces WPs (production, non voided)
   const { data: sessionsData } = await supabase
     .from("work_sessions")
     .select("of_work_package_id, duration_seconds, workers(hourly_cost)")
@@ -401,7 +423,6 @@ export async function getPieceOperations(
     .eq("session_type", "production")
     .is("voided_at", null);
 
-  // 5. Agréger par interface_type (somme des secondes et coût)
   const statsByInterface = new Map<string, { seconds: number; cost: number }>();
 
   for (const s of (sessionsData ?? []) as Array<{
@@ -421,7 +442,6 @@ export async function getPieceOperations(
     statsByInterface.set(iface, entry);
   }
 
-  // 6. Fusionner avec les opérations
   return operations.map((op) => {
     const stats = statsByInterface.get(op.interface_type);
     const actualSeconds = stats?.seconds ?? 0;
@@ -437,9 +457,6 @@ export async function getPieceOperations(
   });
 }
 
-// ----------------------------------------------------------------------------
-// PROJETS TERMINÉS
-// ----------------------------------------------------------------------------
 export async function listCompletedProjects(
   companyId: string,
 ): Promise<ProjectCompletionHeader[]> {
@@ -521,9 +538,6 @@ export async function listCompletedProjects(
   return result;
 }
 
-// ----------------------------------------------------------------------------
-// RAPPORTS JOURNALIERS
-// ----------------------------------------------------------------------------
 export async function listDailyShifts(
   companyId: string,
   fromDate: string,
@@ -581,8 +595,6 @@ export async function listDailyShifts(
   return rows.map((r) => {
     const startedMs = new Date(r.started_at).getTime();
 
-    // Si force_close : capper la fin effective à started_at + shift_hours.
-    // Sinon : garder ended_at tel quel (ou null si ongoing).
     let effectiveEndedIso: string | null = r.ended_at;
     if (r.is_force_closed) {
       const capMs = startedMs + shiftHoursMs;
@@ -613,7 +625,6 @@ export async function getShiftEvents(
   companyId: string,
   shiftId: string,
 ): Promise<DailyEventRow[]> {
-  // Charge le shift + ses événements en parallèle
   const [shiftRes, { data, error }] = await Promise.all([
     supabase
       .from("work_shifts")
@@ -653,7 +664,6 @@ export async function getShiftEvents(
     projects: { name?: string } | null;
   }>;
 
-  // Si force_closed : on cappe la fenêtre d'affichage
   let capMs: number | null = null;
   if (shift && shift.is_force_closed) {
     const shiftHours = await loadShiftHours(companyId);
@@ -664,12 +674,10 @@ export async function getShiftEvents(
   for (const s of rows) {
     const startedMs = new Date(s.started_at).getTime();
 
-    // Événement démarré après la borne : on l'ignore complètement
     if (capMs !== null && startedMs >= capMs) {
       continue;
     }
 
-    // Calcul de la durée effective (cappée si dépasse la borne)
     let effectiveDuration: number | null = s.duration_seconds;
     if (capMs !== null) {
       const actualEndMs = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
