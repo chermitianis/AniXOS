@@ -1,4 +1,4 @@
-﻿// apps/web/src/shared/types/database.ts
+// apps/web/src/shared/types/database.ts
 // ملف وسيط: يستخرج الأسماء المطلوبة من الأنواع المولّدة في ../../types/database
 
 import type { Database } from '../../types/database';
@@ -30,7 +30,10 @@ export type Machine = Tables['machines']['Row'];
 export type Client = Tables['clients']['Row'];
 
 // ==================== المشاريع والقطع ====================
-export type Project = Tables['projects']['Row'];
+export type Project = Tables['projects']['Row'] & {
+  /** 👈 اسم العميل (للعرض فقط، لا يُخزن في جدول projects) */
+  client_name?: string | null;
+};
 export type PieceTask = Tables['pieces_tasks']['Row'];
 
 // ==================== أنواع المهام وأسباب التوقف ====================
