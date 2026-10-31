@@ -481,17 +481,21 @@ export async function listCompletedProjects(
 
   const result: ProjectCompletionHeader[] = [];
   for (const p of rows) {
+    // 1. جلب القطع
     const { data: piecesData } = await supabase
       .from("pieces_tasks")
-      .select("id, estimated_time_minutes")
+      .select("id, estimated_time_minutes, production_status, costing_status")
       .eq("company_id", companyId)
       .eq("project_id", p.id);
     const pieces = (piecesData ?? []) as Array<{
       id: string;
       estimated_time_minutes: number | null;
+      production_status: string;
+      costing_status: string;
     }>;
     const pieceIds = pieces.map((x) => x.id);
 
+    // 2. حساب الوقت الفعلي والتكلفة
     let actualSeconds = 0;
     let laborCost = 0;
     if (pieceIds.length > 0) {
@@ -512,10 +516,28 @@ export async function listCompletedProjects(
       }
     }
 
-    const estimatedSeconds = pieces.reduce(
+    // 3. حساب الوقت التقديري (من pieces_tasks + piece_costing_operations)
+    let estimatedSeconds = pieces.reduce(
       (sum, x) => sum + (x.estimated_time_minutes ?? 0) * 60,
       0,
     );
+
+    // إضافة الوقت من عمليات التكلفة (إذا وجدت)
+    if (pieceIds.length > 0) {
+      const { data: opsData } = await supabase
+        .from("piece_costing_operations")
+        .select("estimated_hours")
+        .eq("company_id", companyId)
+        .in("piece_task_id", pieceIds);
+      const opsHours = (opsData ?? []).reduce(
+        (sum, op) => sum + (op.estimated_hours ?? 0),
+        0,
+      );
+      // إذا كان الوقت من العمليات أكبر من الوقت من القطع، نستخدمه
+      if (opsHours * 3600 > estimatedSeconds) {
+        estimatedSeconds = opsHours * 3600;
+      }
+    }
 
     const quoted = p.quoted_price ?? 0;
 
