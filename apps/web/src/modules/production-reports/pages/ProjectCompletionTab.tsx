@@ -4,6 +4,22 @@ import { Loader2, FolderKanban } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { listCompletedProjects, type ProjectCompletionHeader } from "../api/productionReportsApi";
 
+// ✅ دالة فصل اسم المشروع عن العميل ورقم التسعيرة
+function parseProjectName(projectName: string | undefined | null) {
+  if (!projectName) return { projectName: "—", clientName: "" };
+  
+  const match = projectName.match(/^([A-Z0-9]+)\s*-\s*(.+?)\s*-\s*(.+)$/);
+  
+  if (match) {
+    return { 
+      projectName: match[3].trim(), 
+      clientName: match[2].trim() 
+    };
+  }
+  
+  return { projectName, clientName: "" };
+}
+
 export function ProjectCompletionTab() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
@@ -68,20 +84,27 @@ export function ProjectCompletionTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {projects.map((p) => (
-              <tr key={p.project_id} className="hover:bg-slate-50">
-                <td className="px-3 py-2">
-                  <div className="font-semibold text-slate-700">{p.project_name}</div>
-                  {p.project_code && <div className="font-mono text-[10px] text-slate-400" dir="ltr">{p.project_code}</div>}
-                </td>
-                <td className="px-3 py-2 text-slate-600">{p.client_name ?? "—"}</td>
-                <td className="px-3 py-2 text-end text-slate-600">{p.pieces_count}</td>
-                <td className="px-3 py-2 text-end font-mono text-slate-600" dir="ltr">{fmtSec(p.estimated_seconds)}</td>
-                <td className="px-3 py-2 text-end font-mono text-slate-600" dir="ltr">{fmtSec(p.actual_seconds)}</td>
-                <td className="px-3 py-2 text-end font-mono text-slate-700" dir="ltr">{p.labor_cost.toFixed(2)} TND</td>
-                <td className={`px-3 py-2 text-end font-mono font-bold ${p.margin >= 0 ? "text-green-600" : "text-red-600"}`} dir="ltr">{p.margin.toFixed(2)} TND</td>
-              </tr>
-            ))}
+            {projects.map((p) => {
+              // ✅ استخدام دالة فصل الاسم
+              const { projectName, clientName } = parseProjectName(p.project_name);
+              
+              return (
+                <tr key={p.project_id} className="hover:bg-slate-50">
+                  <td className="px-3 py-2">
+                    <div className="font-semibold text-slate-700">{projectName}</div>
+                    {p.project_code && <div className="font-mono text-[10px] text-slate-400" dir="ltr">{p.project_code}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {clientName || p.client_name || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-end text-slate-600">{p.pieces_count}</td>
+                  <td className="px-3 py-2 text-end font-mono text-slate-600" dir="ltr">{fmtSec(p.estimated_seconds)}</td>
+                  <td className="px-3 py-2 text-end font-mono text-slate-600" dir="ltr">{fmtSec(p.actual_seconds)}</td>
+                  <td className="px-3 py-2 text-end font-mono text-slate-700" dir="ltr">{p.labor_cost.toFixed(2)} TND</td>
+                  <td className={`px-3 py-2 text-end font-mono font-bold ${p.margin >= 0 ? "text-green-600" : "text-red-600"}`} dir="ltr">{p.margin.toFixed(2)} TND</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
