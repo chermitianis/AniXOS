@@ -688,14 +688,14 @@ export async function markPieceTaskComplete(
   shiftId: string | null,
   ofWorkPackageId: string | null,
 ): Promise<void> {
-  // 1. إغلاق الجلسات المفتوحة (دائماً، بغض النظر عن الحالة)
+  // 1. إغلاق الجلسات المفتوحة
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await closeShiftPieceWork(shiftId, pieceTaskId);
 
   const nowIso = new Date().toISOString();
   const companyId = await resolveCompanyId();
 
-  // 2. جلب بيانات القطعة (بما فيها manufacturing_order_id)
+  // 2. جلب بيانات القطعة
   const { data: pieceData } = await supabase
     .from("pieces_tasks")
     .select("id, project_id, manufacturing_order_id, status, production_status")
@@ -703,21 +703,27 @@ export async function markPieceTaskComplete(
     .eq("company_id", companyId ?? "")
     .maybeSingle();
 
-  if (!pieceData) return; // القطعة غير موجودة
+  if (!pieceData) return;
 
-  // 3. التحقق من اكتمال جميع الحزم (إذا كان هناك أمر تصنيع)
+  // 3. التحقق من الحزم
   let allPackagesCompleted = true;
   const manufacturingOrderId = pieceData.manufacturing_order_id;
 
   if (manufacturingOrderId) {
+    // جلب كل الحزم المرتبطة بأمر التصنيع
     const { data: wps } = await supabase
       .from("of_work_packages")
       .select("id, status")
       .eq("company_id", companyId ?? "")
       .eq("manufacturing_order_id", manufacturingOrderId);
 
-    if (wps && wps.length > 0) {
-      // تحديث الحزمة الحالية إلى completed (لأن العامل أنهى عمله عليها)
+    const packages = wps ?? [];
+
+    if (packages.length === 0) {
+      // 🛡️ حالة 1: لا توجد حزم مخططة -> القطعة تعتبر منتهية
+      allPackagesCompleted = true;
+    } else {
+      // تحديث الحزمة الحالية (إذا وجدت) إلى completed
       if (ofWorkPackageId) {
         await supabase
           .from("of_work_packages")
@@ -726,21 +732,26 @@ export async function markPieceTaskComplete(
           .eq("company_id", companyId ?? "");
       }
 
-      // إعادة جلب الحزم بعد التحديث للتحقق
-      const { data: updatedWps } = await supabase
-        .from("of_work_packages")
-        .select("id, status")
-        .eq("company_id", companyId ?? "")
-        .eq("manufacturing_order_id", manufacturingOrderId);
+      if (packages.length === 1) {
+        // 🛡️ حالة 2: حزمة واحدة فقط -> نعتبرها منتهية بعد تحديثها
+        allPackagesCompleted = true;
+      } else {
+        // 🛡️ حالة 3: أكثر من حزمة -> نتحقق من اكتمال جميعها (بعد التحديث)
+        const { data: updatedWps } = await supabase
+          .from("of_work_packages")
+          .select("id, status")
+          .eq("company_id", companyId ?? "")
+          .eq("manufacturing_order_id", manufacturingOrderId);
 
-      allPackagesCompleted = (updatedWps ?? []).every((wp) => wp.status === "completed");
+        allPackagesCompleted = (updatedWps ?? []).every((wp) => wp.status === "completed");
+      }
     }
   } else {
-    // لا يوجد أمر تصنيع (قطعة عادية) -> نعتبرها مكتملة مباشرة
+    // قطعة بدون أمر تصنيع -> تعتبر منتهية
     allPackagesCompleted = true;
   }
 
-  // 4. تحديث حالة القطعة فقط إذا اكتملت جميع الحزم
+  // 4. تحديث حالة القطعة (فقط إذا اكتملت جميع الحزم)
   if (allPackagesCompleted) {
     await supabase
       .from("pieces_tasks")
@@ -758,7 +769,7 @@ export async function markPieceTaskComplete(
       completed_at: nowIso,
     });
 
-    // تحديث الـ planning إلى done
+    // تحديث الـ planning
     await supabase
       .from("planning")
       .update({ status: "done", completed_at: nowIso })
@@ -767,8 +778,7 @@ export async function markPieceTaskComplete(
       .eq("company_id", companyId ?? "")
       .in("status", ["scheduled", "in_progress"]);
 
-    // التحقق مما إذا كانت جميع القطع في المشروع منتهية
-    let allPiecesDone = false;
+    // تحديث حالة المشروع إذا كانت جميع القطع منتهية
     if (pieceData.project_id) {
       const { data: siblingPieces } = await supabase
         .from("pieces_tasks")
@@ -777,29 +787,25 @@ export async function markPieceTaskComplete(
         .eq("company_id", companyId ?? "");
 
       if (siblingPieces && siblingPieces.length > 0) {
-        allPiecesDone = siblingPieces.every((p) => p.status === "completed");
+        const allPiecesDone = siblingPieces.every((p) => p.status === "completed");
+        if (allPiecesDone) {
+          await supabase
+            .from("projects")
+            .update({ status: "completed" })
+            .eq("id", pieceData.project_id)
+            .eq("company_id", companyId ?? "");
+
+          await localDb.projects.update(pieceData.project_id, { status: "completed" });
+        }
       }
     }
-
-    // تحديث حالة المشروع إلى completed إذا كانت جميع القطع منتهية
-    if (allPiecesDone && pieceData.project_id) {
-      await supabase
-        .from("projects")
-        .update({ status: "completed" })
-        .eq("id", pieceData.project_id)
-        .eq("company_id", companyId ?? "");
-
-      await localDb.projects.update(pieceData.project_id, { status: "completed" });
-    }
   } else {
-    // إذا لم تكتمل جميع الحزم، نكتفي بتحديث الحزمة الحالية فقط
-    // (لقد فعلنا ذلك في الخطوة 3)
     console.log(
       `[markPieceTaskComplete] Piece "${pieceTaskId}" has incomplete packages. Keeping status as in_progress.`
     );
   }
 
-  // 5. تسجيل الحدث (دائماً)
+  // 5. تسجيل الحدث
   await logActivity(
     workerId,
     null,
