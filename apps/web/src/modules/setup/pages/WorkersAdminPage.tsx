@@ -34,6 +34,7 @@ export function WorkersAdminPage() {
   const [editUsername, setEditUsername] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editSkillLevel, setEditSkillLevel] = useState("");
+  const [editHourlyCost, setEditHourlyCost] = useState(""); // ✅ جديد
   const [editInterfaceType, setEditInterfaceType] = useState<InterfaceType>("both");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -104,6 +105,7 @@ export function WorkersAdminPage() {
     setEditUsername(w.username);
     setEditPassword("");
     setEditSkillLevel(w.skill_level ?? "");
+    setEditHourlyCost(String(w.hourly_cost ?? "")); // ✅ جديد
     setEditInterfaceType((w.interface_type as InterfaceType) ?? "both");
     setError(null);
   }
@@ -116,6 +118,7 @@ export function WorkersAdminPage() {
         full_name: editFullName.trim(),
         username: editUsername.trim(),
         skill_level: editSkillLevel.trim() || null,
+        hourly_cost: Number(editHourlyCost) || 0, // ✅ جديد
         interface_type: editInterfaceType,
       };
       if (editPassword) patch.password_hash = bcrypt.hashSync(editPassword, 10);
@@ -261,6 +264,15 @@ export function WorkersAdminPage() {
                     placeholder={t("setup.workerRole")}
                     className="rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
+                  {/* ✅ حقل أجر الساعة الجديد */}
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editHourlyCost}
+                    onChange={(e) => setEditHourlyCost(e.target.value)}
+                    placeholder={t("setup.workerHourlyCost")}
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
                 </div>
 
                 <div className="mb-2 grid grid-cols-3 gap-2">
@@ -322,6 +334,11 @@ export function WorkersAdminPage() {
                         <InterfaceIcon size={9} />
                         {t(interfaceMeta.labelKey)}
                       </span>
+                      {w.hourly_cost > 0 && (
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          {w.hourly_cost} TND/h
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
