@@ -193,17 +193,18 @@ export function WorkersAdminPage() {
           />
         </AdminField>
 
+        {/* ✅ حقل أجر الساعة (وضع الإضافة) - تصميم محسن */}
         <AdminField label={t("setup.workerHourlyCost")}>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <input
               type="number"
               step="0.01"
               value={hourlyCost}
               onChange={(e) => setHourlyCost(e.target.value)}
               placeholder="Ex: 20.00"
-              className={adminInputClass}
+              className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
-            <span className="flex items-center rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-500" dir="ltr">
+            <span className="flex items-center rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500 whitespace-nowrap" dir="ltr">
               TND / h
             </span>
           </div>
@@ -284,19 +285,21 @@ export function WorkersAdminPage() {
                     placeholder={t("setup.workerRole")}
                     className="rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editHourlyCost}
-                      onChange={(e) => setEditHourlyCost(e.target.value)}
-                      placeholder={t("setup.workerHourlyCost")}
-                      className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                    <span className="flex items-center rounded border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-500" dir="ltr">
-                      TND / h
-                    </span>
-                  </div>
+                </div>
+
+                {/* ✅ حقل أجر الساعة (وضع التعديل) - تصميم محسن */}
+                <div className="mb-2 flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editHourlyCost}
+                    onChange={(e) => setEditHourlyCost(e.target.value)}
+                    placeholder={t("setup.workerHourlyCost")}
+                    className="w-32 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <span className="flex items-center rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 whitespace-nowrap" dir="ltr">
+                    TND / h
+                  </span>
                 </div>
 
                 <div className="mb-2 grid grid-cols-3 gap-2">
