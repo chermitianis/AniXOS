@@ -34,7 +34,7 @@ export function WorkersAdminPage() {
   const [editUsername, setEditUsername] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editSkillLevel, setEditSkillLevel] = useState("");
-  const [editHourlyCost, setEditHourlyCost] = useState(""); // ✅ جديد
+  const [editHourlyCost, setEditHourlyCost] = useState("");
   const [editInterfaceType, setEditInterfaceType] = useState<InterfaceType>("both");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -105,7 +105,7 @@ export function WorkersAdminPage() {
     setEditUsername(w.username);
     setEditPassword("");
     setEditSkillLevel(w.skill_level ?? "");
-    setEditHourlyCost(String(w.hourly_cost ?? "")); // ✅ جديد
+    setEditHourlyCost(String(w.hourly_cost ?? ""));
     setEditInterfaceType((w.interface_type as InterfaceType) ?? "both");
     setError(null);
   }
@@ -118,7 +118,7 @@ export function WorkersAdminPage() {
         full_name: editFullName.trim(),
         username: editUsername.trim(),
         skill_level: editSkillLevel.trim() || null,
-        hourly_cost: Number(editHourlyCost) || 0, // ✅ جديد
+        hourly_cost: Number(editHourlyCost) || 0,
         interface_type: editInterfaceType,
       };
       if (editPassword) patch.password_hash = bcrypt.hashSync(editPassword, 10);
@@ -155,17 +155,30 @@ export function WorkersAdminPage() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+      {/* ================= FORMULAIRE D'AJOUT ================= */}
       <form onSubmit={handleSubmit} className="h-fit rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
           {t("setup.addWorker")}
         </h2>
 
         <AdminField label={t("setup.workerFullName")}>
-          <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={adminInputClass} required />
+          <input
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Ex: Ahmed Ben Ali"
+            className={adminInputClass}
+            required
+          />
         </AdminField>
 
         <AdminField label={t("setup.workerUsername")}>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} className={adminInputClass} required />
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Ex: ahmed.benali"
+            className={adminInputClass}
+            required
+          />
         </AdminField>
 
         <AdminField label={t("setup.workerPassword")}>
@@ -173,6 +186,7 @@ export function WorkersAdminPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
             minLength={4}
             className={adminInputClass}
             required
@@ -180,16 +194,21 @@ export function WorkersAdminPage() {
         </AdminField>
 
         <AdminField label={t("setup.workerHourlyCost")}>
-          <input
-            type="number"
-            step="0.01"
-            value={hourlyCost}
-            onChange={(e) => setHourlyCost(e.target.value)}
-            className={adminInputClass}
-          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              value={hourlyCost}
+              onChange={(e) => setHourlyCost(e.target.value)}
+              placeholder="Ex: 20.00"
+              className={adminInputClass}
+            />
+            <span className="flex items-center rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-500" dir="ltr">
+              TND / h
+            </span>
+          </div>
         </AdminField>
 
-        {/* Interface Kiosk */}
         <AdminField label={t("setup.workerInterface")}>
           <div className="grid grid-cols-3 gap-2">
             {INTERFACE_OPTIONS.map((opt) => {
@@ -225,6 +244,7 @@ export function WorkersAdminPage() {
         </button>
       </form>
 
+      {/* ================= LISTE DES TRAVAILLEURS ================= */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="mb-4 text-base font-bold text-slate-800 sm:text-lg">
           {t("setup.registeredWorkers")} ({workers.length})
@@ -264,15 +284,19 @@ export function WorkersAdminPage() {
                     placeholder={t("setup.workerRole")}
                     className="rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
-                  {/* ✅ حقل أجر الساعة الجديد */}
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editHourlyCost}
-                    onChange={(e) => setEditHourlyCost(e.target.value)}
-                    placeholder={t("setup.workerHourlyCost")}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editHourlyCost}
+                      onChange={(e) => setEditHourlyCost(e.target.value)}
+                      placeholder={t("setup.workerHourlyCost")}
+                      className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                    />
+                    <span className="flex items-center rounded border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-500" dir="ltr">
+                      TND / h
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mb-2 grid grid-cols-3 gap-2">
