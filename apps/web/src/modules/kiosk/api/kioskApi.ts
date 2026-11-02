@@ -547,7 +547,6 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
         .maybeSingle();
       finalPieceTaskId = (data as { piece_task_id: string | null } | null)?.piece_task_id ?? null;
     } else {
-      // في وضع الأوفلاين، نحاول قراءتها من الكاش المحلي
       const planningEntry = await localDb.planning.get(input.planningId);
       finalPieceTaskId = planningEntry?.piece_task_id ?? null;
     }
@@ -561,7 +560,7 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     shift_id: input.shiftId,
     machine_id: input.machineId,
     project_id: input.projectId,
-    piece_task_id: finalPieceTaskId, // 👈 استخدام القيمة المحمية
+    piece_task_id: finalPieceTaskId,
     planning_id: input.planningId,
     of_work_package_id: input.ofWorkPackageId,
     session_type: input.sessionType,
@@ -581,12 +580,10 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   await localDb.workSessions.put(newSession);
   await persistSessionChange(newSession, "insert");
 
-  // تحديث حالة القطعة إلى in_progress (باستخدام finalPieceTaskId)
   if (input.sessionType === "production" && finalPieceTaskId) {
     await updatePieceTaskStatusIfPending(finalPieceTaskId);
   }
 
-  // تسجيل حدث اختيار القطعة
   if (finalPieceTaskId) {
     await logActivity(
       input.workerId,
@@ -707,14 +704,14 @@ export async function markPieceTaskComplete(
 
   const manufacturingOrderId = pieceData.manufacturing_order_id;
 
+  // 3. إذا لم يكن هناك أمر تصنيع -> قطعة عادية -> إنهاء مباشر
   if (!manufacturingOrderId) {
-    // لا يوجد أمر تصنيع -> قطعة عادية، نعتبرها مكتملة
     await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
     await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
     return;
   }
 
-  // 3. جلب الحزم
+  // 4. جلب الحزم المرتبطة بأمر التصنيع
   const { data: wps } = await supabase
     .from("of_work_packages")
     .select("id, status, interface_type")
@@ -724,18 +721,15 @@ export async function markPieceTaskComplete(
   const packages = wps ?? [];
 
   if (packages.length === 0) {
-    // لا توجد حزم -> قطعة عادية
     await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
     await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
     return;
   }
 
-  // 4. تحديد الحزمة الحالية (التي نعمل عليها)
+  // 5. تحديد الحزمة الحالية
   let targetWpId = ofWorkPackageId;
 
-  // إذا لم يتم تمرير ofWorkPackageId، نحاول استنتاجه من interface_type الخاص بالعامل
   if (!targetWpId) {
-    // جلب worker للحصول على interface_type
     const { data: worker } = await supabase
       .from("workers")
       .select("interface_type")
@@ -751,18 +745,27 @@ export async function markPieceTaskComplete(
     }
   }
 
-  // 5. تحديث الحزمة الحالية إلى completed (إذا وجدت)
+  // 6. تحديث الحزمة الحالية إلى completed
   if (targetWpId) {
     await supabase
       .from("of_work_packages")
       .update({ status: "completed", completed_at: nowIso })
       .eq("id", targetWpId)
       .eq("company_id", companyId ?? "");
+
+    // 7. إخفاء الحزمة من المخطط
+    await supabase
+      .from("planning")
+      .update({ status: "done", completed_at: nowIso })
+      .eq("of_work_package_id", targetWpId)
+      .eq("worker_id", workerId)
+      .eq("company_id", companyId ?? "")
+      .in("status", ["scheduled", "in_progress"]);
   } else {
     console.warn(`[markPieceTaskComplete] Could not determine target work package for piece ${pieceTaskId}.`);
   }
 
-  // 6. إعادة جلب الحزم بعد التحديث
+  // 8. إعادة جلب الحزم بعد التحديث
   const { data: updatedWps } = await supabase
     .from("of_work_packages")
     .select("id, status")
@@ -771,7 +774,7 @@ export async function markPieceTaskComplete(
 
   const allPackagesCompleted = (updatedWps ?? []).every((wp) => wp.status === "completed");
 
-  // 7. تحديث حالة القطعة
+  // 9. تحديث حالة القطعة
   if (allPackagesCompleted) {
     await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
     await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
@@ -789,7 +792,6 @@ async function completePiece(
   projectId: string | null,
   nowIso: string,
 ): Promise<void> {
-  // تحديث القطعة
   await supabase
     .from("pieces_tasks")
     .update({ status: "completed", production_status: "completed", completed_at: nowIso })
@@ -802,7 +804,6 @@ async function completePiece(
     completed_at: nowIso,
   });
 
-  // تحديث الـ planning
   await supabase
     .from("planning")
     .update({ status: "done", completed_at: nowIso })
@@ -811,7 +812,6 @@ async function completePiece(
     .eq("company_id", companyId ?? "")
     .in("status", ["scheduled", "in_progress"]);
 
-  // تحديث المشروع
   if (projectId) {
     const { data: siblingPieces } = await supabase
       .from("pieces_tasks")
@@ -833,6 +833,7 @@ async function completePiece(
     }
   }
 }
+
 export async function pauseWorkOnPiece(pieceTaskId: string, workerId: string): Promise<void> {
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await updatePieceTaskStatusIfPending(pieceTaskId);
@@ -1151,7 +1152,6 @@ export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise
   const companyId = await resolveCompanyId();
   if (!companyId) return 0;
 
-  // 1. محاولة القراءة من الخادم (Online)
   if (connectivityMonitor.getStatus()) {
     const { data: sessions, error } = await supabase
       .from("work_sessions")
@@ -1172,7 +1172,6 @@ export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise
     }
   }
 
-  // 2. القراءة من الكاش المحلي (Offline)
   const localRows = await localDb.workSessions
     .where("piece_task_id")
     .equals(pieceTaskId)
