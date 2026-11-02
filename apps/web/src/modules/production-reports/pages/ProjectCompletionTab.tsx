@@ -4,19 +4,12 @@ import { Loader2, FolderKanban } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { listCompletedProjects, type ProjectCompletionHeader } from "../api/productionReportsApi";
 
-// ✅ دالة فصل اسم المشروع عن العميل ورقم التسعيرة
 function parseProjectName(projectName: string | undefined | null) {
   if (!projectName) return { projectName: "—", clientName: "" };
-  
   const match = projectName.match(/^([A-Z0-9]+)\s*-\s*(.+?)\s*-\s*(.+)$/);
-  
   if (match) {
-    return { 
-      projectName: match[3].trim(), 
-      clientName: match[2].trim() 
-    };
+    return { projectName: match[3].trim(), clientName: match[2].trim() };
   }
-  
   return { projectName, clientName: "" };
 }
 
@@ -85,7 +78,6 @@ export function ProjectCompletionTab() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {projects.map((p) => {
-              // ✅ استخدام دالة فصل الاسم
               const { projectName, clientName } = parseProjectName(p.project_name);
               
               return (
