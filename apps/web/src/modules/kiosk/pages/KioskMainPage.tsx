@@ -25,7 +25,9 @@ import {
   type PieceOperationEstimate,
 } from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
-import { OdooAutoSync } from "../../settings/components/OdooAutoSync"; // 👈 استيراد المزامنة
+import { OdooAutoSync } from "../../settings/components/OdooAutoSync";
+import type { PlanningProjectOption } from "../hooks/useWorkerPlanning";
+import type { PieceTask } from "../../../shared/types/database";
 
 export function KioskMainPage() {
   const { activeWorker, logout, hasOpenPieceEvents } = useWorkerSession();
@@ -117,8 +119,14 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     })
     .reduce((sum, op) => sum + Math.round(op.estimated_hours * 60), 0);
 
-  async function handleSelectFromModal(...args: Parameters<typeof selectPlanningOption>) {
-    await selectPlanningOption(...args);
+  // ✅ دالة محدثة لاستقبال planningId و ofWorkPackageId من النافذة المنبثقة
+  async function handleSelectFromModal(
+    option: PlanningProjectOption,
+    piece: PieceTask | null,
+    planningId: string | null,
+    ofWorkPackageId: string | null
+  ) {
+    await selectPlanningOption(option, piece, planningId, ofWorkPackageId);
     setIsSelectorOpen(false);
   }
 
@@ -159,7 +167,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
-      <OdooAutoSync /> {/* 👈 تفعيل المزامنة التلقائية */}
+      <OdooAutoSync />
 
       <TopNavBar
         sessionStartedAt={worker.session_started_at}
@@ -225,7 +233,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         <ProjectPieceSelectorModal
           projectOptions={projectOptions}
           loadPiecesForOption={loadPiecesForOption}
-          onSelect={(option, piece) => void handleSelectFromModal(option, piece)}
+          onSelect={handleSelectFromModal}
           onClose={() => setIsSelectorOpen(false)}
         />
       )}
