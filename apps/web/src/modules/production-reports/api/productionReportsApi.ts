@@ -522,7 +522,6 @@ export async function listCompletedProjects(
       0,
     );
 
-    // إضافة الوقت من عمليات التكلفة (إذا وجدت)
     if (pieceIds.length > 0) {
       const { data: opsData } = await supabase
         .from("piece_costing_operations")
@@ -533,7 +532,6 @@ export async function listCompletedProjects(
         (sum, op) => sum + (op.estimated_hours ?? 0),
         0,
       );
-      // إذا كان الوقت من العمليات أكبر من الوقت من القطع، نستخدمه
       if (opsHours * 3600 > estimatedSeconds) {
         estimatedSeconds = opsHours * 3600;
       }
@@ -553,7 +551,7 @@ export async function listCompletedProjects(
       actual_seconds: actualSeconds,
       labor_cost: laborCost,
       quoted_price: quoted,
-      margin: quoted - laborCost,
+      margin: quoted - laborCost, // ✅ الهامش = السعر - التكلفة
     });
   }
 
