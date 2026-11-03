@@ -495,28 +495,32 @@ export async function listCompletedProjects(
     }>;
     const pieceIds = pieces.map((x) => x.id);
 
-    // 2. حساب الوقت الفعلي والتكلفة
+    // 2. حساب الوقت الفعلي وتكلفة العامل والآلة
     let actualSeconds = 0;
     let laborCost = 0;
+    let machineCost = 0;
     if (pieceIds.length > 0) {
       const { data: sessionsData } = await supabase
         .from("work_sessions")
-        .select("duration_seconds, workers(hourly_cost)")
+        .select("duration_seconds, workers(hourly_cost), machines(hourly_cost)")
         .eq("company_id", companyId)
         .in("piece_task_id", pieceIds)
         .is("voided_at", null)
         .eq("session_type", "production");
+      
       for (const s of (sessionsData ?? []) as {
         duration_seconds: number | null;
         workers: { hourly_cost?: number } | null;
+        machines: { hourly_cost?: number } | null;
       }[]) {
         const dur = s.duration_seconds ?? 0;
         actualSeconds += dur;
         laborCost += (dur / 3600) * (s.workers?.hourly_cost ?? 0);
+        machineCost += (dur / 3600) * (s.machines?.hourly_cost ?? 0);
       }
     }
 
-    // 3. حساب الوقت التقديري (من pieces_tasks + piece_costing_operations)
+    // 3. حساب الوقت التقديري
     let estimatedSeconds = pieces.reduce(
       (sum, x) => sum + (x.estimated_time_minutes ?? 0) * 60,
       0,
@@ -538,6 +542,7 @@ export async function listCompletedProjects(
     }
 
     const quoted = p.quoted_price ?? 0;
+    const totalCost = laborCost + machineCost;
 
     result.push({
       project_id: p.id,
@@ -550,8 +555,10 @@ export async function listCompletedProjects(
       estimated_seconds: estimatedSeconds,
       actual_seconds: actualSeconds,
       labor_cost: laborCost,
+      machine_cost: machineCost, // ✅ جديد
+      total_cost: totalCost, // ✅ جديد
       quoted_price: quoted,
-      margin: quoted - laborCost, // ✅ الهامش = السعر - التكلفة
+      margin: quoted - totalCost, // ✅ الهامش = السعر - التكلفة الإجمالية
     });
   }
 
