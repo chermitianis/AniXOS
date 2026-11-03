@@ -63,10 +63,11 @@ export function ProjectReportModal({ project, onClose }: ProjectReportModalProps
         </div>
       ) : (
         <div className="space-y-6">
-          {/* معلومات المشروع */}
+          {/* معلومات المشروع (مع كود المشروع) */}
           <section>
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Informations</h2>
             <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-4">
+              <div><div className="text-[10px] font-bold uppercase text-slate-400">Code Projet</div><div className="font-semibold">{project.project_code ?? "—"}</div></div>
               <div><div className="text-[10px] font-bold uppercase text-slate-400">Statut</div><div className="font-semibold">{project.status}</div></div>
               <div><div className="text-[10px] font-bold uppercase text-slate-400">Date de fin</div><div className="font-semibold">{project.completed_at ? new Date(project.completed_at).toLocaleDateString("fr-FR") : "—"}</div></div>
               <div><div className="text-[10px] font-bold uppercase text-slate-400">Nombre de pièces</div><div className="font-semibold">{project.pieces_count}</div></div>
