@@ -25,12 +25,11 @@ export interface PieceReportHeader {
   actual_seconds: number;
   estimated_cost: number;
   actual_cost: number;
-   labor_cost: number;     
-  machine_cost: number;  
+  labor_cost: number;
+  machine_cost: number;
   margin: number;
 }
 
-// ✨ NEW: Interface pour les sessions détaillées (comme Odoo)
 export interface PieceSessionRow {
   session_id: string;
   worker_name: string;
@@ -38,7 +37,7 @@ export interface PieceSessionRow {
   ended_at: string | null;
   duration_seconds: number;
   session_type: string;
-  is_last: boolean; // Pour afficher "(Terminé)" comme Odoo
+  is_last: boolean;
 }
 
 export interface PieceWpRow {
@@ -67,7 +66,6 @@ export interface PieceOpRow {
   actual_hourly_rate: number | null;
 }
 
-// ... (باقي الواجهات ProjectCompletionHeader, DailyShiftRow, DailyEventRow تبقى كما هي)
 export interface ProjectCompletionHeader {
   project_id: string;
   project_code: string | null;
@@ -79,7 +77,7 @@ export interface ProjectCompletionHeader {
   estimated_seconds: number;
   actual_seconds: number;
   labor_cost: number;
-  machine_cost: number;       
+  machine_cost: number;
   total_cost: number;
   quoted_price: number;
   margin: number;
@@ -165,7 +163,7 @@ export async function listCompletedPieces(
   const pieceIds = rows.map((r) => r.id);
   const aggregates = new Map<string, { seconds: number; laborCost: number; machineCost: number }>();
 
-    // 1. حساب الوقت الفعلي + تكلفة العامل + تكلفة الآلة
+  // 1. حساب الوقت الفعلي + تكلفة العامل + تكلفة الآلة
   if (pieceIds.length > 0) {
     const { data: sessionsData } = await supabase
       .from("work_sessions")
@@ -234,7 +232,7 @@ export async function listCompletedPieces(
       actual_cost: totalActualCost,
       labor_cost: actual.laborCost,
       machine_cost: actual.machineCost,
-      margin: estimated.cost - totalActualCost, // ✅ الربح = التكلفة التقديرية - التكلفة الفعلية
+      margin: estimated.cost - totalActualCost,
     };
   });
 }
@@ -275,7 +273,6 @@ export async function getPieceSessions(
   }));
 }
 
-// ... (باقي الدوال getPieceWorkPackages, getPieceOperations, listCompletedProjects, listDailyShifts, getShiftEvents تبقى كما هي)
 export async function getPieceWorkPackages(
   companyId: string,
   pieceTaskId: string,
@@ -337,7 +334,6 @@ export async function getPieceWorkPackages(
     aggregated.set(s.of_work_package_id, agg);
   }
 
-  // ✅ قراءة التقديرات من piece_costing_operations (وليس of_operations)
   const { data: costingOpsData } = await supabase
     .from("piece_costing_operations")
     .select("stage, estimated_hours")
@@ -349,7 +345,6 @@ export async function getPieceWorkPackages(
     stage: string;
     estimated_hours: number;
   }[]) {
-    // تحويل stage إلى interface_type (cnc أو classique)
     const stageLower = op.stage.toLowerCase();
     const iface = stageLower.includes("cnc") ? "cnc" : "classique";
     estimatedByInterface.set(
@@ -366,7 +361,7 @@ export async function getPieceWorkPackages(
       status: wp.status,
       started_at: wp.started_at,
       completed_at: wp.completed_at,
-      estimated_hours: estimatedByInterface.get(wp.interface_type) ?? 0, // ✅ من piece_costing_operations
+      estimated_hours: estimatedByInterface.get(wp.interface_type) ?? 0,
       actual_seconds: agg?.seconds ?? 0,
       sessions_count: agg?.sessions ?? 0,
       workers_count: agg?.workers.size ?? 0,
@@ -432,9 +427,10 @@ export async function getPieceOperations(
   const wpIdToInterface = new Map<string, string>();
   for (const wp of wpList) wpIdToInterface.set(wp.id, wp.interface_type);
 
+  // ✅ إضافة machines!work_sessions_machine_id_fkey
   const { data: sessionsData } = await supabase
     .from("work_sessions")
-    .select("of_work_package_id, duration_seconds, workers(hourly_cost)")
+    .select("of_work_package_id, duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)")
     .eq("company_id", companyId)
     .in("of_work_package_id", allWpIds)
     .eq("session_type", "production")
@@ -446,16 +442,18 @@ export async function getPieceOperations(
     of_work_package_id: string | null;
     duration_seconds: number | null;
     workers: { hourly_cost?: number } | null;
+    machines: { hourly_cost?: number } | null;
   }>) {
     if (!s.of_work_package_id) continue;
     const iface = wpIdToInterface.get(s.of_work_package_id);
     if (!iface) continue;
 
     const dur = s.duration_seconds ?? 0;
-    const rate = s.workers?.hourly_cost ?? 0;
+    const workerRate = s.workers?.hourly_cost ?? 0;
+    const machineRate = s.machines?.hourly_cost ?? 0;
     const entry = statsByInterface.get(iface) ?? { seconds: 0, cost: 0 };
     entry.seconds += dur;
-    entry.cost += (dur / 3600) * rate;
+    entry.cost += (dur / 3600) * (workerRate + machineRate); // ✅ العامل + الآلة
     statsByInterface.set(iface, entry);
   }
 
@@ -498,7 +496,6 @@ export async function listCompletedProjects(
 
   const result: ProjectCompletionHeader[] = [];
   for (const p of rows) {
-    // 1. جلب القطع
     const { data: piecesData } = await supabase
       .from("pieces_tasks")
       .select("id, estimated_time_minutes, production_status, costing_status")
@@ -512,7 +509,6 @@ export async function listCompletedProjects(
     }>;
     const pieceIds = pieces.map((x) => x.id);
 
-       // 2. حساب الوقت الفعلي وتكلفة العامل والآلة
     let actualSeconds = 0;
     let laborCost = 0;
     let machineCost = 0;
@@ -537,7 +533,6 @@ export async function listCompletedProjects(
       }
     }
 
-    // 3. حساب الوقت التقديري
     let estimatedSeconds = pieces.reduce(
       (sum, x) => sum + (x.estimated_time_minutes ?? 0) * 60,
       0,
@@ -572,10 +567,10 @@ export async function listCompletedProjects(
       estimated_seconds: estimatedSeconds,
       actual_seconds: actualSeconds,
       labor_cost: laborCost,
-      machine_cost: machineCost, // ✅ جديد
-      total_cost: totalCost, // ✅ جديد
+      machine_cost: machineCost,
+      total_cost: totalCost,
       quoted_price: quoted,
-      margin: quoted - totalCost, // ✅ الهامش = السعر - التكلفة الإجمالية
+      margin: quoted - totalCost,
     });
   }
 
