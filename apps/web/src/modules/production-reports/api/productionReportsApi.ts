@@ -167,23 +167,39 @@ export async function listCompletedPieces(
   if (pieceIds.length > 0) {
     const { data: sessionsData } = await supabase
       .from("work_sessions")
-      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)") // ✅ الاسم الصريح
+      .select("piece_task_id, duration_seconds, machine_id, workers(hourly_cost)")
       .eq("company_id", companyId)
       .in("piece_task_id", pieceIds)
       .is("voided_at", null)
       .eq("session_type", "production");
+
+    // ✅ جلب hourly_cost للآلات بشكل منفصل
+    const machineIds = Array.from(
+      new Set((sessionsData ?? []).map((s: any) => s.machine_id).filter(Boolean))
+    );
+    let machineHourlyCostMap = new Map<string, number>();
+    if (machineIds.length > 0) {
+      const { data: machinesData } = await supabase
+        .from("machines")
+        .select("id, hourly_cost")
+        .in("id", machineIds);
+      machineHourlyCostMap = new Map(
+        (machinesData ?? []).map((m: any) => [m.id, m.hourly_cost ?? 0])
+      );
+    }
+
     for (const s of (sessionsData ?? []) as {
       piece_task_id: string | null;
       duration_seconds: number | null;
+      machine_id: string | null;
       workers: { hourly_cost?: number } | null;
-      machines: { hourly_cost?: number } | null;
     }[]) {
       if (!s.piece_task_id) continue;
       const agg = aggregates.get(s.piece_task_id) ?? { seconds: 0, laborCost: 0, machineCost: 0 };
       const dur = s.duration_seconds ?? 0;
       agg.seconds += dur;
       agg.laborCost += (dur / 3600) * (s.workers?.hourly_cost ?? 0);
-      agg.machineCost += (dur / 3600) * (s.machines?.hourly_cost ?? 0);
+      agg.machineCost += (dur / 3600) * (machineHourlyCostMap.get(s.machine_id ?? "") ?? 0);
       aggregates.set(s.piece_task_id, agg);
     }
   }
@@ -427,22 +443,36 @@ export async function getPieceOperations(
   const wpIdToInterface = new Map<string, string>();
   for (const wp of wpList) wpIdToInterface.set(wp.id, wp.interface_type);
 
-  // ✅ إضافة machines!work_sessions_machine_id_fkey
   const { data: sessionsData } = await supabase
     .from("work_sessions")
-    .select("of_work_package_id, duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)")
+    .select("of_work_package_id, duration_seconds, machine_id, workers(hourly_cost)")
     .eq("company_id", companyId)
     .in("of_work_package_id", allWpIds)
     .eq("session_type", "production")
     .is("voided_at", null);
+
+  // ✅ جلب hourly_cost للآلات بشكل منفصل
+  const machineIds = Array.from(
+    new Set((sessionsData ?? []).map((s: any) => s.machine_id).filter(Boolean))
+  );
+  let machineHourlyCostMap = new Map<string, number>();
+  if (machineIds.length > 0) {
+    const { data: machinesData } = await supabase
+      .from("machines")
+      .select("id, hourly_cost")
+      .in("id", machineIds);
+    machineHourlyCostMap = new Map(
+      (machinesData ?? []).map((m: any) => [m.id, m.hourly_cost ?? 0])
+    );
+  }
 
   const statsByInterface = new Map<string, { seconds: number; cost: number }>();
 
   for (const s of (sessionsData ?? []) as Array<{
     of_work_package_id: string | null;
     duration_seconds: number | null;
+    machine_id: string | null;
     workers: { hourly_cost?: number } | null;
-    machines: { hourly_cost?: number } | null;
   }>) {
     if (!s.of_work_package_id) continue;
     const iface = wpIdToInterface.get(s.of_work_package_id);
@@ -450,10 +480,10 @@ export async function getPieceOperations(
 
     const dur = s.duration_seconds ?? 0;
     const workerRate = s.workers?.hourly_cost ?? 0;
-    const machineRate = s.machines?.hourly_cost ?? 0;
+    const machineRate = machineHourlyCostMap.get(s.machine_id ?? "") ?? 0;
     const entry = statsByInterface.get(iface) ?? { seconds: 0, cost: 0 };
     entry.seconds += dur;
-    entry.cost += (dur / 3600) * (workerRate + machineRate); // ✅ العامل + الآلة
+    entry.cost += (dur / 3600) * (workerRate + machineRate);
     statsByInterface.set(iface, entry);
   }
 
@@ -515,21 +545,36 @@ export async function listCompletedProjects(
     if (pieceIds.length > 0) {
       const { data: sessionsData } = await supabase
         .from("work_sessions")
-        .select("duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)") // ✅ الاسم الصريح
+        .select("duration_seconds, machine_id, workers(hourly_cost)")
         .eq("company_id", companyId)
         .in("piece_task_id", pieceIds)
         .is("voided_at", null)
         .eq("session_type", "production");
-      
+
+      // ✅ جلب hourly_cost للآلات بشكل منفصل
+      const machineIds = Array.from(
+        new Set((sessionsData ?? []).map((s: any) => s.machine_id).filter(Boolean))
+      );
+      let machineHourlyCostMap = new Map<string, number>();
+      if (machineIds.length > 0) {
+        const { data: machinesData } = await supabase
+          .from("machines")
+          .select("id, hourly_cost")
+          .in("id", machineIds);
+        machineHourlyCostMap = new Map(
+          (machinesData ?? []).map((m: any) => [m.id, m.hourly_cost ?? 0])
+        );
+      }
+
       for (const s of (sessionsData ?? []) as {
         duration_seconds: number | null;
+        machine_id: string | null;
         workers: { hourly_cost?: number } | null;
-        machines: { hourly_cost?: number } | null;
       }[]) {
         const dur = s.duration_seconds ?? 0;
         actualSeconds += dur;
         laborCost += (dur / 3600) * (s.workers?.hourly_cost ?? 0);
-        machineCost += (dur / 3600) * (s.machines?.hourly_cost ?? 0);
+        machineCost += (dur / 3600) * (machineHourlyCostMap.get(s.machine_id ?? "") ?? 0);
       }
     }
 
