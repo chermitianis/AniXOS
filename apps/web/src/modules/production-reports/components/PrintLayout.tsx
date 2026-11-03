@@ -30,19 +30,24 @@ export function PrintLayout({
       {/* ✅ CSS للطباعة: إخفاء كل شيء ما عدا التقرير */}
       <style>{`
         @media print {
+          /* إخفاء كل شيء */
           body * {
             visibility: hidden;
           }
+          /* إظهار محتوى التقرير فقط */
           #print-report-content, #print-report-content * {
             visibility: visible;
           }
+          /* تثبيت التقرير في أعلى الصفحة */
           #print-report-content {
-            position: absolute;
-            left: 0;
-            top: 0;
+            position: static;
             width: 100%;
             margin: 0;
             padding: 0;
+          }
+          /* إخفاء أي عناصر أخرى (مثل الـ modals) */
+          .print-hidden {
+            display: none !important;
           }
           @page {
             size: A4;
@@ -51,8 +56,8 @@ export function PrintLayout({
         }
       `}</style>
 
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:static print:block print:bg-transparent print:p-0">
-        <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:static print:block print:bg-transparent print:p-0 print:inset-auto">
+        <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl print:max-h-none print:w-full print:max-w-none print:overflow-visible print:rounded-none print:shadow-none print:relative">
           {/* أزرار التحكم (مخفية عند الطباعة) */}
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 print:hidden">
             <div className="text-sm font-bold text-slate-700">Aperçu du rapport</div>
