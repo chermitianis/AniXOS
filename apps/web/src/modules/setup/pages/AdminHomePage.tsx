@@ -51,11 +51,7 @@ import { ProductionReportsPage } from "../../production-reports/pages/Production
 // ---------------------------------------------------------------------------
 // Pages mapping
 // ---------------------------------------------------------------------------
-// NOTE : toutes les pages peuvent recevoir `onNavigate(pageKey)` — mais elles
-// l'ignorent si elles ne l'utilisent pas. C'est un mécanisme opt-in.
 export interface AdminPageProps {
-  /** Demande à AdminHomePage d'ouvrir une autre section.
-   *  Accepte un `node.key` OU un `node.pageKey` (les deux sont résolus). */
   onNavigate?: (keyOrPageKey: string) => void;
 }
 
@@ -98,6 +94,7 @@ const PAGES: Record<string, React.ComponentType<any>> = {
 
 const SIDEBAR_COLLAPSED_KEY = "anixos_sidebar_collapsed";
 const NAV_EXPANDED_KEY = "anixos_nav_expanded";
+const ACTIVE_SECTION_KEY = "anixos_active_section"; // ✅ جديد: مفتاح حفظ القسم النشط
 
 interface AdminHomePageProps {
   onNavigateToSubscription?: () => void;
@@ -130,7 +127,6 @@ function filterTree(groups: NavGroup[], role: any, isOwner: boolean): NavGroup[]
     .filter((g) => g.items.length > 0);
 }
 
-/** Recherche un node par son `key` (identifiant unique dans la nav). */
 function findNode(groups: NavGroup[], key: string): NavNode | null {
   function walk(nodes: NavNode[]): NavNode | null {
     for (const n of nodes) {
@@ -149,11 +145,6 @@ function findNode(groups: NavGroup[], key: string): NavNode | null {
   return null;
 }
 
-/**
- * ✅ NEW — Recherche un node par son `pageKey`.
- * Utile quand une page appelle onNavigate("machines") — elle envoie
- * le pageKey plutôt que le node.key ("atelier_machines_cnc").
- */
 function findNodeByPageKey(groups: NavGroup[], pageKey: string): NavNode | null {
   function walk(nodes: NavNode[]): NavNode | null {
     for (const n of nodes) {
@@ -172,11 +163,6 @@ function findNodeByPageKey(groups: NavGroup[], pageKey: string): NavNode | null 
   return null;
 }
 
-/**
- * ✅ NEW — Résout un identifiant flou (key OU pageKey) vers un node.
- * Cherche dans le NAV_TREE complet (pas seulement les items visibles),
- * pour rester robuste même si la nav est partiellement repliée.
- */
 function resolveNode(
   groups: NavGroup[],
   keyOrPageKey: string,
@@ -187,7 +173,6 @@ function resolveNode(
   );
 }
 
-/** Trouve le groupe parent d'un node (pour le breadcrumb). */
 function findGroupOfKey(groups: NavGroup[], key: string): NavGroup | null {
   function contains(nodes: NavNode[], k: string): boolean {
     for (const n of nodes) {
@@ -221,6 +206,15 @@ function loadExpanded(): Set<string> {
   ]);
 }
 
+// ✅ دالة جديدة: استعادة القسم النشط من localStorage
+function loadActiveSection(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_SECTION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -245,7 +239,10 @@ export function AdminHomePage({
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(loadExpanded);
-  const [activeSection, setActiveSection] = useState<string | null>(null);
+  
+  // ✅ استعادة القسم النشط من localStorage
+  const [activeSection, setActiveSection] = useState<string | null>(() => loadActiveSection());
+  
   const [navParams, setNavParams] = useState<Record<string, string> | null>(null);
 
   const mainScrollRef = useRef<HTMLElement>(null);
@@ -253,9 +250,13 @@ export function AdminHomePage({
   const navValue = useMemo(
     () => ({
       goToSection: (key: string, params?: Record<string, string>) => {
-        // Résout key OU pageKey vers le vrai node.key
         const resolved = resolveNode(NAV_TREE, key);
-        setActiveSection(resolved?.key ?? key);
+        const newKey = resolved?.key ?? key;
+        setActiveSection(newKey);
+        // ✅ حفظ القسم النشط في localStorage
+        try {
+          localStorage.setItem(ACTIVE_SECTION_KEY, newKey);
+        } catch { /* ignore */ }
         setNavParams(params ?? null);
         setShowProfile(false);
       },
@@ -332,8 +333,6 @@ export function AdminHomePage({
 
   const fallbackKey = firstLeafKey(visibleGroups);
   const currentKey = activeSection ?? fallbackKey;
-  // ✅ Résolution robuste : cherche dans NAV_TREE complet (pas seulement visible)
-  // pour ne pas être bloqué si la nav est repliée ou si le role n'autorise pas.
   const currentNode = currentKey
     ? resolveNode(NAV_TREE, currentKey) ?? findNode(visibleGroups, currentKey)
     : null;
@@ -351,16 +350,14 @@ export function AdminHomePage({
 
   const CurrentIcon = currentNode?.icon;
 
-  /**
-   * ✅ Navigation interne.
-   * Accepte un node.key ("atelier_machines_cnc") OU un pageKey ("machines").
-   * Le pageKey est automatiquement résolu vers le node correspondant,
-   * ce qui permet aux pages enfants (ex: Dashboard "Voir tout") d'appeler
-   * onNavigate("machines") sans connaître le node.key exact.
-   */
   function handleSelect(keyOrPageKey: string) {
     const resolved = resolveNode(NAV_TREE, keyOrPageKey);
-    setActiveSection(resolved?.key ?? keyOrPageKey);
+    const newKey = resolved?.key ?? keyOrPageKey;
+    setActiveSection(newKey);
+    // ✅ حفظ القسم النشط في localStorage
+    try {
+      localStorage.setItem(ACTIVE_SECTION_KEY, newKey);
+    } catch { /* ignore */ }
     setNavParams(null);
     setIsSidebarOpen(false);
     setShowProfile(false);
@@ -379,7 +376,6 @@ export function AdminHomePage({
     handleToggleExpand(key);
   }
 
-  // User initials for avatar
   const userInitials = useMemo(() => {
     const name = staffUser?.full_name ?? "?";
     return name
@@ -396,9 +392,6 @@ export function AdminHomePage({
         className="flex h-screen flex-col overflow-hidden md:flex-row"
         style={{ backgroundColor: "var(--bg-app)" }}
       >
-        {/* ====================================================================
-            MOBILE HEADER
-            ==================================================================== */}
         <header
           className="flex flex-shrink-0 items-center justify-between border-b px-3 py-2.5 md:hidden"
           style={{
@@ -430,9 +423,6 @@ export function AdminHomePage({
           />
         )}
 
-        {/* ====================================================================
-            SIDEBAR — Deep Navy
-            ==================================================================== */}
         <aside
           className={`
             fixed inset-y-0 start-0 z-50 flex w-64 flex-col
@@ -447,7 +437,6 @@ export function AdminHomePage({
             borderInlineEnd: "1px solid var(--sidebar-border)",
           }}
         >
-          {/* ---- Brand + Collapse toggle ---- */}
           <div
             className={`relative flex-shrink-0 border-b ${
               isCollapsed ? "md:p-2 p-4" : "p-4"
@@ -502,7 +491,6 @@ export function AdminHomePage({
               </button>
             )}
 
-            {/* ---- User Card ---- */}
             {!isCollapsed && (
               <div className="flex items-center gap-2.5 rounded-xl bg-white/5 px-2.5 py-2">
                 <div
@@ -533,7 +521,6 @@ export function AdminHomePage({
             )}
           </div>
 
-          {/* ---- Navigation ---- */}
           <nav className="flex-1 overflow-y-auto px-2 py-3">
             {visibleGroups.map((group) => {
               const isGroupExpanded = expandedKeys.has(group.key);
@@ -577,7 +564,6 @@ export function AdminHomePage({
             })}
           </nav>
 
-          {/* ---- Footer: Developer Panel ---- */}
           <div
             className={`flex-shrink-0 border-t p-2 ${isCollapsed ? "md:px-1" : ""}`}
             style={{ borderColor: "var(--sidebar-border)" }}
@@ -597,11 +583,7 @@ export function AdminHomePage({
           </div>
         </aside>
 
-        {/* ====================================================================
-            MAIN AREA
-            ==================================================================== */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* ---- TOP BAR ---- */}
           <header
             className="flex flex-shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5 sm:px-6"
             style={{
@@ -609,7 +591,6 @@ export function AdminHomePage({
               borderColor: "var(--topbar-border)",
             }}
           >
-            {/* Breadcrumb */}
             <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
               <span
                 className="shrink-0 font-extrabold tracking-tight"
@@ -643,18 +624,15 @@ export function AdminHomePage({
               )}
             </div>
 
-            {/* Actions */}
             <TopRightActions onOpenProfile={() => setShowProfile(true)} />
           </header>
 
-          {/* ---- Scrollable content ---- */}
           <main
             ref={mainScrollRef}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6"
             style={{ backgroundColor: "var(--bg-app)" }}
           >
             <NavContext.Provider value={navValue}>
-              {/* Page title */}
               {!showProfile && currentNode && (
                 <div className="mb-4 flex items-center gap-2.5 md:mb-6">
                   {CurrentIcon && (
