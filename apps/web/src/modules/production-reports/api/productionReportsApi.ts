@@ -165,11 +165,11 @@ export async function listCompletedPieces(
   const pieceIds = rows.map((r) => r.id);
   const aggregates = new Map<string, { seconds: number; laborCost: number; machineCost: number }>();
 
-  // 1. حساب الوقت الفعلي + تكلفة العامل + تكلفة الآلة
+    // 1. حساب الوقت الفعلي + تكلفة العامل + تكلفة الآلة
   if (pieceIds.length > 0) {
     const { data: sessionsData } = await supabase
       .from("work_sessions")
-      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines!machine_id(hourly_cost)") // ✅ العلاقة الصريحة
+      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)") // ✅ الاسم الصريح
       .eq("company_id", companyId)
       .in("piece_task_id", pieceIds)
       .is("voided_at", null)
@@ -512,14 +512,14 @@ export async function listCompletedProjects(
     }>;
     const pieceIds = pieces.map((x) => x.id);
 
-    // 2. حساب الوقت الفعلي وتكلفة العامل والآلة
+       // 2. حساب الوقت الفعلي وتكلفة العامل والآلة
     let actualSeconds = 0;
     let laborCost = 0;
     let machineCost = 0;
     if (pieceIds.length > 0) {
-            const { data: sessionsData } = await supabase
+      const { data: sessionsData } = await supabase
         .from("work_sessions")
-        .select("duration_seconds, workers(hourly_cost), machines!machine_id(hourly_cost)") // ✅ العلاقة الصريحة
+        .select("duration_seconds, workers(hourly_cost), machines!work_sessions_machine_id_fkey(hourly_cost)") // ✅ الاسم الصريح
         .eq("company_id", companyId)
         .in("piece_task_id", pieceIds)
         .is("voided_at", null)
