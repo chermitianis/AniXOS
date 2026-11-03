@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, CalendarDays, ChevronDown, ChevronRight, Play, Pause,
-  Download, Filter
+  Download, Filter, Printer
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
@@ -12,6 +12,7 @@ import {
   type DailyEventRow,
 } from "../api/productionReportsApi";
 import { supabase } from "../../../lib/supabaseClient";
+import { ShiftReportModal } from "../components/ShiftReportModal";
 
 function todayIso(): string {
   const d = new Date();
@@ -36,6 +37,8 @@ export function DailyShiftsTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [printShift, setPrintShift] = useState<DailyShiftRow | null>(null);
   const [events, setEvents] = useState<Record<string, DailyEventRow[]>>({});
 
   useEffect(() => {
@@ -169,15 +172,27 @@ export function DailyShiftsTab() {
         <ul className="space-y-2">
           {filteredShifts.map((s) => {
             const isOpen = expanded === s.shift_id;
+            const isSelected = selectedId === s.shift_id;
             const shiftEvents = events[s.shift_id] ?? [];
             return (
-              <li key={s.shift_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                <button
-                  type="button"
-                  onClick={() => void toggleExpand(s.shift_id)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-slate-50"
-                >
-                  {isOpen ? <ChevronDown size={16} className="shrink-0 text-slate-400" /> : <ChevronRight size={16} className="shrink-0 text-slate-400" />}
+              <li
+                key={s.shift_id}
+                onClick={() => setSelectedId(isSelected ? null : s.shift_id)}
+                className={`overflow-hidden rounded-xl border bg-white transition-colors ${
+                  isSelected ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200"
+                }`}
+              >
+                <div className="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleExpand(s.shift_id);
+                    }}
+                    className="shrink-0"
+                  >
+                    {isOpen ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-bold text-slate-800">{s.worker_name}</span>
@@ -198,7 +213,20 @@ export function DailyShiftsTab() {
                       {s.pieces_count} {t("productionReports.daily.piecesShort")} · {s.events_count} {t("productionReports.daily.eventsShort")}
                     </div>
                   </div>
-                </button>
+                  {isSelected && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPrintShift(s);
+                      }}
+                      className="ml-2 shrink-0 rounded-lg bg-slate-800 p-2 text-white shadow-sm hover:bg-slate-700"
+                      title="Imprimer le rapport"
+                    >
+                      <Printer size={14} />
+                    </button>
+                  )}
+                </div>
 
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-3">
@@ -233,6 +261,13 @@ export function DailyShiftsTab() {
             );
           })}
         </ul>
+      )}
+
+      {printShift && (
+        <ShiftReportModal
+          shift={printShift}
+          onClose={() => setPrintShift(null)}
+        />
       )}
     </div>
   );
