@@ -337,20 +337,24 @@ export async function getPieceWorkPackages(
     aggregated.set(s.of_work_package_id, agg);
   }
 
-  const { data: ofOpsData } = await supabase
-    .from("of_operations")
-    .select("interface_type, estimated_hours")
+  // ✅ قراءة التقديرات من piece_costing_operations (وليس of_operations)
+  const { data: costingOpsData } = await supabase
+    .from("piece_costing_operations")
+    .select("stage, estimated_hours")
     .eq("company_id", companyId)
-    .eq("manufacturing_order_id", ofId);
+    .eq("piece_task_id", pieceTaskId);
 
-  const estimatedByIface = new Map<string, number>();
-  for (const op of (ofOpsData ?? []) as {
-    interface_type: string;
+  const estimatedByInterface = new Map<string, number>();
+  for (const op of (costingOpsData ?? []) as {
+    stage: string;
     estimated_hours: number;
   }[]) {
-    estimatedByIface.set(
-      op.interface_type,
-      (estimatedByIface.get(op.interface_type) ?? 0) + (op.estimated_hours ?? 0),
+    // تحويل stage إلى interface_type (cnc أو classique)
+    const stageLower = op.stage.toLowerCase();
+    const iface = stageLower.includes("cnc") ? "cnc" : "classique";
+    estimatedByInterface.set(
+      iface,
+      (estimatedByInterface.get(iface) ?? 0) + (op.estimated_hours ?? 0),
     );
   }
 
@@ -362,7 +366,7 @@ export async function getPieceWorkPackages(
       status: wp.status,
       started_at: wp.started_at,
       completed_at: wp.completed_at,
-      estimated_hours: estimatedByIface.get(wp.interface_type) ?? 0,
+      estimated_hours: estimatedByInterface.get(wp.interface_type) ?? 0, // ✅ من piece_costing_operations
       actual_seconds: agg?.seconds ?? 0,
       sessions_count: agg?.sessions ?? 0,
       workers_count: agg?.workers.size ?? 0,
