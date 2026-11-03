@@ -76,6 +76,8 @@ export interface ProjectCompletionHeader {
   estimated_seconds: number;
   actual_seconds: number;
   labor_cost: number;
+  machine_cost: number;       
+  total_cost: number;
   quoted_price: number;
   margin: number;
 }
