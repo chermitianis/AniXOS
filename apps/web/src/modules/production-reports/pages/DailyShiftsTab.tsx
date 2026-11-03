@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, CalendarDays, ChevronDown, ChevronRight, Play, Pause,
-  Clock, TrendingUp, TrendingDown, AlertTriangle
+  Download, Filter
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
@@ -11,6 +11,7 @@ import {
   type DailyShiftRow,
   type DailyEventRow,
 } from "../api/productionReportsApi";
+import { supabase } from "../../../lib/supabaseClient";
 
 function todayIso(): string {
   const d = new Date();
@@ -29,11 +30,24 @@ export function DailyShiftsTab() {
 
   const [fromDate, setFromDate] = useState(sevenDaysAgoIso());
   const [toDate, setToDate] = useState(todayIso());
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
+  const [workers, setWorkers] = useState<Array<{ id: string; full_name: string }>>([]);
   const [shifts, setShifts] = useState<DailyShiftRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [events, setEvents] = useState<Record<string, DailyEventRow[]>>({});
+
+  useEffect(() => {
+    if (!companyId) return;
+    void supabase
+      .from("workers")
+      .select("id, full_name")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .order("full_name")
+      .then(({ data }) => setWorkers((data as Array<{ id: string; full_name: string }>) ?? []));
+  }, [companyId]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -43,6 +57,11 @@ export function DailyShiftsTab() {
       .catch((err) => setError(err instanceof Error ? err.message : "Erreur"))
       .finally(() => setIsLoading(false));
   }, [companyId, fromDate, toDate]);
+
+  const filteredShifts = useMemo(() => {
+    if (!selectedWorkerId) return shifts;
+    return shifts.filter((s) => s.worker_id === selectedWorkerId);
+  }, [shifts, selectedWorkerId]);
 
   async function toggleExpand(shiftId: string) {
     if (expanded === shiftId) {
@@ -64,23 +83,34 @@ export function DailyShiftsTab() {
     return `${h}h ${String(m).padStart(2, "0")}`;
   }
 
-  function computeShiftSummary(shiftEvents: DailyEventRow[]) {
-    let totalProduction = 0;
-    let totalDowntime = 0;
-    const byType = new Map<string, number>();
-
-    for (const e of shiftEvents) {
-      const dur = e.duration_seconds ?? 0;
-      if (e.session_type === "production") {
-        totalProduction += dur;
+  async function exportToCsv() {
+    const rows: Array<{ worker: string; started_at: string; ended_at: string | null; duration_seconds: number; events: string }> = [];
+    for (const s of filteredShifts) {
+      const shiftEvents = events[s.shift_id] ?? [];
+      let eventLog = "";
+      if (shiftEvents.length > 0) {
+        eventLog = shiftEvents.map(e =>
+          `${new Date(e.started_at).toLocaleTimeString()}: ${e.task_type_name ?? e.stop_reason_name ?? e.session_type} (${e.piece_name ?? '-'}) [${fmtSec(e.duration_seconds ?? 0)}]`
+        ).join(" | ");
       } else {
-        totalDowntime += dur;
+        eventLog = "Aucun événement chargé (cliquez sur la ligne pour charger)";
       }
-      const key = e.task_type_name ?? e.stop_reason_name ?? e.session_type;
-      byType.set(key, (byType.get(key) ?? 0) + dur);
+      rows.push({
+        worker: s.worker_name,
+        started_at: new Date(s.started_at).toLocaleString(),
+        ended_at: s.ended_at ? new Date(s.ended_at).toLocaleString() : "En cours",
+        duration_seconds: s.duration_seconds,
+        events: eventLog,
+      });
     }
-
-    return { totalProduction, totalDowntime, byType };
+    const header = "Worker;Started;Ended;Duration;Events\n";
+    const csv = header + rows.map(r => `${r.worker};${r.started_at};${r.ended_at};${fmtSec(r.duration_seconds)};${r.events}`).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rapport_journalier_${fromDate}_${toDate}.csv`;
+    a.click();
   }
 
   return (
@@ -100,6 +130,27 @@ export function DailyShiftsTab() {
           <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
         </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            <Filter size={10} className="inline mr-1" /> Opérateur
+          </label>
+          <select
+            value={selectedWorkerId}
+            onChange={(e) => setSelectedWorkerId(e.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          >
+            <option value="">Tous les opérateurs</option>
+            {workers.map((w) => (
+              <option key={w.id} value={w.id}>{w.full_name}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={() => void exportToCsv()}
+          className="ms-auto inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-white hover:bg-slate-700"
+        >
+          <Download size={14} /> Exporter CSV
+        </button>
       </div>
 
       {isLoading ? (
@@ -109,17 +160,16 @@ export function DailyShiftsTab() {
         </div>
       ) : error ? (
         <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
-      ) : shifts.length === 0 ? (
+      ) : filteredShifts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-400">
           <CalendarDays size={32} className="mx-auto mb-2 text-slate-300" />
           {t("productionReports.daily.empty")}
         </div>
       ) : (
         <ul className="space-y-2">
-          {shifts.map((s) => {
+          {filteredShifts.map((s) => {
             const isOpen = expanded === s.shift_id;
             const shiftEvents = events[s.shift_id] ?? [];
-            const summary = computeShiftSummary(shiftEvents);
             return (
               <li key={s.shift_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <button
@@ -152,50 +202,6 @@ export function DailyShiftsTab() {
 
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-3">
-                    {/* ✅ ملخص الوردية */}
-                    <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-xs sm:grid-cols-4">
-                      <div>
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Temps total</div>
-                        <div className="font-bold text-slate-700">{fmtSec(s.duration_seconds)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Production</div>
-                        <div className="font-bold text-green-600">{fmtSec(summary.totalProduction)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Arrêts</div>
-                        <div className="font-bold text-amber-600">{fmtSec(summary.totalDowntime)}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Taux</div>
-                        <div className="font-bold text-slate-700">
-                          {s.duration_seconds > 0
-                            ? `${((summary.totalProduction / s.duration_seconds) * 100).toFixed(1)}%`
-                            : "—"}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* ✅ تجميع الأحداث حسب النوع */}
-                    {summary.byType.size > 0 && (
-                      <div className="mb-3">
-                        <h4 className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                          Répartition par type
-                        </h4>
-                        <div className="flex flex-wrap gap-1.5">
-                          {Array.from(summary.byType.entries()).map(([key, seconds]) => (
-                            <span key={key} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 border border-slate-200">
-                              {key}: {fmtSec(seconds)}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ✅ قائمة الأحداث التفصيلية */}
-                    <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                      {t("productionReports.daily.events")}
-                    </h3>
                     {shiftEvents.length === 0 ? (
                       <p className="rounded-lg bg-white px-3 py-4 text-center text-xs text-slate-400">
                         {t("productionReports.daily.noEvents")}
