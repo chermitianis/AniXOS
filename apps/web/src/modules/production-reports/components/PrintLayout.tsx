@@ -32,21 +32,45 @@ export function PrintLayout({
         @media print {
           /* إخفاء كل شيء */
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
           }
           /* إظهار محتوى التقرير فقط */
           #print-report-content, #print-report-content * {
-            visibility: visible;
+            visibility: visible !important;
           }
           /* تثبيت التقرير في أعلى الصفحة */
           #print-report-content {
-            position: static;
-            width: 100%;
-            margin: 0;
-            padding: 0;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+            color: black !important;
+            z-index: 9999 !important;
           }
-          /* إخفاء أي عناصر أخرى (مثل الـ modals) */
-          .print-hidden {
+          /* تجاوز قواعد Dark Mode */
+          #print-report-content .bg-white,
+          #print-report-content .bg-slate-50,
+          #print-report-content .bg-slate-100 {
+            background-color: white !important;
+          }
+          #print-report-content .text-slate-900,
+          #print-report-content .text-slate-800,
+          #print-report-content .text-slate-700 {
+            color: black !important;
+          }
+          #print-report-content .text-slate-500,
+          #print-report-content .text-slate-400 {
+            color: #666 !important;
+          }
+          #print-report-content .border-slate-200,
+          #print-report-content .border-slate-300 {
+            border-color: #ddd !important;
+          }
+          /* إخفاء الأزرار */
+          .print-hidden, button, .print\\:hidden {
             display: none !important;
           }
           @page {
