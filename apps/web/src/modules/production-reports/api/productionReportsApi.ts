@@ -169,7 +169,7 @@ export async function listCompletedPieces(
   if (pieceIds.length > 0) {
     const { data: sessionsData } = await supabase
       .from("work_sessions")
-      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines(hourly_cost)")
+      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines!machine_id(hourly_cost)") // ✅ العلاقة الصريحة
       .eq("company_id", companyId)
       .in("piece_task_id", pieceIds)
       .is("voided_at", null)
@@ -517,9 +517,9 @@ export async function listCompletedProjects(
     let laborCost = 0;
     let machineCost = 0;
     if (pieceIds.length > 0) {
-      const { data: sessionsData } = await supabase
+            const { data: sessionsData } = await supabase
         .from("work_sessions")
-        .select("duration_seconds, workers(hourly_cost), machines(hourly_cost)")
+        .select("duration_seconds, workers(hourly_cost), machines!machine_id(hourly_cost)") // ✅ العلاقة الصريحة
         .eq("company_id", companyId)
         .in("piece_task_id", pieceIds)
         .is("voided_at", null)
