@@ -27,18 +27,15 @@ export function PrintLayout({
 
   return (
     <>
-      {/* CSS للطباعة */}
+      {/* ✅ CSS للطباعة: إخفاء كل شيء ما عدا التقرير */}
       <style>{`
         @media print {
-          /* إخفاء كل شيء */
           body * {
             visibility: hidden !important;
           }
-          /* إظهار التقرير فقط */
           #print-report-content, #print-report-content * {
             visibility: visible !important;
           }
-          /* تثبيت التقرير في أعلى الصفحة */
           #print-report-content {
             position: absolute !important;
             left: 0 !important;
@@ -50,7 +47,6 @@ export function PrintLayout({
             color: black !important;
             z-index: 9999 !important;
           }
-          /* تجاوز Dark Mode */
           #print-report-content .bg-white,
           #print-report-content .bg-slate-50,
           #print-report-content .bg-slate-100 {
@@ -69,7 +65,6 @@ export function PrintLayout({
           #print-report-content .border-slate-300 {
             border-color: #ddd !important;
           }
-          /* إخفاء الأزرار */
           .print-hidden, button, .print\\:hidden {
             display: none !important;
           }
@@ -103,8 +98,7 @@ export function PrintLayout({
           </div>
 
           {/* محتوى التقرير (معاينة على الشاشة) */}
-          <div className="overflow-y-auto p-8" id="print-report-content">
-            {/* ... (نفس المحتوى السابق) ... */}
+          <div className="overflow-y-auto p-8">
             <ReportContent
               title={title}
               subtitle={subtitle}
@@ -153,33 +147,41 @@ function ReportContent({
   return (
     <>
       {/* رأس التقرير */}
-      <div className="mb-6 flex items-start justify-between border-b-2 border-slate-800 pb-4">
-        <div className="flex items-center gap-4">
-          {logoUrl ? (
-            <img src={logoUrl} alt="Logo" className="h-16 w-16 object-contain" />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
-              Logo
-            </div>
-          )}
-          <div>
+      <div className="mb-6 border-b-2 border-slate-800 pb-4">
+        {/* الجزء العلوي: الشعار واسم الشركة (يمين) + التاريخ (يسار) */}
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            {logoUrl ? (
+              <img src={logoUrl} alt="Logo" className="h-14 w-14 object-contain" />
+            ) : (
+              <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
+                Logo
+              </div>
+            )}
             <div className="text-lg font-extrabold text-slate-800">
               {companyName ?? "AniXOS"}
             </div>
-            <div className="text-xs text-slate-500">Rapport de production</div>
+          </div>
+          <div className="text-end text-xs text-slate-500">
+            <div>Édité le : {printDate}</div>
+            <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
           </div>
         </div>
-        <div className="text-end text-xs text-slate-500">
-          <div>Édité le : {printDate}</div>
-          <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
+
+        {/* ✅ العنوان الرئيسي: في المنتصف، بخط كبير وبارز */}
+        <div className="mt-4 text-center">
+          <h1 className="text-3xl font-black uppercase tracking-wide text-slate-900">
+            {title}
+          </h1>
         </div>
       </div>
 
-      {/* عنوان التقرير */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-black text-slate-900">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-600">{subtitle}</p>}
-      </div>
+      {/* معلومات إضافية (subtitle) تحت العنوان مباشرة، إن وجدت */}
+      {subtitle && (
+        <div className="mb-6 text-center text-sm text-slate-600">
+          {subtitle}
+        </div>
+      )}
 
       {/* محتوى التقرير */}
       {children}
