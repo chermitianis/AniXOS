@@ -63,8 +63,8 @@ export function ShiftReportModal({ shift, onClose }: ShiftReportModalProps) {
 
   return (
     <PrintLayout
-      title={`Rapport Journalier : ${shift.worker_name}`}
-      subtitle={`Date : ${new Date(shift.started_at).toLocaleDateString("fr-FR")}`}
+      title="Rapport Journalier"
+      subtitle=""
       logoUrl={logoUrl}
       companyName={companyName}
       onClose={onClose}
@@ -79,10 +79,26 @@ export function ShiftReportModal({ shift, onClose }: ShiftReportModalProps) {
           <section>
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Informations de la Session</h2>
             <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-4">
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Opérateur</div><div className="font-semibold">{shift.worker_name}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Début</div><div className="font-semibold">{new Date(shift.started_at).toLocaleTimeString("fr-FR")}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Fin</div><div className="font-semibold">{shift.ended_at ? new Date(shift.ended_at).toLocaleTimeString("fr-FR") : "En cours"}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Durée totale</div><div className="font-semibold">{fmtSec(shift.duration_seconds)}</div></div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Opérateur</div>
+                <div className="font-semibold">{shift.worker_name}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Date</div>
+                <div className="font-semibold">{new Date(shift.started_at).toLocaleDateString("fr-FR")}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Début</div>
+                <div className="font-semibold">{new Date(shift.started_at).toLocaleTimeString("fr-FR")}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Fin</div>
+                <div className="font-semibold">{shift.ended_at ? new Date(shift.ended_at).toLocaleTimeString("fr-FR") : "En cours"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Durée totale</div>
+                <div className="font-semibold">{fmtSec(shift.duration_seconds)}</div>
+              </div>
             </div>
           </section>
 
@@ -98,7 +114,11 @@ export function ShiftReportModal({ shift, onClose }: ShiftReportModalProps) {
 
           {/* جدول الأحداث */}
           <section>
-            <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Journal des Événements</h2>
+            {/* ✅ اسم العامل فوق جدول التفاصيل (على اليسار) */}
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Journal des Événements</h2>
+              <span className="text-sm font-semibold text-slate-700">Opérateur : {shift.worker_name}</span>
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
                 <tr>
