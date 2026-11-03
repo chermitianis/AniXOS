@@ -25,6 +25,9 @@ export interface PieceReportHeader {
   actual_seconds: number;
   estimated_cost: number;
   actual_cost: number;
+   labor_cost: number;     
+  machine_cost: number;  
+  margin: number;
 }
 
 // ✨ NEW: Interface pour les sessions détaillées (comme Odoo)
@@ -127,7 +130,6 @@ async function loadShiftHours(companyId: string): Promise<number> {
 export async function listCompletedPieces(
   companyId: string,
 ): Promise<PieceReportHeader[]> {
-  // ✅ Fix: Prendre en compte 'status' ET 'production_status' pour éviter les conflits
   const { data, error } = await supabase
     .from("pieces_tasks")
     .select(
@@ -135,7 +137,7 @@ export async function listCompletedPieces(
         "projects(id, name, code, client_id, clients(name))",
     )
     .eq("company_id", companyId)
-    .or("production_status.in.(completed,partially_done),status.eq.completed") // 👈 Correction ici
+    .or("production_status.in.(completed,partially_done),status.eq.completed")
     .order("completed_at", { ascending: false, nullsFirst: false })
     .order("updated_at", { ascending: false });
   if (error) throw error;
@@ -161,12 +163,13 @@ export async function listCompletedPieces(
   }>;
 
   const pieceIds = rows.map((r) => r.id);
-  const aggregates = new Map<string, { seconds: number; cost: number }>();
+  const aggregates = new Map<string, { seconds: number; laborCost: number; machineCost: number }>();
 
+  // 1. حساب الوقت الفعلي + تكلفة العامل + تكلفة الآلة
   if (pieceIds.length > 0) {
     const { data: sessionsData } = await supabase
       .from("work_sessions")
-      .select("piece_task_id, duration_seconds, workers(hourly_cost)")
+      .select("piece_task_id, duration_seconds, workers(hourly_cost), machines(hourly_cost)")
       .eq("company_id", companyId)
       .in("piece_task_id", pieceIds)
       .is("voided_at", null)
@@ -175,39 +178,44 @@ export async function listCompletedPieces(
       piece_task_id: string | null;
       duration_seconds: number | null;
       workers: { hourly_cost?: number } | null;
+      machines: { hourly_cost?: number } | null;
     }[]) {
       if (!s.piece_task_id) continue;
-      const agg = aggregates.get(s.piece_task_id) ?? { seconds: 0, cost: 0 };
+      const agg = aggregates.get(s.piece_task_id) ?? { seconds: 0, laborCost: 0, machineCost: 0 };
       const dur = s.duration_seconds ?? 0;
       agg.seconds += dur;
-      agg.cost += (dur / 3600) * (s.workers?.hourly_cost ?? 0);
+      agg.laborCost += (dur / 3600) * (s.workers?.hourly_cost ?? 0);
+      agg.machineCost += (dur / 3600) * (s.machines?.hourly_cost ?? 0);
       aggregates.set(s.piece_task_id, agg);
     }
   }
 
+  // 2. حساب التكلفة التقديرية (من piece_costing_operations)
   const estimatedMap = new Map<string, { seconds: number; cost: number }>();
   if (pieceIds.length > 0) {
     const { data: opsData } = await supabase
       .from("piece_costing_operations")
-      .select("piece_task_id, estimated_hours, subtotal")
+      .select("piece_task_id, estimated_hours, hourly_rate, subtotal")
       .eq("company_id", companyId)
       .in("piece_task_id", pieceIds);
     for (const op of (opsData ?? []) as {
       piece_task_id: string | null;
       estimated_hours: number | null;
+      hourly_rate: number | null;
       subtotal: number | null;
     }[]) {
       if (!op.piece_task_id) continue;
       const agg = estimatedMap.get(op.piece_task_id) ?? { seconds: 0, cost: 0 };
       agg.seconds += (op.estimated_hours ?? 0) * 3600;
-      agg.cost += Number(op.subtotal ?? 0);
+      agg.cost += Number(op.subtotal ?? (op.estimated_hours ?? 0) * (op.hourly_rate ?? 0));
       estimatedMap.set(op.piece_task_id, agg);
     }
   }
 
   return rows.map((r) => {
-    const actual = aggregates.get(r.id) ?? { seconds: 0, cost: 0 };
+    const actual = aggregates.get(r.id) ?? { seconds: 0, laborCost: 0, machineCost: 0 };
     const estimated = estimatedMap.get(r.id) ?? { seconds: 0, cost: 0 };
+    const totalActualCost = actual.laborCost + actual.machineCost;
     return {
       piece_task_id: r.id,
       piece_name: r.name,
@@ -218,12 +226,15 @@ export async function listCompletedPieces(
       project_name: r.projects?.name ?? "—",
       project_code: r.projects?.code ?? null,
       client_name: r.projects?.clients?.name ?? null,
-      production_status: r.production_status || r.status, // Fallback
+      production_status: r.production_status || r.status,
       completed_at: r.completed_at,
       estimated_seconds: estimated.seconds,
       actual_seconds: actual.seconds,
       estimated_cost: estimated.cost,
-      actual_cost: actual.cost,
+      actual_cost: totalActualCost,
+      labor_cost: actual.laborCost,
+      machine_cost: actual.machineCost,
+      margin: estimated.cost - totalActualCost, // ✅ الربح = التكلفة التقديرية - التكلفة الفعلية
     };
   });
 }
