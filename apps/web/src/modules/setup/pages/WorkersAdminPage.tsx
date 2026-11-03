@@ -111,6 +111,8 @@ export function WorkersAdminPage() {
   }
 
   async function saveEdit(id: string) {
+      console.log("Saving editHourlyCost:", editHourlyCost); // 👈 أضف هذا
+  setIsSavingEdit(true);
     setIsSavingEdit(true);
     setError(null);
     try {
