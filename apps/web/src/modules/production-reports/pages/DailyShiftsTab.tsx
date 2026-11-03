@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, CalendarDays, ChevronDown, ChevronRight, Play, Pause,
+  Clock, TrendingUp, TrendingDown, AlertTriangle
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
@@ -63,6 +64,25 @@ export function DailyShiftsTab() {
     return `${h}h ${String(m).padStart(2, "0")}`;
   }
 
+  function computeShiftSummary(shiftEvents: DailyEventRow[]) {
+    let totalProduction = 0;
+    let totalDowntime = 0;
+    const byType = new Map<string, number>();
+
+    for (const e of shiftEvents) {
+      const dur = e.duration_seconds ?? 0;
+      if (e.session_type === "production") {
+        totalProduction += dur;
+      } else {
+        totalDowntime += dur;
+      }
+      const key = e.task_type_name ?? e.stop_reason_name ?? e.session_type;
+      byType.set(key, (byType.get(key) ?? 0) + dur);
+    }
+
+    return { totalProduction, totalDowntime, byType };
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -98,6 +118,8 @@ export function DailyShiftsTab() {
         <ul className="space-y-2">
           {shifts.map((s) => {
             const isOpen = expanded === s.shift_id;
+            const shiftEvents = events[s.shift_id] ?? [];
+            const summary = computeShiftSummary(shiftEvents);
             return (
               <li key={s.shift_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <button
@@ -130,16 +152,57 @@ export function DailyShiftsTab() {
 
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-3">
+                    {/* ✅ ملخص الوردية */}
+                    <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-xs sm:grid-cols-4">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Temps total</div>
+                        <div className="font-bold text-slate-700">{fmtSec(s.duration_seconds)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Production</div>
+                        <div className="font-bold text-green-600">{fmtSec(summary.totalProduction)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Arrêts</div>
+                        <div className="font-bold text-amber-600">{fmtSec(summary.totalDowntime)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Taux</div>
+                        <div className="font-bold text-slate-700">
+                          {s.duration_seconds > 0
+                            ? `${((summary.totalProduction / s.duration_seconds) * 100).toFixed(1)}%`
+                            : "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ✅ تجميع الأحداث حسب النوع */}
+                    {summary.byType.size > 0 && (
+                      <div className="mb-3">
+                        <h4 className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Répartition par type
+                        </h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Array.from(summary.byType.entries()).map(([key, seconds]) => (
+                            <span key={key} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 border border-slate-200">
+                              {key}: {fmtSec(seconds)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ✅ قائمة الأحداث التفصيلية */}
                     <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                       {t("productionReports.daily.events")}
                     </h3>
-                    {(events[s.shift_id] ?? []).length === 0 ? (
+                    {shiftEvents.length === 0 ? (
                       <p className="rounded-lg bg-white px-3 py-4 text-center text-xs text-slate-400">
                         {t("productionReports.daily.noEvents")}
                       </p>
                     ) : (
                       <ul className="space-y-1.5">
-                        {(events[s.shift_id] ?? []).map((e) => {
+                        {shiftEvents.map((e) => {
                           const isProduction = e.session_type === "production";
                           const Icon = isProduction ? Play : Pause;
                           return (
