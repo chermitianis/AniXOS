@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, Boxes, ChevronDown, ChevronRight, TrendingUp, TrendingDown,
-  Search, X, CheckCircle2, Clock, Calendar, User
+  Search, X, CheckCircle2, Clock, Calendar, User, Download, Printer
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import {
@@ -15,6 +15,7 @@ import {
   type PieceOpRow,
   type PieceSessionRow,
 } from "../api/productionReportsApi";
+import { PieceReportModal } from "../components/PieceReportModal";
 
 export function PiecesReportsTab() {
   const { t } = useTranslation();
@@ -25,6 +26,8 @@ export function PiecesReportsTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [printPiece, setPrintPiece] = useState<PieceReportHeader | null>(null);
   const [wps, setWps] = useState<Record<string, PieceWpRow[]>>({});
   const [ops, setOps] = useState<Record<string, PieceOpRow[]>>({});
   const [sessions, setSessions] = useState<Record<string, PieceSessionRow[]>>({});
@@ -78,6 +81,31 @@ export function PiecesReportsTab() {
       return nameMatch || codeMatch;
     });
   }, [pieces, searchQuery]);
+
+  function exportToCsv() {
+    const header = "Pièce;Code;Projet;Client;Statut;Temps estimé;Temps réel;Coût estimé;Coût réel;Marge\n";
+    const rows = filteredPieces.map((p) => {
+      const totalCost = p.labor_cost + p.machine_cost;
+      return [
+        p.piece_name,
+        p.piece_code ?? "—",
+        p.project_name,
+        p.client_name ?? "—",
+        p.production_status,
+        fmtSec(p.estimated_seconds),
+        fmtSec(p.actual_seconds),
+        p.estimated_cost.toFixed(2),
+        totalCost.toFixed(2),
+        p.margin.toFixed(2),
+      ].join(";");
+    }).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rapport_pieces_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  }
 
   if (isLoading) {
     return (
@@ -136,6 +164,14 @@ export function PiecesReportsTab() {
                   defaultValue: "{{count}} pièce(s) avec rapport",
                 })}
           </span>
+          <div className="flex items-center gap-2">
+            <button onClick={exportToCsv} className="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-[10px] font-bold text-white">
+              <Download size={10} /> CSV
+            </button>
+            <button onClick={() => window.print()} className="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-[10px] font-bold text-white">
+              <Printer size={10} /> PDF (Liste)
+            </button>
+          </div>
         </div>
       </div>
 
@@ -154,9 +190,10 @@ export function PiecesReportsTab() {
           })}
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-2 print:space-y-4">
           {filteredPieces.map((p) => {
             const isOpen = expanded === p.piece_task_id;
+            const isSelected = selectedId === p.piece_task_id;
             const variance = p.actual_seconds - p.estimated_seconds;
             const isOver = variance > 0;
             const isFullyDone = p.production_status === "completed";
@@ -167,18 +204,26 @@ export function PiecesReportsTab() {
             return (
               <li
                 key={p.piece_task_id}
-                className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                onClick={() => setSelectedId(isSelected ? null : p.piece_task_id)}
+                className={`overflow-hidden rounded-xl border bg-white transition-colors print:break-inside-avoid ${
+                  isSelected ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200"
+                }`}
               >
-                <button
-                  type="button"
-                  onClick={() => void toggleExpand(p.piece_task_id)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-slate-50"
-                >
-                  {isOpen ? (
-                    <ChevronDown size={16} className="shrink-0 text-slate-400" />
-                  ) : (
-                    <ChevronRight size={16} className="shrink-0 text-slate-400" />
-                  )}
+                <div className="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-slate-50 print:bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleExpand(p.piece_task_id);
+                    }}
+                    className="shrink-0"
+                  >
+                    {isOpen ? (
+                      <ChevronDown size={16} className="text-slate-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-slate-400" />
+                    )}
+                  </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-bold text-slate-800">
@@ -190,21 +235,21 @@ export function PiecesReportsTab() {
                         </span>
                       )}
                       {isFullyDone ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700 print:bg-green-50">
                           <CheckCircle2 size={10} />
                           {t("productionReports.pieces.badgeCompleted", {
                             defaultValue: "Terminée",
                           })}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700 print:bg-amber-50">
                           <Clock size={10} />
                           {t("productionReports.pieces.badgePartial", {
                             defaultValue: "Partielle",
                           })}
                         </span>
                       )}
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 print:bg-slate-50">
                         Qté {p.quantity}
                       </span>
                     </div>
@@ -231,12 +276,26 @@ export function PiecesReportsTab() {
                       {isProfit ? "+" : "−"}{Math.abs(margin).toFixed(2)} TND
                     </div>
                   </div>
-                </button>
+                  {/* ✅ أيقونة الطباعة (تظهر فقط عند تحديد السطر) */}
+                  {isSelected && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPrintPiece(p);
+                      }}
+                      className="ml-2 shrink-0 rounded-lg bg-slate-800 p-2 text-white shadow-sm hover:bg-slate-700 print:hidden"
+                      title="Imprimer le rapport"
+                    >
+                      <Printer size={14} />
+                    </button>
+                  )}
+                </div>
 
                 {isOpen && (
-                  <div className="border-t border-slate-100 bg-slate-50/50 p-4">
-                    {/* ✅ ملخص التكاليف */}
-                    <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-xs sm:grid-cols-4">
+                  <div className="border-t border-slate-100 bg-slate-50/50 p-4 print:block">
+                    {/* ملخص التكاليف */}
+                    <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-xs sm:grid-cols-4 print:grid-cols-4">
                       <div>
                         <div className="text-[10px] font-bold uppercase text-slate-400">Coût estimé</div>
                         <div className="font-bold text-slate-700" dir="ltr">{p.estimated_cost.toFixed(2)} TND</div>
@@ -381,7 +440,7 @@ export function PiecesReportsTab() {
                         return (
                           <div
                             key={op.operation_id}
-                            className="rounded-lg border border-slate-200 bg-white p-4"
+                            className="rounded-lg border border-slate-200 bg-white p-4 print:break-inside-avoid"
                           >
                             <div className="mb-3 flex items-center justify-between gap-2">
                               <span className="text-sm font-bold text-slate-800">
@@ -492,6 +551,14 @@ export function PiecesReportsTab() {
             );
           })}
         </ul>
+      )}
+
+      {/* ✅ نموذج الطباعة */}
+      {printPiece && (
+        <PieceReportModal
+          piece={printPiece}
+          onClose={() => setPrintPiece(null)}
+        />
       )}
     </div>
   );
