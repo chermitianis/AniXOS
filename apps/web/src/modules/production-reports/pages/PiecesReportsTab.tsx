@@ -9,11 +9,11 @@ import {
   listCompletedPieces,
   getPieceWorkPackages,
   getPieceOperations,
-  getPieceSessions, // ✨ NEW
+  getPieceSessions,
   type PieceReportHeader,
   type PieceWpRow,
   type PieceOpRow,
-  type PieceSessionRow, // ✨ NEW
+  type PieceSessionRow,
 } from "../api/productionReportsApi";
 
 export function PiecesReportsTab() {
@@ -27,7 +27,7 @@ export function PiecesReportsTab() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [wps, setWps] = useState<Record<string, PieceWpRow[]>>({});
   const [ops, setOps] = useState<Record<string, PieceOpRow[]>>({});
-  const [sessions, setSessions] = useState<Record<string, PieceSessionRow[]>>({}); // ✨ NEW
+  const [sessions, setSessions] = useState<Record<string, PieceSessionRow[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -54,7 +54,6 @@ export function PiecesReportsTab() {
       const o = await getPieceOperations(companyId, pieceId);
       setOps((prev) => ({ ...prev, [pieceId]: o }));
     }
-    // ✨ NEW: Fetch sessions
     if (!sessions[pieceId]) {
       const s = await getPieceSessions(companyId, pieceId);
       setSessions((prev) => ({ ...prev, [pieceId]: s }));
@@ -161,6 +160,9 @@ export function PiecesReportsTab() {
             const variance = p.actual_seconds - p.estimated_seconds;
             const isOver = variance > 0;
             const isFullyDone = p.production_status === "completed";
+            const totalCost = p.labor_cost + p.machine_cost;
+            const margin = p.estimated_cost - totalCost;
+            const isProfit = margin >= 0;
 
             return (
               <li
@@ -225,12 +227,39 @@ export function PiecesReportsTab() {
                     <div className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
                       {fmtSec(p.actual_seconds)} / {fmtSec(p.estimated_seconds)}
                     </div>
+                    <div className={`mt-0.5 text-[10px] font-bold ${isProfit ? "text-green-600" : "text-red-600"}`} dir="ltr">
+                      {isProfit ? "+" : "−"}{Math.abs(margin).toFixed(2)} TND
+                    </div>
                   </div>
                 </button>
 
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-4">
-                    {/* ✨ NEW: Détail des sessions (comme Odoo) */}
+                    {/* ✅ ملخص التكاليف */}
+                    <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-xs sm:grid-cols-4">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Coût estimé</div>
+                        <div className="font-bold text-slate-700" dir="ltr">{p.estimated_cost.toFixed(2)} TND</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Coût réel</div>
+                        <div className="font-bold text-slate-700" dir="ltr">{totalCost.toFixed(2)} TND</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Marge</div>
+                        <div className={`font-bold ${isProfit ? "text-green-600" : "text-red-600"}`} dir="ltr">
+                          {isProfit ? "+" : "−"}{Math.abs(margin).toFixed(2)} TND
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Détail</div>
+                        <div className="text-[10px] text-slate-500" dir="ltr">
+                          Main d'œuvre: {p.labor_cost.toFixed(2)} | Machine: {p.machine_cost.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Détail des sessions */}
                     <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                       Détail des sessions
                     </h3>
