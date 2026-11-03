@@ -81,14 +81,38 @@ export function PieceReportModal({ piece, onClose }: PieceReportModalProps) {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* معلومات القطعة */}
+          {/* معلومات القطعة (مع كود المشروع) */}
           <section>
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Informations</h2>
             <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-4">
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Code</div><div className="font-semibold">{piece.piece_code ?? "—"}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Quantité</div><div className="font-semibold">{piece.quantity}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Statut</div><div className="font-semibold">{piece.production_status}</div></div>
-              <div><div className="text-[10px] font-bold uppercase text-slate-400">Date de fin</div><div className="font-semibold">{piece.completed_at ? new Date(piece.completed_at).toLocaleDateString("fr-FR") : "—"}</div></div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Code Pièce</div>
+                <div className="font-semibold">{piece.piece_code ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Code Projet</div>
+                <div className="font-semibold">{piece.project_code ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Quantité</div>
+                <div className="font-semibold">{piece.quantity}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Statut</div>
+                <div className="font-semibold">{piece.production_status}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Date de fin</div>
+                <div className="font-semibold">{piece.completed_at ? new Date(piece.completed_at).toLocaleDateString("fr-FR") : "—"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Projet</div>
+                <div className="font-semibold">{piece.project_name}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase text-slate-400">Client</div>
+                <div className="font-semibold">{piece.client_name ?? "—"}</div>
+              </div>
             </div>
           </section>
 
