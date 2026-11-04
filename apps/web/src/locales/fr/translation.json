@@ -1054,7 +1054,16 @@
         "confirmReset": "Réinitialiser les paramètres aux valeurs par défaut ?",
         "chooseWorker": "Choisir un opérateur",
         "selectWorker": "Sélectionner un opérateur",
-        "workerBusy": "Occupé"
+        "workerBusy": "Occupé",
+
+        "logoSection": "Logo de l'entreprise",
+        "logoSubtitle": "Ce logo apparaîtra sur les rapports imprimés.",
+        "logoUpload": "Uploader un logo",
+        "logoChange": "Changer le logo",
+        "logoHint": "Formats acceptés: PNG, JPG. L'image sera redimensionnée automatiquement.",
+        "logoDeleteConfirm": "Supprimer le logo ?",
+        "logoError": "Erreur lors de l'upload",
+        "logoBucketError": "Bucket introuvable. Veuillez contacter le support."
       }
     }
   },
