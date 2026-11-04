@@ -1025,7 +1025,9 @@
       },
       "changeWorker": "Changer l'opérateur",
       "workerAssigned": "Affecté",
-      "workSettings": {
+
+    },
+          "workSettings": {
         "title": "Paramètres de travail",
         "subtitle": "Configurez les postes, horaires et chemins de vos dessins techniques",
         "cncSection": "Postes CNC",
@@ -1065,7 +1067,6 @@
         "logoError": "Erreur lors de l'upload",
         "logoBucketError": "Bucket introuvable. Veuillez contacter le support."
       }
-    }
   },
   "productionReports": {
     "tabs": {
