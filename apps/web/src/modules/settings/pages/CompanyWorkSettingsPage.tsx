@@ -21,6 +21,7 @@ const DAYS: { n: number; labelKey: string }[] = [
   { n: 6, labelKey: "production.planning.workSettings.saturday" },
   { n: 0, labelKey: "production.planning.workSettings.sunday" },
 ];
+
 export function CompanyWorkSettingsPage() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
@@ -130,7 +131,7 @@ export function CompanyWorkSettingsPage() {
   }
 
   async function handleRemoveLogo() {
-    if (!companyId || !window.confirm(t("planning.workSettings.logoDeleteConfirm"))) return;
+    if (!companyId || !window.confirm(t("production.planning.workSettings.logoDeleteConfirm"))) return;
     setLogoError(null);
     setIsUploadingLogo(true);
     try {
@@ -141,7 +142,7 @@ export function CompanyWorkSettingsPage() {
       await supabase.from("companies").update({ logo_url: null }).eq("id", companyId);
       setLogoUrl(null);
     } catch (err) {
-      setLogoError(err instanceof Error ? err.message : t("planning.workSettings.logoError"));
+      setLogoError(err instanceof Error ? err.message : t("production.planning.workSettings.logoError"));
     } finally {
       setIsUploadingLogo(false);
     }
@@ -177,7 +178,7 @@ export function CompanyWorkSettingsPage() {
   }
 
   function handleReset() {
-    if (!window.confirm(t("planning.workSettings.confirmReset"))) return;
+    if (!window.confirm(t("production.planning.workSettings.confirmReset"))) return;
     if (!settings) return;
     setSettings({ ...settings, ...DEFAULT_WORK_SETTINGS });
   }
@@ -205,10 +206,10 @@ export function CompanyWorkSettingsPage() {
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <h1 className="text-lg font-extrabold text-slate-800">
-          {t("planning.workSettings.title")}
+          {t("production.planning.workSettings.title")}
         </h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          {t("planning.workSettings.subtitle")}
+          {t("production.planning.workSettings.subtitle")}
         </p>
       </div>
 
@@ -217,19 +218,19 @@ export function CompanyWorkSettingsPage() {
       )}
       {success && (
         <div className="rounded-lg bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-          {t("planning.workSettings.saved")}
+          {t("production.planning.workSettings.saved")}
         </div>
       )}
 
-          {/* ✅ LOGO DE L'ENTREPRISE */}
+      {/* ✅ LOGO DE L'ENTREPRISE */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
             <ImageIcon size={18} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-800">{t("planning.workSettings.logoSection")}</h2>
-            <p className="text-xs text-slate-500">{t("planning.workSettings.logoSubtitle")}</p>
+            <h2 className="text-base font-bold text-slate-800">{t("production.planning.workSettings.logoSection")}</h2>
+            <p className="text-xs text-slate-500">{t("production.planning.workSettings.logoSubtitle")}</p>
           </div>
         </div>
 
@@ -266,10 +267,10 @@ export function CompanyWorkSettingsPage() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {isUploadingLogo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {logoUrl ? t("planning.workSettings.logoChange") : t("planning.workSettings.logoUpload")}
+              {logoUrl ? t("production.planning.workSettings.logoChange") : t("production.planning.workSettings.logoUpload")}
             </button>
             <p className="mt-1 text-[11px] text-slate-400">
-              {t("planning.workSettings.logoHint")}
+              {t("production.planning.workSettings.logoHint")}
             </p>
             {logoError && <p className="mt-1 text-xs text-red-600">{logoError}</p>}
           </div>
@@ -283,13 +284,13 @@ export function CompanyWorkSettingsPage() {
             <Cpu size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.cncSection")}
+            {t("production.planning.workSettings.cncSection")}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label={t("planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.cnc_shifts_per_day} onChange={(v) => patch("cnc_shifts_per_day", Number(v) || 1)} />
-          <Field label={t("planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.cnc_shift_hours} onChange={(v) => patch("cnc_shift_hours", Number(v) || 8)} />
-          <Field label={t("planning.workSettings.shiftStartTime")} type="time" value={settings.cnc_shift_start_time} onChange={(v) => patch("cnc_shift_start_time", v)} />
+          <Field label={t("production.planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.cnc_shifts_per_day} onChange={(v) => patch("cnc_shifts_per_day", Number(v) || 1)} />
+          <Field label={t("production.planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.cnc_shift_hours} onChange={(v) => patch("cnc_shift_hours", Number(v) || 8)} />
+          <Field label={t("production.planning.workSettings.shiftStartTime")} type="time" value={settings.cnc_shift_start_time} onChange={(v) => patch("cnc_shift_start_time", v)} />
         </div>
       </div>
 
@@ -300,13 +301,13 @@ export function CompanyWorkSettingsPage() {
             <Wrench size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.classiqueSection")}
+            {t("production.planning.workSettings.classiqueSection")}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label={t("planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.classique_shifts_per_day} onChange={(v) => patch("classique_shifts_per_day", Number(v) || 1)} />
-          <Field label={t("planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.classique_shift_hours} onChange={(v) => patch("classique_shift_hours", Number(v) || 8)} />
-          <Field label={t("planning.workSettings.shiftStartTime")} type="time" value={settings.classique_shift_start_time} onChange={(v) => patch("classique_shift_start_time", v)} />
+          <Field label={t("production.planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.classique_shifts_per_day} onChange={(v) => patch("classique_shifts_per_day", Number(v) || 1)} />
+          <Field label={t("production.planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.classique_shift_hours} onChange={(v) => patch("classique_shift_hours", Number(v) || 8)} />
+          <Field label={t("production.planning.workSettings.shiftStartTime")} type="time" value={settings.classique_shift_start_time} onChange={(v) => patch("classique_shift_start_time", v)} />
         </div>
       </div>
 
@@ -317,7 +318,7 @@ export function CompanyWorkSettingsPage() {
             <Calendar size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.workingDays")}
+            {t("production.planning.workSettings.workingDays")}
           </h2>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -339,22 +340,22 @@ export function CompanyWorkSettingsPage() {
             <FolderOpen size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.drawingSection")}
+            {t("production.planning.workSettings.drawingSection")}
           </h2>
         </div>
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("planning.workSettings.drawingBasePath")}</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("production.planning.workSettings.drawingBasePath")}</label>
             <input type="text" dir="ltr" value={settings.piece_drawing_base_path ?? ""} onChange={(e) => patch("piece_drawing_base_path", e.target.value || null)} placeholder="D:\\Dessins\\  ou  \\\\SERVER\\Dessins\\" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-400 focus:outline-none" />
-            <p className="mt-1 text-[11px] text-slate-400">{t("planning.workSettings.drawingBasePathHint")}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{t("production.planning.workSettings.drawingBasePathHint")}</p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("planning.workSettings.drawingPattern")}</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("production.planning.workSettings.drawingPattern")}</label>
             <input type="text" dir="ltr" value={settings.piece_drawing_path_pattern ?? ""} onChange={(e) => patch("piece_drawing_path_pattern", e.target.value || null)} placeholder="{projectCode}/{pieceName}.pdf" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-400 focus:outline-none" />
-            <p className="mt-1 text-[11px] text-slate-400">{t("planning.workSettings.drawingPatternHint")}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{t("production.planning.workSettings.drawingPatternHint")}</p>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t("planning.workSettings.drawingPreview")}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t("production.planning.workSettings.drawingPreview")}</div>
             <div className="mt-0.5 font-mono text-xs text-slate-700" dir="ltr">{pathPreview()}</div>
           </div>
         </div>
@@ -363,11 +364,11 @@ export function CompanyWorkSettingsPage() {
       {/* ACTIONS */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4">
         <button type="button" onClick={handleReset} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-          <RotateCcw size={14} /> {t("planning.workSettings.resetToDefaults")}
+          <RotateCcw size={14} /> {t("production.planning.workSettings.resetToDefaults")}
         </button>
         <button type="button" onClick={() => void handleSave()} disabled={isSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
           {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          {isSaving ? t("planning.workSettings.saving") : t("planning.workSettings.save")}
+          {isSaving ? t("production.planning.workSettings.saving") : t("production.planning.workSettings.save")}
         </button>
       </div>
     </div>
