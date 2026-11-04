@@ -13,15 +13,14 @@ import {
 } from "../../../shared/api/companyWorkSettingsApi";
 
 const DAYS: { n: number; labelKey: string }[] = [
-  { n: 1, labelKey: "planning.workSettings.monday" },
-  { n: 2, labelKey: "planning.workSettings.tuesday" },
-  { n: 3, labelKey: "planning.workSettings.wednesday" },
-  { n: 4, labelKey: "planning.workSettings.thursday" },
-  { n: 5, labelKey: "planning.workSettings.friday" },
-  { n: 6, labelKey: "planning.workSettings.saturday" },
-  { n: 0, labelKey: "planning.workSettings.sunday" },
+  { n: 1, labelKey: "production.planning.workSettings.monday" },
+  { n: 2, labelKey: "production.planning.workSettings.tuesday" },
+  { n: 3, labelKey: "production.planning.workSettings.wednesday" },
+  { n: 4, labelKey: "production.planning.workSettings.thursday" },
+  { n: 5, labelKey: "production.planning.workSettings.friday" },
+  { n: 6, labelKey: "production.planning.workSettings.saturday" },
+  { n: 0, labelKey: "production.planning.workSettings.sunday" },
 ];
-
 export function CompanyWorkSettingsPage() {
   const { t } = useTranslation();
   const { staffUser } = useStaffAuth();
