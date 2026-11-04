@@ -11,7 +11,6 @@ interface NavItemProps {
   onToggleExpand: (key: string) => void;
 }
 
-// زيادة المسافة البادئة لتكون أوضح للعناصر الفرعية
 const INDENT_PER_LEVEL = 16;
 
 export function NavItem({
@@ -24,25 +23,22 @@ export function NavItem({
 }: NavItemProps) {
   const { t } = useTranslation();
   
-  const hasMultipleChildren = !!node.children && node.children.length > 1;
-  const singleChild = node.children && node.children.length === 1 ? node.children[0] : null;
-  const targetNode = singleChild ? singleChild : node;
-
+  const hasChildren = !!node.children && node.children.length > 0;
   const isExpanded = expandedKeys.has(node.key);
-  const isActive = activeKey === targetNode.key;
+  const isActive = activeKey === node.key;
   
-  const label = t(targetNode.labelKey, { defaultValue: targetNode.label });
-  const Icon = targetNode.icon || node.icon;
+  const label = t(node.labelKey, { defaultValue: node.label });
+  const Icon = node.icon;
 
+  // النقر في أي مكان في الصف يفتح أو يغلق القائمة
   function handleClick() {
-    if (hasMultipleChildren) {
+    if (hasChildren) {
       onToggleExpand(node.key);
     } else {
-      onSelect(targetNode.key);
+      onSelect(node.key);
     }
   }
 
-  // حساب المسافة البادئة: المسافة الأساسية + (مستوى العمق * المسافة لكل مستوى)
   const paddingStart = depth * INDENT_PER_LEVEL + 12;
 
   return (
@@ -50,7 +46,7 @@ export function NavItem({
       <button
         type="button"
         onClick={handleClick}
-        className={`group flex w-full items-center gap-2 rounded-lg py-2 pe-2 text-start text-[13px] font-medium transition-colors duration-150 ${
+        className={`group flex w-full items-center gap-3 rounded-lg py-2.5 pe-2 text-start text-[13px] font-medium transition-colors duration-150 ${
           isActive ? "font-bold" : ""
         }`}
         style={{
@@ -73,7 +69,7 @@ export function NavItem({
       >
         {Icon && (
           <Icon
-            size={16}
+            size={18}
             className="shrink-0 transition-colors"
             style={{
               color: isActive ? "#ffffff" : "var(--sidebar-text-secondary)",
@@ -82,10 +78,10 @@ export function NavItem({
         )}
         <span className="flex-1 truncate">{label}</span>
         
-        {hasMultipleChildren && (
+        {hasChildren && (
           <ChevronRight
-            size={14}
-            className={`shrink-0 transition-transform duration-150 ${
+            size={16}
+            className={`shrink-0 transition-transform duration-200 ${
               isExpanded ? "rotate-90" : ""
             }`}
             style={{
@@ -95,8 +91,9 @@ export function NavItem({
         )}
       </button>
 
-      {hasMultipleChildren && isExpanded && (
-        <div className="mt-0.5">
+      {/* عرض العناصر الفرعية مع تأثير انسيابي */}
+      {hasChildren && isExpanded && (
+        <div className="mt-1 space-y-0.5">
           {node.children!.map((child) => (
             <NavItem
               key={child.key}
