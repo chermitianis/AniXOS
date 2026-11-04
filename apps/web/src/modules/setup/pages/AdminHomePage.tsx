@@ -94,7 +94,7 @@ const PAGES: Record<string, React.ComponentType<any>> = {
 
 const SIDEBAR_COLLAPSED_KEY = "anixos_sidebar_collapsed";
 const NAV_EXPANDED_KEY = "anixos_nav_expanded";
-const ACTIVE_SECTION_KEY = "anixos_active_section"; // ✅ جديد: مفتاح حفظ القسم النشط
+const ACTIVE_SECTION_KEY = "anixos_active_section";
 
 interface AdminHomePageProps {
   onNavigateToSubscription?: () => void;
@@ -206,7 +206,6 @@ function loadExpanded(): Set<string> {
   ]);
 }
 
-// ✅ دالة جديدة: استعادة القسم النشط من localStorage
 function loadActiveSection(): string | null {
   try {
     return localStorage.getItem(ACTIVE_SECTION_KEY);
@@ -240,7 +239,6 @@ export function AdminHomePage({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(loadExpanded);
   
-  // ✅ استعادة القسم النشط من localStorage
   const [activeSection, setActiveSection] = useState<string | null>(() => loadActiveSection());
   
   const [navParams, setNavParams] = useState<Record<string, string> | null>(null);
@@ -253,7 +251,6 @@ export function AdminHomePage({
         const resolved = resolveNode(NAV_TREE, key);
         const newKey = resolved?.key ?? key;
         setActiveSection(newKey);
-        // ✅ حفظ القسم النشط في localStorage
         try {
           localStorage.setItem(ACTIVE_SECTION_KEY, newKey);
         } catch { /* ignore */ }
@@ -354,7 +351,6 @@ export function AdminHomePage({
     const resolved = resolveNode(NAV_TREE, keyOrPageKey);
     const newKey = resolved?.key ?? keyOrPageKey;
     setActiveSection(newKey);
-    // ✅ حفظ القسم النشط في localStorage
     try {
       localStorage.setItem(ACTIVE_SECTION_KEY, newKey);
     } catch { /* ignore */ }
@@ -525,50 +521,48 @@ export function AdminHomePage({
             {visibleGroups.map((group) => {
               const isGroupExpanded = expandedKeys.has(group.key);
               const groupLabel = t(group.labelKey, { defaultValue: group.label });
-              
-              // ✅ المنطق الجديد: إذا كان القسم يحتوي على عنصر واحد فقط، نعرضه مباشرة كرابط
               const isSingleItemGroup = group.items.length === 1;
 
               return (
-                <div key={group.key} className="mb-2">
-                  {/* عرض العنوان والسهم فقط إذا كان القسم يحتوي على أكثر من عنصر */}
-                  {!isCollapsed && !isSingleItemGroup && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleGroup(group.key)}
-                      className="mb-0.5 flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition"
+                <div key={group.key} className="mb-4 last:mb-0">
+                  
+                  {!isCollapsed && (
+                    <div 
+                      className="mb-1 flex items-center justify-between px-3 text-[10px] font-bold uppercase tracking-wider"
                       style={{ color: "var(--sidebar-group-label)" }}
                     >
                       <span className="truncate">{groupLabel}</span>
-                      <ChevronRight
-                        size={11}
-                        strokeWidth={2.5}
-                        className={`shrink-0 transition-transform ${
-                          isGroupExpanded ? "rotate-90" : ""
-                        }`}
-                      />
-                    </button>
-                  )}
-                  {!isCollapsed && isSingleItemGroup && (
-                    <div className="mx-2 my-2 h-px" style={{ backgroundColor: "var(--sidebar-border)" }} />
-                  )}
-                  {isCollapsed && (
-                    <div className="mx-2 my-2 h-px" style={{ backgroundColor: "var(--sidebar-border)" }} />
+                      
+                      {!isSingleItemGroup && (
+                         <button
+                           type="button"
+                           onClick={() => handleToggleGroup(group.key)}
+                           className="rounded p-0.5 transition hover:bg-white/10"
+                         >
+                           <ChevronRight
+                             size={12}
+                             strokeWidth={2.5}
+                             className={`shrink-0 transition-transform ${isGroupExpanded ? "rotate-90" : ""}`}
+                           />
+                         </button>
+                      )}
+                    </div>
                   )}
 
-                  {/* عرض العناصر: إذا كان عنصراً واحداً نعرضه دائماً، وإذا كان متعدداً نعرضه فقط عند التوسيع */}
-                  {(isCollapsed || isSingleItemGroup || isGroupExpanded) &&
-                    group.items.map((item) => (
-                      <NavItem
-                        key={item.key}
-                        node={item}
-                        depth={0}
-                        activeKey={currentKey}
-                        expandedKeys={expandedKeys}
-                        onSelect={handleSelect}
-                        onToggleExpand={handleToggleExpand}
-                      />
-                    ))}
+                  <div className="space-y-0.5">
+                    {(isCollapsed || isSingleItemGroup || isGroupExpanded) &&
+                      group.items.map((item) => (
+                        <NavItem
+                          key={item.key}
+                          node={item}
+                          depth={0}
+                          activeKey={currentKey}
+                          expandedKeys={expandedKeys}
+                          onSelect={handleSelect}
+                          onToggleExpand={handleToggleExpand}
+                        />
+                      ))}
+                  </div>
                 </div>
               );
             })}
