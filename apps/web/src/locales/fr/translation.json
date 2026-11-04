@@ -333,7 +333,10 @@
     "commercial": "Commercial",
     "ingenierie": "Ingénierie",
     "finance": "Finance",
-    "archives": "Archives"
+    "archives": "Archives",
+    "security": "Sécurité & audit",
+"settings": "Paramètres",
+"integrations": "Intégrations"
   },
   "setup": {
     "fullName": "Nom complet",
