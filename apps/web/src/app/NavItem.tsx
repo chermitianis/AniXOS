@@ -30,7 +30,6 @@ export function NavItem({
   const label = t(node.labelKey, { defaultValue: node.label });
   const Icon = node.icon;
 
-  // النقر في أي مكان في الصف يفتح أو يغلق القائمة
   function handleClick() {
     if (hasChildren) {
       onToggleExpand(node.key);
@@ -91,7 +90,6 @@ export function NavItem({
         )}
       </button>
 
-      {/* عرض العناصر الفرعية مع تأثير انسيابي */}
       {hasChildren && isExpanded && (
         <div className="mt-1 space-y-0.5">
           {node.children!.map((child) => (
