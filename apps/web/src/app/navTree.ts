@@ -131,7 +131,26 @@ export const NAV_TREE: NavGroup[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 05. FINANCE
+  // 05. ATELIER
+  // ─────────────────────────────────────────────────────────────
+  {
+    key: "atelier",
+    labelKey: "navGroup.atelier",
+    label: "Atelier",
+    items: [
+      L("atelier_operateurs", "Opérateurs", { page: "workers", perm: "workers", icon: HardHat }),
+      L("atelier_machines_cnc", "Machines", { page: "machines", perm: "machines", icon: Cog }),
+      L("atelier_operations", "Opérations", { page: "operations", perm: "operations", icon: ListChecks }),
+      L("atelier_outillages", "Outillages", { icon: Hammer }),
+      L("atelier_matieres", "Matières & consommables", { icon: Package }),
+      L("atelier_equipements", "Équipements", { icon: Boxes }),
+      L("atelier_maintenance", "Maintenance", { icon: AlertTriangle }),
+      L("atelier_ressources", "Ressources disponibles", { icon: Layers }),
+    ],
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // 06. FINANCE
   // ─────────────────────────────────────────────────────────────
   {
     key: "finance",
@@ -256,25 +275,6 @@ export const NAV_TREE: NavGroup[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 06. ATELIER
-  // ─────────────────────────────────────────────────────────────
-  {
-    key: "atelier",
-    labelKey: "navGroup.atelier",
-    label: "Atelier",
-    items: [
-      L("atelier_operateurs", "Opérateurs", { page: "workers", perm: "workers", icon: HardHat }),
-      L("atelier_machines_cnc", "Machines", { page: "machines", perm: "machines", icon: Cog }),
-      L("atelier_operations", "Opérations", { page: "operations", perm: "operations", icon: ListChecks }),
-      L("atelier_outillages", "Outillages", { icon: Hammer }),
-      L("atelier_matieres", "Matières & consommables", { icon: Package }),
-      L("atelier_equipements", "Équipements", { icon: Boxes }),
-      L("atelier_maintenance", "Maintenance", { icon: AlertTriangle }),
-      L("atelier_ressources", "Ressources disponibles", { icon: Layers }),
-    ],
-  },
-
-  // ─────────────────────────────────────────────────────────────
   // 07. ARCHIVES
   // ─────────────────────────────────────────────────────────────
   {
@@ -298,15 +298,17 @@ export const NAV_TREE: NavGroup[] = [
         L("admin_users_liste", "Utilisateurs", { page: "admin_staff", perm: "staff" }),
         L("admin_users_roles", "Rôles", { page: "admin_roles", perm: "roles" }),
       ], { icon: Users2 }),
+    ],
+  },
 
-      G("admin_settings", "Paramètres", [
-        L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings" }),
-        L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings" }),
-        L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings", icon: DollarSign }),
-        L("admin_settings_databases", "Bases de données", { page: "admin_databases" }),
-        L("admin_settings_subscription", "Abonnement", { page: "admin_subscription" }),
-      ], { icon: Settings2 }),
-
+  // ─────────────────────────────────────────────────────────────
+  // 09. SÉCURITÉ & AUDIT (Maintenant un groupe principal indépendant)
+  // ─────────────────────────────────────────────────────────────
+  {
+    key: "securite_audit",
+    labelKey: "navGroup.security",
+    label: "Sécurité & audit",
+    items: [
       G("admin_securite", "Sécurité & audit", [
         L("admin_securite_backup", "Sauvegarde / Réinitialisation", { page: "admin_database", perm: "settings" }),
         L("admin_securite_password", "Changer le mot de passe", { page: "admin_change_password" }),
@@ -314,7 +316,35 @@ export const NAV_TREE: NavGroup[] = [
         L("admin_securite_activites", "Activités utilisateurs"),
         L("admin_securite_historique", "Historique des modifications"),
       ], { icon: Shield }),
+    ],
+  },
 
+  // ─────────────────────────────────────────────────────────────
+  // 10. PARAMÈTRES (Maintenant un groupe principal indépendant)
+  // ─────────────────────────────────────────────────────────────
+  {
+    key: "parametres",
+    labelKey: "navGroup.settings",
+    label: "Paramètres",
+    items: [
+      G("admin_settings", "Paramètres", [
+        L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings" }),
+        L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings" }),
+        L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings", icon: DollarSign }),
+        L("admin_settings_databases", "Bases de données", { page: "admin_databases" }),
+        L("admin_settings_subscription", "Abonnement", { page: "admin_subscription" }),
+      ], { icon: Settings2 }),
+    ],
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // 11. INTÉGRATIONS (Maintenant un groupe principal indépendant)
+  // ─────────────────────────────────────────────────────────────
+  {
+    key: "integrations",
+    labelKey: "navGroup.integrations",
+    label: "Intégrations",
+    items: [
       G("admin_integrations", "Intégrations", [
         L("admin_integrations_odoo", "Odoo", { page: "admin_odoo", perm: "settings" }),
       ], { icon: Link2 }),
