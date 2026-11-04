@@ -12,15 +12,81 @@ import { NavItem } from "../../../app/NavItem";
 import { NavContext } from "../../../app/NavContext";
 import { ComingSoonPage } from "./ComingSoonPage";
 
-// ... (جميع الاستيرادات للصفحات PAGES تبقى كما هي)
 import { ManagerDashboardPage } from "./ManagerDashboardPage";
 import { PlanningAdminPage } from "./PlanningAdminPage";
-// ... (أضف بقية استيراداتك هنا)
+import { ProjectsAdminPage } from "./ProjectsAdminPage";
+import { ManufacturingOrdersAdminPage } from "./ManufacturingOrdersAdminPage";
+import { SalesAdminPage } from "./SalesAdminPage";
+import { InventoryAdminPage } from "./InventoryAdminPage";
+import { ClientsAdminPage } from "./ClientsAdminPage";
+import { WorkersAdminPage } from "./WorkersAdminPage";
+import { MachinesAdminPage } from "./MachinesAdminPage";
+import { OperationsAdminPage } from "./OperationsAdminPage";
+import { ArchivePage } from "./ArchivePage";
+import { NomenclaturePage } from "../../nomenclature/pages/NomenclaturePage";
+import { ReportsPage } from "../../reports/pages/ReportsPage";
+import { CRMAdminPage } from "../../crm/pages/CRMAdminPage";
+import { AccountingAdminPage } from "../../accounting/pages/AccountingAdminPage";
+import { DossiersTechniquesPage } from "../../engineering/pages/DossiersTechniquesPage";
+import { GammesTempsPage } from "../../engineering/pages/GammesTempsPage";
+import { ValidationTechniquePage } from "../../engineering/pages/ValidationTechniquePage";
+import { ProductionDashboardPage } from "./ProductionDashboardPage";
+import { ProductionPreparationPage } from "./ProductionPreparationPage";
+import { ThemeProvider } from "../../../app/ThemeContext";
+import { TopRightActions } from "../../../app/TopRightActions";
+import { MyProfilePage } from "../../settings/pages/MyProfilePage";
+import { StaffAdminPage } from "../../settings/pages/StaffAdminPage";
+import { RolesAdminPage } from "../../settings/pages/RolesAdminPage";
+import { DatabasePage } from "../../settings/pages/DatabasePage";
+import { PlanningQrSecurityCard } from "../../settings/components/PlanningQrSecurityCard";
+import { OdooIntegrationPanel } from "../../settings/components/OdooIntegrationPanel";
+import { DatabasesManagerPage } from "./DatabasesManagerPage";
+import { SubscriptionPage } from "../../subscription/pages/SubscriptionPage";
+import { ChangePasswordModal } from "../../../app/ChangePasswordModal";
+import { GeneralSettingsPage } from "../../../app/GeneralSettingsPage";
+import { MaterialPricesPage } from "../../settings/pages/MaterialPricesPage";
+import { CompanyWorkSettingsPage } from "../../settings/pages/CompanyWorkSettingsPage";
+import { ProductionReportsPage } from "../../production-reports/pages/ProductionReportsPage";
 
+export interface AdminPageProps {
+  onNavigate?: (keyOrPageKey: string) => void;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<string, React.ComponentType<any>> = {
   dashboard: ManagerDashboardPage,
+  reports: ReportsPage,
+  crm: CRMAdminPage,
+  clients: ClientsAdminPage,
+  nomenclature: NomenclaturePage,
+  projects: ProjectsAdminPage,
+  engineering_dossiers: DossiersTechniquesPage,
+  production_reports: ProductionReportsPage,
+  engineering_validation: ValidationTechniquePage,
+  production_dashboard: ProductionDashboardPage,
+  production_preparation: ProductionPreparationPage,
+  manufacturing_orders: ManufacturingOrdersAdminPage,
   planning: PlanningAdminPage,
-  // ... (أضف بقية الصفحات هنا)
+  accounting: AccountingAdminPage,
+  quotes: SalesAdminPage,
+  sales: SalesAdminPage,
+  invoices: SalesAdminPage,
+  inventory: InventoryAdminPage,
+  purchases: InventoryAdminPage,
+  workers: WorkersAdminPage,
+  machines: MachinesAdminPage,
+  operations: OperationsAdminPage,
+  archive: ArchivePage,
+  admin_staff: StaffAdminPage,
+  admin_roles: RolesAdminPage,
+  admin_general_settings: GeneralSettingsPage,
+  admin_work_settings: CompanyWorkSettingsPage,
+  admin_material_prices: MaterialPricesPage,
+  admin_database: DatabasePage,
+  admin_databases: DatabasesManagerPage,
+  admin_subscription: SubscriptionPage,
+  admin_security_qr: PlanningQrSecurityCard,
+  admin_odoo: OdooIntegrationPanel,
 };
 
 const SIDEBAR_COLLAPSED_KEY = "anixos_sidebar_collapsed";
@@ -33,7 +99,6 @@ interface AdminHomePageProps {
   onNavigateToDatabasesManager?: () => void;
 }
 
-// دالة لفلترة الشجرة بناءً على الصلاحيات
 function filterTree(nodes: NavNode[], role: any, isOwner: boolean): NavNode[] {
   return nodes.map(node => {
     if (node.permissionKey && !isOwner && !hasPermission(role, node.permissionKey, "view")) {
@@ -48,7 +113,6 @@ function filterTree(nodes: NavNode[], role: any, isOwner: boolean): NavNode[] {
   }).filter((n): n is NavNode => n !== null);
 }
 
-// دالة للبحث عن عنصر بالـ key أو pageKey
 function resolveNode(nodes: NavNode[], keyOrPageKey: string): NavNode | null {
   for (const node of nodes) {
     if (node.key === keyOrPageKey || node.pageKey === keyOrPageKey) return node;
@@ -190,7 +254,6 @@ export function AdminHomePage({
   return (
     <ThemeProvider>
       <div className="flex h-screen flex-col overflow-hidden md:flex-row" style={{ backgroundColor: "var(--bg-app)" }}>
-        {/* ... (الهيدر العلوي والشعار يبقيان كما هما) ... */}
         <header className="flex flex-shrink-0 items-center justify-between border-b px-3 py-2.5 md:hidden" style={{ backgroundColor: "var(--sidebar-bg)", borderColor: "var(--sidebar-border)" }}>
           <button onClick={() => setIsSidebarOpen(true)} className="rounded-lg p-2 text-[var(--sidebar-text)] transition hover:bg-white/10 active:bg-white/20" aria-label={t("common.menu")}>
             <Menu size={20} />
@@ -206,7 +269,6 @@ export function AdminHomePage({
 
         <aside className={`fixed inset-y-0 start-0 z-50 flex w-64 flex-col transition-transform duration-300 ease-in-out ${isSidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"} md:static md:z-auto md:translate-x-0 ${isCollapsed ? "md:w-[68px]" : "md:w-64"}`} style={{ backgroundColor: "var(--sidebar-bg)", color: "var(--sidebar-text)", borderInlineEnd: "1px solid var(--sidebar-border)" }}>
           <div className={`relative flex-shrink-0 border-b ${isCollapsed ? "md:p-2 p-4" : "p-4"}`} style={{ borderColor: "var(--sidebar-border)" }}>
-            {/* ... (شعار الشركة وبيانات المستخدم تبقى كما هي) ... */}
             <div className={`flex items-center ${isCollapsed ? "md:flex-col md:gap-2 mb-0" : "mb-3 gap-2.5"}`}>
               <AppLogo size="sm" />
               {!isCollapsed && (
@@ -236,7 +298,6 @@ export function AdminHomePage({
             )}
           </div>
 
-          {/* الجزء المعدل: رسم الشجرة مباشرة بدون مجموعات */}
           <nav className="flex-1 overflow-y-auto px-2 py-3">
             <div className="space-y-1">
               {visibleTree.map((node) => (
@@ -263,7 +324,6 @@ export function AdminHomePage({
           </div>
         </aside>
 
-        {/* ... (الباقي من الكود: الهيدر العلوي والمحتوى الرئيسي يبقى كما هو) ... */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5 sm:px-6" style={{ backgroundColor: "var(--topbar-bg)", borderColor: "var(--topbar-border)" }}>
             <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
