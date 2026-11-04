@@ -27,17 +27,27 @@ export function NavItem({
   onToggleExpand,
 }: NavItemProps) {
   const { t } = useTranslation();
-  const hasChildren = !!node.children && node.children.length > 0;
+  
+  // ✅ المنطق الجديد: نعتبره قائمة منسدلة فقط إذا كان لديه أكثر من طفل واحد
+  const hasMultipleChildren = !!node.children && node.children.length > 1;
+  
+  // إذا كان لديه طفل واحد فقط، نأخذ بياناته لنعرضه كرابط مباشر
+  const singleChild = node.children && node.children.length === 1 ? node.children[0] : null;
+  const targetNode = singleChild ? singleChild : node;
+
   const isExpanded = expandedKeys.has(node.key);
-  const isActive = activeKey === node.key;
-  const label = t(node.labelKey, { defaultValue: node.label });
-  const Icon = node.icon;
+  // التحقق من الحالة النشطة: سواء كان العنصر نفسه نشطاً، أو الطفل الوحيد نشطاً
+  const isActive = activeKey === targetNode.key;
+  
+  const label = t(targetNode.labelKey, { defaultValue: targetNode.label });
+  const Icon = targetNode.icon || node.icon;
 
   function handleClick() {
-    if (hasChildren) {
+    if (hasMultipleChildren) {
       onToggleExpand(node.key);
     } else {
-      onSelect(node.key);
+      // إذا كان رابطاً مباشراً (ليس لديه أطفال أو لديه طفل واحد)
+      onSelect(targetNode.key);
     }
   }
 
@@ -79,7 +89,9 @@ export function NavItem({
           />
         )}
         <span className="flex-1 truncate">{label}</span>
-        {hasChildren && (
+        
+        {/* ✅ السهم يظهر فقط إذا كان هناك أكثر من طفل (قائمة منسدلة حقيقية) */}
+        {hasMultipleChildren && (
           <ChevronRight
             size={14}
             className={`shrink-0 transition-transform duration-150 ${
@@ -92,7 +104,8 @@ export function NavItem({
         )}
       </button>
 
-      {hasChildren && isExpanded && (
+      {/* ✅ عرض القائمة الفرعية فقط إذا كان هناك أكثر من طفل وهي مفتوحة */}
+      {hasMultipleChildren && isExpanded && (
         <div>
           {node.children!.map((child) => (
             <NavItem
