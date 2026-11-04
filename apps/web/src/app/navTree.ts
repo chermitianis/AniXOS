@@ -8,7 +8,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// واجهة الشجرة
 export interface NavNode {
   key: string;
   labelKey: string;
@@ -33,10 +32,8 @@ const L = (
 });
 
 export const NAV_TREE: NavNode[] = [
-  // 1. Vue d'ensemble
   L("vue_ensemble", "Vue d'ensemble", { icon: LayoutDashboard, labelKey: "navGroup.overview", page: "dashboard", perm: "dashboard" }),
 
-  // 2. Commercial (قابل للطي)
   {
     key: "commercial", labelKey: "navGroup.commercial", label: "Commercial", icon: Users,
     children: [
@@ -46,7 +43,6 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 3. Ingénierie (قابل للطي)
   {
     key: "ingenierie", labelKey: "navGroup.ingenierie", label: "Ingénierie", icon: FolderSearch,
     children: [
@@ -58,7 +54,6 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 4. Production (قابل للطي)
   {
     key: "production", labelKey: "navGroup.production", label: "Production", icon: Gauge,
     children: [
@@ -69,7 +64,6 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 5. Atelier (قابل للطي)
   {
     key: "atelier", labelKey: "navGroup.atelier", label: "Atelier", icon: Wrench,
     children: [
@@ -84,7 +78,6 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 6. Finance (قابل للطي)
   {
     key: "finance", labelKey: "navGroup.finance", label: "Finance", icon: Landmark,
     children: [
@@ -105,10 +98,8 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 7. Archives (رابط مباشر بدون سهم)
   L("archive", "Archives", { icon: ArchiveIcon, labelKey: "navGroup.archives", page: "archive", perm: "archive" }),
 
-  // 8. Administration (قابل للطي)
   {
     key: "administration", labelKey: "navGroup.admin", label: "Administration", icon: Users2,
     children: [
@@ -117,12 +108,9 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 9. Sécurité & audit (رابط مباشر بدون سهم)
   L("admin_securite_backup", "Sécurité & audit", { icon: Shield, labelKey: "navGroup.security", page: "admin_database", perm: "settings" }),
 
-  // 10. Paramètres (رابط مباشر بدون سهم)
   L("admin_settings_generaux", "Paramètres", { icon: Settings2, labelKey: "navGroup.settings", page: "admin_general_settings", perm: "settings" }),
 
-  // 11. Intégrations (رابط مباشر بدون سهم - ينقل مباشرة إلى Odoo)
   L("admin_integrations_odoo", "Intégrations", { icon: Link2, labelKey: "navGroup.integrations", page: "admin_odoo", perm: "settings" }),
 ];
