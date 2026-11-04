@@ -32,8 +32,19 @@ const L = (
 });
 
 export const NAV_TREE: NavNode[] = [
-  L("vue_ensemble", "Vue d'ensemble", { icon: LayoutDashboard, labelKey: "navGroup.overview", page: "dashboard", perm: "dashboard" }),
+  // 1. Vue d'ensemble (قابل للطي)
+  {
+    key: "vue_ensemble",
+    labelKey: "navGroup.overview",
+    label: "Vue d'ensemble",
+    icon: LayoutDashboard,
+    children: [
+      L("dashboard", "Tableau de bord", { page: "dashboard", perm: "dashboard" }),
+      L("reports", "Statistiques", { page: "reports", perm: "reports" }),
+    ],
+  },
 
+  // 2. Commercial (قابل للطي)
   {
     key: "commercial", labelKey: "navGroup.commercial", label: "Commercial", icon: Users,
     children: [
@@ -43,6 +54,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
+  // 3. Ingénierie (قابل للطي)
   {
     key: "ingenierie", labelKey: "navGroup.ingenierie", label: "Ingénierie", icon: FolderSearch,
     children: [
@@ -54,6 +66,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
+  // 4. Production (قابل للطي)
   {
     key: "production", labelKey: "navGroup.production", label: "Production", icon: Gauge,
     children: [
@@ -64,6 +77,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
+  // 5. Atelier (قابل للطي)
   {
     key: "atelier", labelKey: "navGroup.atelier", label: "Atelier", icon: Wrench,
     children: [
@@ -78,6 +92,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
+  // 6. Finance (قابل للطي)
   {
     key: "finance", labelKey: "navGroup.finance", label: "Finance", icon: Landmark,
     children: [
@@ -98,8 +113,10 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
+  // 7. Archives (رابط مباشر بدون سهم - أعجبك)
   L("archive", "Archives", { icon: ArchiveIcon, labelKey: "navGroup.archives", page: "archive", perm: "archive" }),
 
+  // 8. Administration (قابل للطي)
   {
     key: "administration", labelKey: "navGroup.admin", label: "Administration", icon: Users2,
     children: [
@@ -108,9 +125,44 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  L("admin_securite_backup", "Sécurité & audit", { icon: Shield, labelKey: "navGroup.security", page: "admin_database", perm: "settings" }),
+  // 9. Sécurité & audit (قابل للطي - إعادة الأقسام الفرعية)
+  {
+    key: "securite_audit",
+    labelKey: "navGroup.security",
+    label: "Sécurité & audit",
+    icon: Shield,
+    children: [
+      L("admin_securite_backup", "Sauvegarde / Réinitialisation", { page: "admin_database", perm: "settings" }),
+      L("admin_securite_password", "Changer le mot de passe", { page: "admin_change_password" }),
+      L("admin_securite_connexions", "Connexions", { page: "admin_security_qr" }),
+      L("admin_securite_activites", "Activités utilisateurs"),
+      L("admin_securite_historique", "Historique des modifications"),
+    ],
+  },
 
-  L("admin_settings_generaux", "Paramètres", { icon: Settings2, labelKey: "navGroup.settings", page: "admin_general_settings", perm: "settings" }),
+  // 10. Paramètres (قابل للطي - إعادة الأقسام الفرعية)
+  {
+    key: "parametres",
+    labelKey: "navGroup.settings",
+    label: "Paramètres",
+    icon: Settings2,
+    children: [
+      L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings" }),
+      L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings" }),
+      L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings" }),
+      L("admin_settings_databases", "Bases de données", { page: "admin_databases" }),
+      L("admin_settings_subscription", "Abonnement", { page: "admin_subscription" }),
+    ],
+  },
 
-  L("admin_integrations_odoo", "Intégrations", { icon: Link2, labelKey: "navGroup.integrations", page: "admin_odoo", perm: "settings" }),
+  // 11. Intégrations (قابل للطي - إعادة Odoo)
+  {
+    key: "integrations",
+    labelKey: "navGroup.integrations",
+    label: "Intégrations",
+    icon: Link2,
+    children: [
+      L("admin_integrations_odoo", "Odoo", { page: "admin_odoo", perm: "settings" }),
+    ],
+  },
 ];
