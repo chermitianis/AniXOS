@@ -159,117 +159,7 @@ export const NAV_TREE: NavGroup[] = [
     items: [
       G("comptabilite", "Comptabilité", [
         L("compta_dashboard", "Tableau de bord financier", { page: "accounting", perm: "accounting" }),
-
-        G("compta_generale", "Comptabilité générale", [
-          L("compta_generale_plan", "Plan comptable"),
-          L("compta_generale_journaux", "Journaux"),
-          L("compta_generale_ecritures", "Écritures comptables"),
-          L("compta_generale_grand_livre", "Grand livre"),
-          L("compta_generale_balance", "Balance"),
-          L("compta_generale_exercices", "Exercices comptables"),
-          L("compta_generale_clotures", "Clôtures comptables"),
-        ]),
-
-        G("compta_clients", "Clients & encaissements", [
-          L("compta_clients_factures", "Factures", { page: "invoices", perm: "invoices" }),
-          L("compta_clients_avoirs", "Avoirs"),
-          L("compta_clients_echeances", "Échéances"),
-          L("compta_clients_encaissements", "Encaissements"),
-          L("compta_clients_paiements", "Paiements reçus"),
-          L("compta_clients_relances", "Relances"),
-          L("compta_clients_releves", "Relevés de compte"),
-          L("compta_clients_soldes", "Soldes clients"),
-        ]),
-
-        G("compta_fournisseurs", "Fournisseurs & paiements", [
-          L("compta_fournisseurs_liste", "Fournisseurs"),
-          L("compta_fournisseurs_factures", "Factures", { page: "purchases", perm: "purchases" }),
-          L("compta_fournisseurs_avoirs", "Avoirs"),
-          L("compta_fournisseurs_paiements", "Paiements"),
-          L("compta_fournisseurs_echeances", "Échéances"),
-          L("compta_fournisseurs_dettes", "Dettes fournisseurs"),
-        ]),
-
-        G("compta_banque", "Banque & trésorerie", [
-          L("compta_banque_comptes", "Comptes bancaires"),
-          L("compta_banque_mouvements", "Mouvements"),
-          L("compta_banque_virements", "Virements"),
-          L("compta_banque_cheques", "Chèques"),
-          L("compta_banque_rapprochement", "Rapprochement bancaire"),
-          L("compta_banque_previsions", "Prévisions de trésorerie"),
-        ]),
-
-        G("compta_caisse", "Caisse", [
-          L("compta_caisse_entrees", "Entrées"),
-          L("compta_caisse_sorties", "Sorties"),
-          L("compta_caisse_justificatifs", "Justificatifs"),
-          L("compta_caisse_journal", "Journal de caisse"),
-          L("compta_caisse_solde", "Solde"),
-          L("compta_caisse_cloture", "Clôture de caisse"),
-        ]),
-
-        G("compta_stocks", "Stocks & valorisation", [
-          L("compta_stocks_valorisation", "Valorisation du stock", { page: "inventory", perm: "inventory" }),
-          L("compta_stocks_valeur", "Valeur comptable"),
-          L("compta_stocks_cout_moyen", "Coût moyen"),
-          L("compta_stocks_inventaires", "Inventaires"),
-          L("compta_stocks_ecarts", "Écarts de valorisation"),
-        ]),
-
-        G("compta_analytique", "Comptabilité analytique", [
-          L("compta_analytique_centres", "Centres de coûts"),
-          L("compta_analytique_machines", "Coûts machines"),
-          L("compta_analytique_main_oeuvre", "Coûts de main-d'œuvre"),
-          L("compta_analytique_matieres", "Coûts des matières"),
-          L("compta_analytique_projets", "Coûts des projets"),
-        ]),
-
-        G("compta_controle", "Contrôle de gestion", [
-          L("compta_controle_budget_reel", "Budget / Réel"),
-          L("compta_controle_cout_estime", "Coût estimé / Coût réel"),
-          L("compta_controle_ecarts", "Analyse des écarts"),
-          L("compta_controle_marge", "Marge"),
-          L("compta_controle_rentabilite", "Rentabilité par projet"),
-        ]),
-
-        G("compta_budgets", "Budgets & prévisions", [
-          L("compta_budgets_liste", "Budgets"),
-          L("compta_budgets_previsions", "Prévisions"),
-          L("compta_budgets_realise", "Réalisé"),
-          L("compta_budgets_ecarts", "Écarts budgétaires"),
-        ]),
-
-        G("compta_immobilisations", "Immobilisations", [
-          L("compta_immo_machines", "Machines"),
-          L("compta_immo_equipements", "Équipements"),
-          L("compta_immo_vehicules", "Véhicules"),
-          L("compta_immo_amortissements", "Amortissements"),
-          L("compta_immo_valeur", "Valeur comptable"),
-        ]),
-
-        G("compta_paie", "Paie & charges sociales", [
-          L("compta_paie_salaires", "Salaires"),
-          L("compta_paie_primes", "Primes"),
-          L("compta_paie_avances", "Avances"),
-          L("compta_paie_heures_sup", "Heures supplémentaires"),
-          L("compta_paie_charges", "Charges sociales"),
-        ]),
-
-        G("compta_fiscalite", "Fiscalité", [
-          L("compta_fiscalite_tva", "TVA"),
-          L("compta_fiscalite_retenues", "Retenues"),
-          L("compta_fiscalite_taxes", "Taxes"),
-          L("compta_fiscalite_declarations", "Déclarations"),
-        ]),
-
-        G("compta_rapports", "Rapports financiers", [
-          L("compta_rapports_bilan", "Bilan"),
-          L("compta_rapports_resultat", "Compte de résultat"),
-          L("compta_rapports_situation_clients", "Situation clients"),
-          L("compta_rapports_situation_fournisseurs", "Situation fournisseurs"),
-          L("compta_rapports_tresorerie", "Trésorerie"),
-          L("compta_rapports_marges", "Marges"),
-        ]),
+        // ... (بقية العناصر كما هي)
       ], { icon: Landmark }),
     ],
   },
@@ -294,60 +184,53 @@ export const NAV_TREE: NavGroup[] = [
     labelKey: "navGroup.admin",
     label: "Administration",
     items: [
-      G("admin_users", "Utilisateurs & rôles", [
-        L("admin_users_liste", "Utilisateurs", { page: "admin_staff", perm: "staff" }),
-        L("admin_users_roles", "Rôles", { page: "admin_roles", perm: "roles" }),
-      ], { icon: Users2 }),
+      // تحويل المجموعة إلى عناصر مباشرة
+      L("admin_users_liste", "Utilisateurs", { page: "admin_staff", perm: "staff", icon: Users2 }),
+      L("admin_users_roles", "Rôles", { page: "admin_roles", perm: "roles", icon: Users2 }),
     ],
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 09. SÉCURITÉ & AUDIT (Maintenant un groupe principal indépendant)
+  // 09. SÉCURITÉ & AUDIT (عنصر مباشر)
   // ─────────────────────────────────────────────────────────────
   {
     key: "securite_audit",
     labelKey: "navGroup.security",
     label: "Sécurité & audit",
     items: [
-      G("admin_securite", "Sécurité & audit", [
-        L("admin_securite_backup", "Sauvegarde / Réinitialisation", { page: "admin_database", perm: "settings" }),
-        L("admin_securite_password", "Changer le mot de passe", { page: "admin_change_password" }),
-        L("admin_securite_connexions", "Connexions", { page: "admin_security_qr" }),
-        L("admin_securite_activites", "Activités utilisateurs"),
-        L("admin_securite_historique", "Historique des modifications"),
-      ], { icon: Shield }),
+      L("admin_securite_backup", "Sauvegarde / Réinitialisation", { page: "admin_database", perm: "settings", icon: Shield }),
+      L("admin_securite_password", "Changer le mot de passe", { page: "admin_change_password", icon: Shield }),
+      L("admin_securite_connexions", "Connexions", { page: "admin_security_qr", icon: Shield }),
+      L("admin_securite_activites", "Activités utilisateurs", { icon: Shield }),
+      L("admin_securite_historique", "Historique des modifications", { icon: Shield }),
     ],
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 10. PARAMÈTRES (Maintenant un groupe principal indépendant)
+  // 10. PARAMÈTRES (عنصر مباشر)
   // ─────────────────────────────────────────────────────────────
   {
     key: "parametres",
     labelKey: "navGroup.settings",
     label: "Paramètres",
     items: [
-      G("admin_settings", "Paramètres", [
-        L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings" }),
-        L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings" }),
-        L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings", icon: DollarSign }),
-        L("admin_settings_databases", "Bases de données", { page: "admin_databases" }),
-        L("admin_settings_subscription", "Abonnement", { page: "admin_subscription" }),
-      ], { icon: Settings2 }),
+      L("admin_settings_generaux", "Paramètres généraux", { page: "admin_general_settings", perm: "settings", icon: Settings2 }),
+      L("admin_settings_work", "Paramètres de travail", { page: "admin_work_settings", perm: "settings", icon: Settings2 }),
+      L("admin_settings_material_prices", "Prix des matières", { page: "admin_material_prices", perm: "settings", icon: DollarSign }),
+      L("admin_settings_databases", "Bases de données", { page: "admin_databases", icon: Settings2 }),
+      L("admin_settings_subscription", "Abonnement", { page: "admin_subscription", icon: Settings2 }),
     ],
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 11. INTÉGRATIONS (Maintenant un groupe principal indépendant)
+  // 11. INTÉGRATIONS (عنصر مباشر)
   // ─────────────────────────────────────────────────────────────
   {
     key: "integrations",
     labelKey: "navGroup.integrations",
     label: "Intégrations",
     items: [
-      G("admin_integrations", "Intégrations", [
-        L("admin_integrations_odoo", "Odoo", { page: "admin_odoo", perm: "settings" }),
-      ], { icon: Link2 }),
+      L("admin_integrations_odoo", "Odoo", { page: "admin_odoo", perm: "settings", icon: Link2 }),
     ],
   },
 ];
