@@ -525,9 +525,14 @@ export function AdminHomePage({
             {visibleGroups.map((group) => {
               const isGroupExpanded = expandedKeys.has(group.key);
               const groupLabel = t(group.labelKey, { defaultValue: group.label });
+              
+              // ✅ المنطق الجديد: إذا كان القسم يحتوي على عنصر واحد فقط، نعرضه مباشرة كرابط
+              const isSingleItemGroup = group.items.length === 1;
+
               return (
                 <div key={group.key} className="mb-2">
-                  {!isCollapsed ? (
+                  {/* عرض العنوان والسهم فقط إذا كان القسم يحتوي على أكثر من عنصر */}
+                  {!isCollapsed && !isSingleItemGroup && (
                     <button
                       type="button"
                       onClick={() => handleToggleGroup(group.key)}
@@ -543,11 +548,16 @@ export function AdminHomePage({
                         }`}
                       />
                     </button>
-                  ) : (
+                  )}
+                  {!isCollapsed && isSingleItemGroup && (
+                    <div className="mx-2 my-2 h-px" style={{ backgroundColor: "var(--sidebar-border)" }} />
+                  )}
+                  {isCollapsed && (
                     <div className="mx-2 my-2 h-px" style={{ backgroundColor: "var(--sidebar-border)" }} />
                   )}
 
-                  {(isCollapsed || isGroupExpanded) &&
+                  {/* عرض العناصر: إذا كان عنصراً واحداً نعرضه دائماً، وإذا كان متعدداً نعرضه فقط عند التوسيع */}
+                  {(isCollapsed || isSingleItemGroup || isGroupExpanded) &&
                     group.items.map((item) => (
                       <NavItem
                         key={item.key}
