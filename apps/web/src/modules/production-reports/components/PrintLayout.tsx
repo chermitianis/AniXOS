@@ -37,15 +37,12 @@ export function PrintLayout({
             visibility: visible !important;
           }
           #print-report-content {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: static !important; /* ✅ إزالة absolute */
             width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
             color: black !important;
-            z-index: 9999 !important;
           }
           #print-report-content .bg-white,
           #print-report-content .bg-slate-50,
@@ -148,50 +145,54 @@ function ReportContent({
 }) {
   return (
     <>
-      {/* رأس التقرير: الشعار واسم الشركة في المنتصف */}
-      <div className="mb-4 flex flex-col items-center justify-center text-center">
-        {logoUrl ? (
-          <img 
-            src={logoUrl} 
-            alt="Logo" 
-            style={{
-              width: '100px',
-              height: '100px',
-              objectFit: 'contain',
-              display: 'block',
-              marginBottom: '8px',
-            }}
-          />
-        ) : (
-          <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500 mb-2">
-            Logo
+      {/* ✅ رأس التقرير: الشعار يسار، التاريخ يمين، العنوان في المنتصف */}
+      <div className="mb-6 border-b-2 border-slate-800 pb-4">
+        <div className="flex items-start justify-between">
+          {/* الشعار (يسار) */}
+          <div className="flex items-center gap-3">
+            {logoUrl ? (
+              <img 
+                src={logoUrl} 
+                alt="Logo" 
+                style={{
+                  width: '80px',
+                  height: '80px',
+                  objectFit: 'contain',
+                  display: 'block',
+                }}
+              />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
+                Logo
+              </div>
+            )}
+            <div>
+              <div className="text-lg font-extrabold text-slate-800">
+                {companyName ?? "AniXOS"}
+              </div>
+            </div>
           </div>
-        )}
-        <div className="text-xl font-extrabold text-slate-800">
-          {companyName ?? "AniXOS"}
+
+          {/* التاريخ (يمين) */}
+          <div className="text-end text-xs text-slate-500">
+            <div>Édité le : {printDate}</div>
+            <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
+          </div>
+        </div>
+
+        {/* العنوان الرئيسي في المنتصف */}
+        <div className="mt-4 text-center">
+          <h1 className="text-2xl font-black uppercase tracking-wide text-slate-900">
+            Rapport de Production
+          </h1>
+          {subtitle && (
+            <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
+          )}
         </div>
       </div>
 
-      {/* تاريخ الطباعة (في الزاوية العلوية اليمنى) */}
-      <div className="mb-4 text-end text-xs text-slate-500">
-        <div>Édité le : {printDate}</div>
-        <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
-      </div>
-
-      {/* العنوان الرئيسي في المنتصف */}
-      <div className="mb-6 border-b-2 border-slate-800 pb-4 text-center">
-        <h1 className="text-3xl font-black uppercase tracking-wide text-slate-900">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="mt-2 text-sm text-slate-600">{subtitle}</p>
-        )}
-      </div>
-
-      {/* محتوى التقرير (مع منع القطع) */}
-      <div className="print:break-inside-avoid">
-        {children}
-      </div>
+      {/* محتوى التقرير */}
+      {children}
 
       {/* تذييل التقرير */}
       <div className="mt-8 border-t border-slate-300 pt-4 text-center text-[10px] text-slate-400">
