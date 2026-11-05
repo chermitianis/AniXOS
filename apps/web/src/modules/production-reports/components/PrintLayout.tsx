@@ -27,7 +27,7 @@ export function PrintLayout({
 
   return (
     <>
-      {/* ✅ CSS للطباعة: إخفاء كل شيء ما عدا التقرير */}
+      {/* CSS للطباعة */}
       <style>{`
         @media print {
           body * {
@@ -75,10 +75,8 @@ export function PrintLayout({
         }
       `}</style>
 
-      {/* الخلفية (تظهر فقط في الشاشة، وتختفي عند الطباعة) */}
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden">
         <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-          {/* أزرار التحكم */}
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-sm font-bold text-slate-700">Aperçu du rapport</div>
             <div className="flex items-center gap-2">
@@ -97,7 +95,6 @@ export function PrintLayout({
             </div>
           </div>
 
-          {/* محتوى التقرير (معاينة على الشاشة) */}
           <div className="overflow-y-auto p-8">
             <ReportContent
               title={title}
@@ -112,7 +109,6 @@ export function PrintLayout({
         </div>
       </div>
 
-      {/* ✅ نسخة منفصلة للطباعة فقط (خارج الـ modal) */}
       <div className="hidden print:block" id="print-report-content">
         <ReportContent
           title={title}
@@ -128,7 +124,6 @@ export function PrintLayout({
   );
 }
 
-// مكون فرعي لمحتوى التقرير (لتجنب التكرار)
 function ReportContent({
   title,
   subtitle,
@@ -146,15 +141,24 @@ function ReportContent({
 }) {
   return (
     <>
-      {/* رأس التقرير */}
       <div className="mb-6 border-b-2 border-slate-800 pb-4">
-        {/* الجزء العلوي: الشعار واسم الشركة (يمين) + التاريخ (يسار) */}
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             {logoUrl ? (
-              <img src={logoUrl} alt="Logo" className="h-14 w-14 object-contain" />
+              <img 
+                src={logoUrl} 
+                alt="Logo" 
+                style={{
+                  maxWidth: '120px',
+                  maxHeight: '120px',
+                  width: 'auto',
+                  height: 'auto',
+                  objectFit: 'contain',
+                }}
+                className="object-contain"
+              />
             ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
+              <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
                 Logo
               </div>
             )}
@@ -168,7 +172,6 @@ function ReportContent({
           </div>
         </div>
 
-        {/* ✅ العنوان الرئيسي: في المنتصف، بخط كبير وبارز */}
         <div className="mt-4 text-center">
           <h1 className="text-3xl font-black uppercase tracking-wide text-slate-900">
             {title}
@@ -176,17 +179,14 @@ function ReportContent({
         </div>
       </div>
 
-      {/* معلومات إضافية (subtitle) تحت العنوان مباشرة، إن وجدت */}
       {subtitle && (
         <div className="mb-6 text-center text-sm text-slate-600">
           {subtitle}
         </div>
       )}
 
-      {/* محتوى التقرير */}
       {children}
 
-      {/* تذييل التقرير */}
       <div className="mt-8 border-t border-slate-300 pt-4 text-center text-[10px] text-slate-400">
         <p>Document généré par AniXOS — {new Date().getFullYear()}</p>
         <p className="mt-0.5">Ce document est confidentiel et destiné à un usage interne.</p>
