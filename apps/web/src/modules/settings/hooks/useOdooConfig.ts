@@ -2,22 +2,15 @@
 // apps/web/src/modules/settings/hooks/useOdooConfig.ts
 //
 // Hook for managing Odoo integration configuration.
-//
-// Fixes applied:
-//   1. sync_modules: 4 keys → 12 keys (matching odoo_config.sync_modules JSONB)
-//   2. Added `version` to OdooConfig (column exists in DB, was missing in TS)
-//   3. pushNow: reads `totalSynced` from Edge Function response (was `sent`)
-//   4. testConnection: returns `version` and `uid` for UI display
-//   5. Exported SyncModule/SyncModules/SyncDirection types for shared use
-//   6. Added explicit company_id filter (defensive clarity, RLS is primary guard)
-//   7. AUTO-SYNC: Added background polling (every 30s) while app is open.
+// - Supports new matrix structure: { clients: { pull: true, push: false } }
+// - Backward compatible with legacy structure: { clients: true }
 // ============================================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 
 // ---------------------------------------------------------------------------
-// Types — aligned with public.odoo_config schema (22 columns, 12 sync modules)
+// Types
 // ---------------------------------------------------------------------------
 
 export type SyncModule =
@@ -34,33 +27,42 @@ export type SyncModule =
   | "materials"
   | "invoices";
 
-export type SyncModules = Record<SyncModule, boolean>;
+// ✅ البنية الجديدة: لكل وحدة خياران (pull / push)
+export type ModuleDirection = { pull: boolean; push: boolean };
+
+// ✅ البنية الجديدة: مصفوفة من ModuleDirection
+export type SyncModulesMatrix = Record<SyncModule, ModuleDirection>;
+
+// ⚠️ البنية القديمة (للتوافق فقط): لكل وحدة قيمة boolean
+export type LegacySyncModules = Record<SyncModule, boolean>;
+
+// ✅ النوع الموحد (يستخدم في OdooConfig)
+export type SyncModules = SyncModulesMatrix | LegacySyncModules;
 
 export type SyncDirection = "pull" | "push" | "bidirectional";
 export type SyncStatus = "success" | "failed" | "partial";
 export type TestStatus = "success" | "failed";
 
 /**
- * Default sync modules — mirrors the DB default for `sync_modules` JSONB.
- * Used when a config row doesn't yet have an explicit value.
+ * Default sync modules (matrix structure) — mirrors the DB default.
  */
-export const DEFAULT_SYNC_MODULES: SyncModules = {
-  clients: true,
-  suppliers: false,
-  projects: false,
-  manufacturing_orders: false,
-  work_orders: false,
-  machines: false,
-  workcenters: false,
-  workers: false,
-  staff: false,
-  planning: false,
-  materials: false,
-  invoices: false,
+export const DEFAULT_SYNC_MODULES: SyncModulesMatrix = {
+  clients: { pull: true, push: false },
+  suppliers: { pull: false, push: false },
+  projects: { pull: false, push: false },
+  manufacturing_orders: { pull: false, push: false },
+  work_orders: { pull: false, push: false },
+  machines: { pull: false, push: false },
+  workcenters: { pull: false, push: false },
+  workers: { pull: false, push: false },
+  staff: { pull: false, push: false },
+  planning: { pull: false, push: false },
+  materials: { pull: false, push: false },
+  invoices: { pull: false, push: false },
 };
 
 /**
- * Ordered list of all sync modules — for UI rendering (matches DB default order).
+ * Ordered list of all sync modules — for UI rendering.
  */
 export const ALL_SYNC_MODULES: SyncModule[] = [
   "clients",
@@ -76,6 +78,34 @@ export const ALL_SYNC_MODULES: SyncModule[] = [
   "staff",
   "materials",
 ];
+
+/**
+ * ✅ دالة مساعدة: تحويل البنية القديمة (Legacy) إلى الجديدة (Matrix).
+ * - إذا كانت القيمة `true`، تصبح `{ pull: true, push: true }`.
+ * - إذا كانت القيمة `false`، تصبح `{ pull: false, push: false }`.
+ * - إذا كانت القيمة `undefined`، تصبح `{ pull: false, push: false }`.
+ */
+export function normalizeSyncModules(
+  modules: SyncModules | null | undefined,
+): SyncModulesMatrix {
+  if (!modules) return DEFAULT_SYNC_MODULES;
+
+  const result = {} as SyncModulesMatrix;
+  for (const key of ALL_SYNC_MODULES) {
+    const value = modules[key];
+    if (typeof value === "boolean") {
+      // البنية القديمة
+      result[key] = { pull: value, push: value };
+    } else if (value && typeof value === "object") {
+      // البنية الجديدة
+      result[key] = { pull: !!value.pull, push: !!value.push };
+    } else {
+      // غير موجود
+      result[key] = { pull: false, push: false };
+    }
+  }
+  return result;
+}
 
 export interface OdooConfig {
   id: string;
@@ -106,7 +136,7 @@ interface SaveConfigInput {
   odoo_db: string;
   odoo_username: string;
   api_key?: string;
-  sync_modules: SyncModules;
+  sync_modules: SyncModulesMatrix; // ✅ البنية الجديدة
   sync_direction: SyncDirection;
   auto_sync_enabled: boolean;
   auto_sync_interval_minutes: number;
@@ -154,7 +184,6 @@ export function useOdooConfig() {
   const [isPushing, setIsPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // مرجع لتجنب تكرار المزامنة إذا كانت قيد التشغيل
   const isAutoSyncing = useRef(false);
 
   // -------------------------------------------------------------------------
@@ -184,14 +213,12 @@ export function useOdooConfig() {
   }, [reload]);
 
   // -------------------------------------------------------------------------
-  // Auto-Sync Background Polling (كل 30 ثانية)
+  // Auto-Sync Background Polling
   // -------------------------------------------------------------------------
   useEffect(() => {
-    // لا تقم بالجدولة إذا لم تكن الميزة نشطة أو لم يتم تحميل الإعدادات
     if (!config?.is_active) return;
 
     const interval = setInterval(async () => {
-      // تجنب التشغيل المتزامن (إذا كان هناك مزامنة قيد التنفيذ)
       if (isAutoSyncing.current) return;
       isAutoSyncing.current = true;
 
@@ -200,19 +227,17 @@ export function useOdooConfig() {
         const token = sessionData?.session?.access_token;
         if (!token) return;
 
-        // استدعاء الـ Pull في الخلفية
         await supabase.functions.invoke("sync-odoo-pull", {
           headers: { Authorization: `Bearer ${token}` },
         });
         
-        // تحديث الواجهة لإظهار آخر وقت مزامنة
         await reload();
       } catch (err) {
         console.warn("Auto-sync background pull failed", err);
       } finally {
         isAutoSyncing.current = false;
       }
-    }, 30000); // 30 ثانية
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [config?.is_active, reload]);
@@ -331,7 +356,7 @@ export function useOdooConfig() {
   );
 
   // -------------------------------------------------------------------------
-  // Pull (Odoo → AniXOS)
+  // Pull
   // -------------------------------------------------------------------------
   const syncNow = useCallback(async (): Promise<SyncPullResult> => {
     setIsSyncing(true);
@@ -372,7 +397,7 @@ export function useOdooConfig() {
   }, [reload]);
 
   // -------------------------------------------------------------------------
-  // Push (AniXOS → Odoo)
+  // Push
   // -------------------------------------------------------------------------
   const pushNow = useCallback(async (): Promise<SyncPushResult> => {
     setIsPushing(true);
@@ -409,9 +434,6 @@ export function useOdooConfig() {
     }
   }, [reload]);
 
-  // -------------------------------------------------------------------------
-  // Public API
-  // -------------------------------------------------------------------------
   return {
     config,
     isLoading,
