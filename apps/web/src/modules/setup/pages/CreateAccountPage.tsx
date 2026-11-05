@@ -74,8 +74,9 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // بعد نجاح الدخول، سيتم توجيهه إلى الصفحة الرئيسية للتطبيق
           redirectTo: `${window.location.origin}/`,
+          // ✅ إضافة الصلاحية المطلوبة للحصول على البريد الإلكتروني
+          scopes: "https://www.googleapis.com/auth/userinfo.email",
           queryParams: {
             access_type: "offline",
             prompt: "consent",
@@ -84,7 +85,7 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
       });
 
       if (error) throw error;
-      // ملاحظة: المتصفح سيتم توجيهه تلقائياً إلى Google هنا
+      // المتصفح سيتم توجيهه تلقائياً إلى Google هنا
     } catch (err) {
       console.error("[Google SignIn]", err);
       setError(t("createAccount.errGeneric"));
@@ -198,7 +199,7 @@ export function CreateAccountPage({ onCreated, onSwitchToLogin }: CreateAccountP
             <p className="mt-1 text-xs text-slate-500 sm:text-sm">{t("createAccount.subtitle")}</p>
           </div>
 
-          {/* ✅ زر Google الجديد */}
+          {/* ✅ زر Google */}
           <button
             type="button"
             onClick={handleGoogleSignIn}
