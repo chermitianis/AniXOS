@@ -1370,6 +1370,9 @@
     "errGeneric": "Une erreur est survenue, veuillez réessayer"
   },
   "databaseSelector": {
+    "welcomeNewUserTitle": "Bienvenue sur AniXOS !",
+    "welcomeNewUserSubtitle": "Pour commencer, créez votre première entreprise (base de données).",
+    "createFirstCompany": "Créer mon entreprise",
     "title": "Choisissez votre base de données",
     "subtitle": "Sélectionnez l'espace de travail sur lequel travailler.",
     "welcome": "Bienvenue, {{name}}",
