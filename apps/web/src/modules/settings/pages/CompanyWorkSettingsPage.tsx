@@ -13,13 +13,13 @@ import {
 } from "../../../shared/api/companyWorkSettingsApi";
 
 const DAYS: { n: number; labelKey: string }[] = [
-  { n: 1, labelKey: "planning.workSettings.monday" },
-  { n: 2, labelKey: "planning.workSettings.tuesday" },
-  { n: 3, labelKey: "planning.workSettings.wednesday" },
-  { n: 4, labelKey: "planning.workSettings.thursday" },
-  { n: 5, labelKey: "planning.workSettings.friday" },
-  { n: 6, labelKey: "planning.workSettings.saturday" },
-  { n: 0, labelKey: "planning.workSettings.sunday" },
+  { n: 1, labelKey: "workSettings.monday" },
+  { n: 2, labelKey: "workSettings.tuesday" },
+  { n: 3, labelKey: "workSettings.wednesday" },
+  { n: 4, labelKey: "workSettings.thursday" },
+  { n: 5, labelKey: "workSettings.friday" },
+  { n: 6, labelKey: "workSettings.saturday" },
+  { n: 0, labelKey: "workSettings.sunday" },
 ];
 
 export function CompanyWorkSettingsPage() {
@@ -33,7 +33,6 @@ export function CompanyWorkSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // ✅ حالة الشعار
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -46,7 +45,6 @@ export function CompanyWorkSettingsPage() {
     try {
       const s = await getWorkSettings(companyId);
       setSettings(s);
-      // ✅ جلب شعار الشركة
       const { data: company } = await supabase
         .from("companies")
         .select("logo_url")
@@ -76,7 +74,6 @@ export function CompanyWorkSettingsPage() {
     patch("working_days", Array.from(set).sort((a, b) => a - b));
   }
 
-  // ✅ رفع الشعار (بدون تصغير - نحافظ على الجودة الأصلية)
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !companyId) return;
@@ -85,12 +82,10 @@ export function CompanyWorkSettingsPage() {
     setIsUploadingLogo(true);
 
     try {
-      // 1. التحقق من نوع الصورة
       if (!file.type.startsWith("image/")) {
         throw new Error("Le fichier doit être une image.");
       }
 
-      // 2. رفع الصورة الأصلية (بدون تصغير)
       const fileExt = file.name.split('.').pop() || 'png';
       const filePath = `${companyId}/logo.${fileExt}`;
       
@@ -100,14 +95,12 @@ export function CompanyWorkSettingsPage() {
 
       if (uploadError) throw uploadError;
 
-      // 3. الحصول على الرابط العام + Cache Buster
       const { data: publicUrlData } = supabase.storage
         .from("company-logos")
         .getPublicUrl(filePath);
       
       const newLogoUrl = `${publicUrlData.publicUrl}?v=${Date.now()}`;
 
-      // 4. تحديث جدول companies
       const { error: dbError } = await supabase
         .from("companies")
         .update({ logo_url: newLogoUrl })
@@ -126,7 +119,7 @@ export function CompanyWorkSettingsPage() {
   }
 
   async function handleRemoveLogo() {
-    if (!companyId || !window.confirm(t("planning.workSettings.logoDeleteConfirm"))) return;
+    if (!companyId || !window.confirm(t("workSettings.logoDeleteConfirm"))) return;
     setLogoError(null);
     setIsUploadingLogo(true);
     try {
@@ -137,7 +130,7 @@ export function CompanyWorkSettingsPage() {
       await supabase.from("companies").update({ logo_url: null }).eq("id", companyId);
       setLogoUrl(null);
     } catch (err) {
-      setLogoError(err instanceof Error ? err.message : t("planning.workSettings.logoError"));
+      setLogoError(err instanceof Error ? err.message : t("workSettings.logoError"));
     } finally {
       setIsUploadingLogo(false);
     }
@@ -170,7 +163,7 @@ export function CompanyWorkSettingsPage() {
   }
 
   function handleReset() {
-    if (!window.confirm(t("planning.workSettings.confirmReset"))) return;
+    if (!window.confirm(t("workSettings.confirmReset"))) return;
     if (!settings) return;
     setSettings({ ...settings, ...DEFAULT_WORK_SETTINGS });
   }
@@ -198,10 +191,10 @@ export function CompanyWorkSettingsPage() {
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <h1 className="text-lg font-extrabold text-slate-800">
-          {t("planning.workSettings.title")}
+          {t("workSettings.title")}
         </h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          {t("planning.workSettings.subtitle")}
+          {t("workSettings.subtitle")}
         </p>
       </div>
 
@@ -210,19 +203,18 @@ export function CompanyWorkSettingsPage() {
       )}
       {success && (
         <div className="rounded-lg bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-          {t("planning.workSettings.saved")}
+          {t("workSettings.saved")}
         </div>
       )}
 
-      {/* ✅ LOGO DE L'ENTREPRISE */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
             <ImageIcon size={18} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-800">{t("planning.workSettings.logoSection")}</h2>
-            <p className="text-xs text-slate-500">{t("planning.workSettings.logoSubtitle")}</p>
+            <h2 className="text-base font-bold text-slate-800">{t("workSettings.logoSection")}</h2>
+            <p className="text-xs text-slate-500">{t("workSettings.logoSubtitle")}</p>
           </div>
         </div>
 
@@ -259,58 +251,55 @@ export function CompanyWorkSettingsPage() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {isUploadingLogo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {logoUrl ? t("planning.workSettings.logoChange") : t("planning.workSettings.logoUpload")}
+              {logoUrl ? t("workSettings.logoChange") : t("workSettings.logoUpload")}
             </button>
             <p className="mt-1 text-[11px] text-slate-400">
-              {t("planning.workSettings.logoHint")}
+              {t("workSettings.logoHint")}
             </p>
             {logoError && <p className="mt-1 text-xs text-red-600">{logoError}</p>}
           </div>
         </div>
       </div>
 
-      {/* POSTES CNC */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
             <Cpu size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.cncSection")}
+            {t("workSettings.cncSection")}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label={t("planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.cnc_shifts_per_day} onChange={(v) => patch("cnc_shifts_per_day", Number(v) || 1)} />
-          <Field label={t("planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.cnc_shift_hours} onChange={(v) => patch("cnc_shift_hours", Number(v) || 8)} />
-          <Field label={t("planning.workSettings.shiftStartTime")} type="time" value={settings.cnc_shift_start_time} onChange={(v) => patch("cnc_shift_start_time", v)} />
+          <Field label={t("workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.cnc_shifts_per_day} onChange={(v) => patch("cnc_shifts_per_day", Number(v) || 1)} />
+          <Field label={t("workSettings.shiftHours")} type="number" min={1} max={24} value={settings.cnc_shift_hours} onChange={(v) => patch("cnc_shift_hours", Number(v) || 8)} />
+          <Field label={t("workSettings.shiftStartTime")} type="time" value={settings.cnc_shift_start_time} onChange={(v) => patch("cnc_shift_start_time", v)} />
         </div>
       </div>
 
-      {/* POSTES CLASSIQUE */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
             <Wrench size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.classiqueSection")}
+            {t("workSettings.classiqueSection")}
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label={t("planning.workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.classique_shifts_per_day} onChange={(v) => patch("classique_shifts_per_day", Number(v) || 1)} />
-          <Field label={t("planning.workSettings.shiftHours")} type="number" min={1} max={24} value={settings.classique_shift_hours} onChange={(v) => patch("classique_shift_hours", Number(v) || 8)} />
-          <Field label={t("planning.workSettings.shiftStartTime")} type="time" value={settings.classique_shift_start_time} onChange={(v) => patch("classique_shift_start_time", v)} />
+          <Field label={t("workSettings.shiftsPerDay")} type="number" min={1} max={6} value={settings.classique_shifts_per_day} onChange={(v) => patch("classique_shifts_per_day", Number(v) || 1)} />
+          <Field label={t("workSettings.shiftHours")} type="number" min={1} max={24} value={settings.classique_shift_hours} onChange={(v) => patch("classique_shift_hours", Number(v) || 8)} />
+          <Field label={t("workSettings.shiftStartTime")} type="time" value={settings.classique_shift_start_time} onChange={(v) => patch("classique_shift_start_time", v)} />
         </div>
       </div>
 
-      {/* JOURS TRAVAILLÉS */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
             <Calendar size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.workingDays")}
+            {t("workSettings.workingDays")}
           </h2>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -325,42 +314,40 @@ export function CompanyWorkSettingsPage() {
         </div>
       </div>
 
-      {/* CHEMIN DES DESSINS */}
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-fuchsia-100 text-fuchsia-700">
             <FolderOpen size={18} />
           </div>
           <h2 className="text-base font-bold text-slate-800">
-            {t("planning.workSettings.drawingSection")}
+            {t("workSettings.drawingSection")}
           </h2>
         </div>
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("planning.workSettings.drawingBasePath")}</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("workSettings.drawingBasePath")}</label>
             <input type="text" dir="ltr" value={settings.piece_drawing_base_path ?? ""} onChange={(e) => patch("piece_drawing_base_path", e.target.value || null)} placeholder="D:\\Dessins\\  ou  \\\\SERVER\\Dessins\\" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-400 focus:outline-none" />
-            <p className="mt-1 text-[11px] text-slate-400">{t("planning.workSettings.drawingBasePathHint")}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{t("workSettings.drawingBasePathHint")}</p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("planning.workSettings.drawingPattern")}</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">{t("workSettings.drawingPattern")}</label>
             <input type="text" dir="ltr" value={settings.piece_drawing_path_pattern ?? ""} onChange={(e) => patch("piece_drawing_path_pattern", e.target.value || null)} placeholder="{projectCode}/{pieceName}.pdf" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-indigo-400 focus:outline-none" />
-            <p className="mt-1 text-[11px] text-slate-400">{t("planning.workSettings.drawingPatternHint")}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{t("workSettings.drawingPatternHint")}</p>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t("planning.workSettings.drawingPreview")}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t("workSettings.drawingPreview")}</div>
             <div className="mt-0.5 font-mono text-xs text-slate-700" dir="ltr">{pathPreview()}</div>
           </div>
         </div>
       </div>
 
-      {/* ACTIONS */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-4">
         <button type="button" onClick={handleReset} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-          <RotateCcw size={14} /> {t("planning.workSettings.resetToDefaults")}
+          <RotateCcw size={14} /> {t("workSettings.resetToDefaults")}
         </button>
         <button type="button" onClick={() => void handleSave()} disabled={isSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
           {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          {isSaving ? t("planning.workSettings.saving") : t("planning.workSettings.save")}
+          {isSaving ? t("workSettings.saving") : t("workSettings.save")}
         </button>
       </div>
     </div>
