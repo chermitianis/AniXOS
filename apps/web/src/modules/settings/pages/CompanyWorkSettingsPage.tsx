@@ -106,12 +106,13 @@ export function CompanyWorkSettingsPage() {
 
       if (uploadError) throw uploadError;
 
-      // 3. الحصول على الرابط العام
+      // 3. الحصول على الرابط العام + إضافة Cache Buster
       const { data: publicUrlData } = supabase.storage
         .from("company-logos")
         .getPublicUrl(filePath);
       
-      const newLogoUrl = publicUrlData.publicUrl;
+      // ✅ إضافة ?v=timestamp لمنع التخزين المؤقت
+      const newLogoUrl = `${publicUrlData.publicUrl}?v=${Date.now()}`;
 
       // 4. تحديث جدول companies
       const { error: dbError } = await supabase
@@ -123,6 +124,7 @@ export function CompanyWorkSettingsPage() {
 
       setLogoUrl(newLogoUrl);
     } catch (err) {
+      console.error("Catch error:", err);
       setLogoError(err instanceof Error ? err.message : "Erreur lors de l'upload");
     } finally {
       setIsUploadingLogo(false);
