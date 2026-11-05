@@ -141,50 +141,52 @@ function ReportContent({
 }) {
   return (
     <>
-      <div className="mb-6 border-b-2 border-slate-800 pb-4">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            {logoUrl ? (
-              <img 
-                src={logoUrl} 
-                alt="Logo" 
-                style={{
-                  width: '120px',
-                  height: '120px',
-                  objectFit: 'contain',
-                  display: 'block',
-                }}
-              />
-            ) : (
-              <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
-                Logo
-              </div>
-            )}
-            <div className="text-lg font-extrabold text-slate-800">
-              {companyName ?? "AniXOS"}
-            </div>
+      {/* رأس التقرير: الشعار واسم الشركة في المنتصف */}
+      <div className="mb-4 flex flex-col items-center justify-center text-center">
+        {logoUrl ? (
+          <img 
+            src={logoUrl} 
+            alt="Logo" 
+            style={{
+              width: '100px',
+              height: '100px',
+              objectFit: 'contain',
+              display: 'block',
+              marginBottom: '8px',
+            }}
+          />
+        ) : (
+          <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500 mb-2">
+            Logo
           </div>
-          <div className="text-end text-xs text-slate-500">
-            <div>Édité le : {printDate}</div>
-            <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
-          </div>
-        </div>
-
-        <div className="mt-4 text-center">
-          <h1 className="text-3xl font-black uppercase tracking-wide text-slate-900">
-            {title}
-          </h1>
+        )}
+        <div className="text-xl font-extrabold text-slate-800">
+          {companyName ?? "AniXOS"}
         </div>
       </div>
 
-      {subtitle && (
-        <div className="mb-6 text-center text-sm text-slate-600">
-          {subtitle}
-        </div>
-      )}
+      {/* تاريخ الطباعة (في الزاوية العلوية اليمنى) */}
+      <div className="mb-4 text-end text-xs text-slate-500">
+        <div>Édité le : {printDate}</div>
+        <div className="mt-1 font-mono text-[10px]">{`Réf: ${Math.random().toString(36).substring(2, 8).toUpperCase()}`}</div>
+      </div>
 
-      {children}
+      {/* العنوان الرئيسي في المنتصف */}
+      <div className="mb-6 border-b-2 border-slate-800 pb-4 text-center">
+        <h1 className="text-3xl font-black uppercase tracking-wide text-slate-900">
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="mt-2 text-sm text-slate-600">{subtitle}</p>
+        )}
+      </div>
 
+      {/* محتوى التقرير */}
+      <div className="print:break-inside-avoid">
+        {children}
+      </div>
+
+      {/* تذييل التقرير */}
       <div className="mt-8 border-t border-slate-300 pt-4 text-center text-[10px] text-slate-400">
         <p>Document généré par AniXOS — {new Date().getFullYear()}</p>
         <p className="mt-0.5">Ce document est confidentiel et destiné à un usage interne.</p>
