@@ -29,60 +29,63 @@ export function PrintLayout({
     <>
       {/* CSS للطباعة */}
       <style>{`
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #print-report-content, #print-report-content * {
-            visibility: visible !important;
-          }
-          #print-report-content {
-            position: static !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            color: black !important;
-          }
-          #print-report-content .bg-white,
-          #print-report-content .bg-slate-50,
-          #print-report-content .bg-slate-100 {
-            background-color: white !important;
-          }
-          #print-report-content .text-slate-900,
-          #print-report-content .text-slate-800,
-          #print-report-content .text-slate-700 {
-            color: black !important;
-          }
-          #print-report-content .text-slate-500,
-          #print-report-content .text-slate-400 {
-            color: #666 !important;
-          }
-          #print-report-content .border-slate-200,
-          #print-report-content .border-slate-300 {
-            border-color: #ddd !important;
-          }
-          .print-hidden, button, .print\\:hidden {
-            display: none !important;
-          }
-          /* ✅ منع قطع الجداول */
-          #print-report-content table,
-          #print-report-content tr,
-          #print-report-content section {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          /* ✅ إزالة أي margins علوية */
-          #print-report-content > *:first-child {
-            margin-top: 0 !important;
-            padding-top: 0 !important;
-          }
-          @page {
-            size: A4;
-            margin: 15mm;
-          }
-        }
-      `}</style>
+  @media print {
+    /* 1. إخفاء كل شيء في الصفحة */
+    html, body, #root {
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: visible !important;
+    }
+    
+    /* 2. إخفاء كل العناصر */
+    body > * {
+      display: none !important;
+    }
+    
+    /* 3. إظهار التقرير فقط */
+    #print-report-content {
+      display: block !important;
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: white !important;
+      color: black !important;
+      z-index: 9999 !important;
+    }
+    
+    /* 4. إظهار محتوى التقرير */
+    #print-report-content * {
+      visibility: visible !important;
+    }
+    
+    /* 5. منع قطع الجداول */
+    #print-report-content table {
+      page-break-inside: auto !important;
+      break-inside: auto !important;
+    }
+    #print-report-content tr {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+    #print-report-content thead {
+      display: table-header-group !important;
+    }
+    #print-report-content h2 {
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+    
+    /* 6. إعدادات الصفحة */
+    @page {
+      size: A4;
+      margin: 10mm;
+    }
+  }
+`}</style>
 
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden">
         <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
