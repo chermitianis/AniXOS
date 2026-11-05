@@ -70,7 +70,7 @@ export function PieceReportModal({ piece, onClose }: PieceReportModalProps) {
   return (
     <PrintLayout
       title={`Rapport de Pièce : ${piece.piece_name}`}
-       subtitle={`Pièce : ${piece.piece_name}`}المشروع فقط، بدون العميل
+       subtitle={`Pièce : ${piece.piece_name}`}
       logoUrl={logoUrl}
       companyName={companyName}
       onClose={onClose}
