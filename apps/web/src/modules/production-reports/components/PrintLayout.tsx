@@ -149,13 +149,11 @@ function ReportContent({
                 src={logoUrl} 
                 alt="Logo" 
                 style={{
-                  maxWidth: '120px',
-                  maxHeight: '120px',
-                  width: 'auto',
-                  height: 'auto',
+                  width: '120px',
+                  height: '120px',
                   objectFit: 'contain',
+                  display: 'block',
                 }}
-                className="object-contain"
               />
             ) : (
               <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-500">
