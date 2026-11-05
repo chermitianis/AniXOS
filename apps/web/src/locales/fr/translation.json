@@ -1717,6 +1717,7 @@
     }
   },
   "odoo": {
+    "syncNow": "synchroniser",
     "title": "Odoo SaaS",
     "subtitle": "Synchronisez AniXOS avec votre ERP Odoo",
     "badgeConnected": "Connecté",
