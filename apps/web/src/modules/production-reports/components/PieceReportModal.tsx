@@ -79,6 +79,7 @@ export function PieceReportModal({ piece, onClose }: PieceReportModalProps) {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* INFORMATIONS */}
           <section>
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Informations</h2>
             <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-4">
@@ -113,9 +114,104 @@ export function PieceReportModal({ piece, onClose }: PieceReportModalProps) {
             </div>
           </section>
 
-          {/* ... (باقي الأقسام: RÉSUMÉ FINANCIER, DÉTAIL DES SESSIONS, DÉTAIL PAR PAQUET, OPÉRATIONS) ... */}
-          {/* تأكد من أن جميع الأقسام الأخرى موجودة كما هي في الملف الأصلي */}
+          {/* RÉSUMÉ FINANCIER */}
+          <section>
+            <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Résumé Financier</h2>
+            <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-4">
+              <div><div className="text-[10px] font-bold uppercase text-slate-400">Coût estimé</div><div className="font-semibold">{piece.estimated_cost.toFixed(2)} TND</div></div>
+              <div><div className="text-[10px] font-bold uppercase text-slate-400">Coût réel</div><div className="font-semibold">{totalCost.toFixed(2)} TND</div></div>
+              <div><div className="text-[10px] font-bold uppercase text-slate-400">Marge</div><div className={`font-semibold ${margin >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(2)} TND</div></div>
+              <div><div className="text-[10px] font-bold uppercase text-slate-400">Détail</div><div className="text-xs text-slate-500">MO: {piece.labor_cost.toFixed(2)} | Machine: {piece.machine_cost.toFixed(2)}</div></div>
+            </div>
+          </section>
 
+          {/* DÉTAIL DES SESSIONS */}
+          <section>
+            <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Détail des Sessions</h2>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Employé</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2 text-end">Temps passé</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sessions.map((s, idx) => (
+                  <tr key={s.session_id}>
+                    <td className="px-3 py-2">{new Date(s.started_at).toLocaleDateString("fr-FR")}</td>
+                    <td className="px-3 py-2">{s.worker_name}</td>
+                    <td className="px-3 py-2">{piece.piece_name} - Session {idx + 1}{s.is_last && " (Terminé)"}</td>
+                    <td className="px-3 py-2 text-end font-mono">{fmtSec(s.duration_seconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          {/* DÉTAIL PAR PAQUET */}
+          <section>
+            <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Détail par Paquet</h2>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Paquet</th>
+                  <th className="px-3 py-2">Statut</th>
+                  <th className="px-3 py-2 text-end">Estimé</th>
+                  <th className="px-3 py-2 text-end">Réel</th>
+                  <th className="px-3 py-2 text-end">Sessions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {wps.map((wp) => (
+                  <tr key={wp.of_work_package_id}>
+                    <td className="px-3 py-2 font-semibold">{wp.interface_type.toUpperCase()}</td>
+                    <td className="px-3 py-2">{wp.status}</td>
+                    <td className="px-3 py-2 text-end">{wp.estimated_hours > 0 ? `${wp.estimated_hours.toFixed(2)}h` : "—"}</td>
+                    <td className="px-3 py-2 text-end">{fmtSec(wp.actual_seconds)}</td>
+                    <td className="px-3 py-2 text-end">{wp.sessions_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          {/* OPÉRATIONS */}
+          <section>
+            <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Opérations</h2>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Opération</th>
+                  <th className="px-3 py-2 text-end">Heures Est.</th>
+                  <th className="px-3 py-2 text-end">Coût Est.</th>
+                  <th className="px-3 py-2 text-end">Heures Réel.</th>
+                  <th className="px-3 py-2 text-end">Coût Réel</th>
+                  <th className="px-3 py-2 text-end">Écart</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {ops.map((op) => {
+                  const estCost = op.estimated_hours * op.hourly_rate;
+                  const actualHours = op.actual_seconds / 3600;
+                  const costEcart = estCost - op.actual_cost;
+                  return (
+                    <tr key={op.operation_id}>
+                      <td className="px-3 py-2">{op.label ?? op.stage}</td>
+                      <td className="px-3 py-2 text-end font-mono">{op.estimated_hours.toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-end font-mono">{estCost.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-end font-mono">{actualHours.toFixed(2)}h</td>
+                      <td className="px-3 py-2 text-end font-mono">{op.actual_cost.toFixed(2)}</td>
+                      <td className={`px-3 py-2 text-end font-mono font-bold ${costEcart >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {costEcart >= 0 ? "+" : "−"}{Math.abs(costEcart).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
         </div>
       )}
     </PrintLayout>
