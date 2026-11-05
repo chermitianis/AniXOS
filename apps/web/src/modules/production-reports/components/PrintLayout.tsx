@@ -37,7 +37,7 @@ export function PrintLayout({
             visibility: visible !important;
           }
           #print-report-content {
-            position: static !important; /* ✅ إزالة absolute */
+            position: static !important;
             width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -71,6 +71,11 @@ export function PrintLayout({
           #print-report-content section {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+          }
+          /* ✅ إزالة أي margins علوية */
+          #print-report-content > *:first-child {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
           }
           @page {
             size: A4;
