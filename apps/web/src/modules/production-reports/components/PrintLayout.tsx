@@ -68,6 +68,13 @@ export function PrintLayout({
           .print-hidden, button, .print\\:hidden {
             display: none !important;
           }
+          /* ✅ منع قطع الجداول */
+          #print-report-content table,
+          #print-report-content tr,
+          #print-report-content section {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
           @page {
             size: A4;
             margin: 15mm;
@@ -181,7 +188,7 @@ function ReportContent({
         )}
       </div>
 
-      {/* محتوى التقرير */}
+      {/* محتوى التقرير (مع منع القطع) */}
       <div className="print:break-inside-avoid">
         {children}
       </div>
