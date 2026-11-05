@@ -3,17 +3,18 @@ import { useTranslation } from "react-i18next";
 import {
   Plug, PlugZap, Loader2, CheckCircle2, XCircle, Eye, EyeOff,
   Server, KeyRound, User, Database as DatabaseIcon,
-  Save, TestTube2, ShieldAlert, Crown, Send, RefreshCw,
+  Save, TestTube2, ShieldAlert, Crown, RefreshCw,
   ChevronDown, ChevronUp,
   Factory, FolderKanban, ClipboardList, Users, Users2, Calendar, Cog,
-  Truck, FileText, Boxes, HardHat, ListChecks,
+  Truck, FileText, Boxes, HardHat, ListChecks, ArrowLeft, ArrowRight, ArrowLeftRight,
 } from "lucide-react";
 import {
   useOdooConfig,
   DEFAULT_SYNC_MODULES,
   ALL_SYNC_MODULES,
+  normalizeSyncModules, // ✅ دالة التحويل
   type SyncModule,
-  type SyncModules,
+  type SyncModulesMatrix, // ✅ البنية الجديدة
   type SyncDirection,
 } from "../hooks/useOdooConfig";
 
@@ -25,42 +26,25 @@ interface FormState {
   odoo_db: string;
   odoo_username: string;
   api_key: string;
-  sync_modules: SyncModules;
-  sync_direction: SyncDirection;
+  sync_modules: SyncModulesMatrix; // ✅ البنية الجديدة
   auto_sync_enabled: boolean;
   auto_sync_interval_minutes: number;
   notify_on_error: boolean;
 }
-
-const INITIAL_SYNC_MODULES: SyncModules = {
-  clients: true,
-  suppliers: false,
-  projects: false,
-  manufacturing_orders: false,
-  work_orders: false,
-  machines: false,
-  workcenters: false,
-  workers: false,
-  staff: false,
-  planning: false,
-  materials: false,
-  invoices: false,
-};
 
 const INITIAL_FORM: FormState = {
   odoo_url: "",
   odoo_db: "",
   odoo_username: "",
   api_key: "",
-  sync_modules: { ...INITIAL_SYNC_MODULES },
-  sync_direction: "pull",
+  sync_modules: { ...DEFAULT_SYNC_MODULES },
   auto_sync_enabled: false,
   auto_sync_interval_minutes: 60,
   notify_on_error: true,
 };
 
 // ---------------------------------------------------------------------------
-// UI configuration — icons per module (order matches ALL_SYNC_MODULES)
+// UI configuration
 // ---------------------------------------------------------------------------
 const MODULE_ICONS: Record<SyncModule, typeof Factory> = {
   clients: Users2,
@@ -75,15 +59,6 @@ const MODULE_ICONS: Record<SyncModule, typeof Factory> = {
   workers: HardHat,
   staff: Users,
   materials: Boxes,
-};
-
-const SYNC_DIRECTIONS: SyncDirection[] = ["pull", "push", "bidirectional"];
-
-// ✅ الوحدات المتاحة لكل اتجاه
-const MODULES_BY_DIRECTION: Record<SyncDirection, SyncModule[]> = {
-  pull: ["clients", "suppliers", "projects", "manufacturing_orders", "work_orders", "machines", "workcenters", "workers", "staff", "materials", "planning"],
-  push: ["work_orders", "invoices", "clients", "projects", "workers"],
-  bidirectional: ALL_SYNC_MODULES,
 };
 
 // ---------------------------------------------------------------------------
@@ -114,16 +89,14 @@ export function OdooIntegrationPanel() {
 
   useEffect(() => {
     if (!config) return;
+    // ✅ استخدام normalizeSyncModules للتعامل مع البنية القديمة والجديدة
+    const normalizedModules = normalizeSyncModules(config.sync_modules);
     setForm({
       odoo_url: config.odoo_url ?? "",
       odoo_db: config.odoo_db ?? "",
       odoo_username: config.odoo_username ?? "",
       api_key: "",
-      sync_modules: {
-        ...DEFAULT_SYNC_MODULES,
-        ...(config.sync_modules ?? {}),
-      },
-      sync_direction: config.sync_direction ?? "pull",
+      sync_modules: normalizedModules,
       auto_sync_enabled: config.auto_sync_enabled ?? false,
       auto_sync_interval_minutes: config.auto_sync_interval_minutes ?? 60,
       notify_on_error: config.notify_on_error ?? true,
@@ -148,17 +121,19 @@ export function OdooIntegrationPanel() {
     setTestResult(null);
   }
 
-  function toggleModule(mod: SyncModule) {
+  // ✅ تحديث مصفوفة الوحدات (Pull/Push)
+  function toggleModuleDirection(mod: SyncModule, direction: "pull" | "push") {
     setForm((prev) => ({
       ...prev,
-      sync_modules: { ...prev.sync_modules, [mod]: !prev.sync_modules[mod] },
+      sync_modules: {
+        ...prev.sync_modules,
+        [mod]: {
+          ...prev.sync_modules[mod],
+          [direction]: !prev.sync_modules[mod][direction],
+        },
+      },
     }));
   }
-
-  // ✅ الوحدات المعروضة حسب الاتجاه المختار
-  const visibleModules = useMemo(() => {
-    return MODULES_BY_DIRECTION[form.sync_direction] ?? ALL_SYNC_MODULES;
-  }, [form.sync_direction]);
 
   async function handleToggleClick() {
     if (isTogglingNow || isLoading) return;
@@ -381,26 +356,23 @@ export function OdooIntegrationPanel() {
                   )}
                 </span>
               )}
-              {(config?.sync_direction === "pull" ||
-                config?.sync_direction === "bidirectional") && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleSyncNow();
-                  }}
-                  disabled={isSyncing}
-                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold text-white shadow-sm disabled:opacity-50"
-                  style={{ background: ODOO_PRIMARY }}
-                >
-                  {isSyncing ? (
-                    <Loader2 size={11} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={11} />
-                  )}
-                  {t("odoo.syncNow")}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleSyncNow();
+                }}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold text-white shadow-sm disabled:opacity-50"
+                style={{ background: ODOO_PRIMARY }}
+              >
+                {isSyncing ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={11} />
+                )}
+                {t("odoo.syncNow")}
+              </button>
             </div>
           </div>
         )}
@@ -497,89 +469,61 @@ export function OdooIntegrationPanel() {
               </div>
             </div>
 
-            {/* ✅ 1. Direction (أولاً) */}
-            <div>
-              <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                <PlugZap size={13} />
-                {t("odoo.sectionDirection")}
-              </h3>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {SYNC_DIRECTIONS.map((dir) => (
-                  <label
-                    key={dir}
-                    className={`flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2.5 transition-all ${
-                      form.sync_direction === dir
-                        ? "ring-1"
-                        : "border-slate-200 bg-white hover:bg-slate-50"
-                    }`}
-                    style={
-                      form.sync_direction === dir
-                        ? {
-                            borderColor: ODOO_PRIMARY,
-                            background: `${ODOO_PRIMARY}08`,
-                            "--tw-ring-color": `${ODOO_PRIMARY}40`,
-                          } as React.CSSProperties
-                        : undefined
-                    }
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="sync_direction"
-                        value={dir}
-                        checked={form.sync_direction === dir}
-                        onChange={() => updateField("sync_direction", dir)}
-                        className="h-3.5 w-3.5"
-                        style={{ accentColor: ODOO_PRIMARY }}
-                      />
-                      <span className="text-xs font-bold text-slate-700">
-                        {t(`odoo.direction.${dir}.label`)}
-                      </span>
-                    </div>
-                    <span className="ps-5 text-[10px] text-slate-400">
-                      {t(`odoo.direction.${dir}.hint`)}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* ✅ 2. Modules (ثانياً، مع عرض الوحدات حسب الاتجاه) */}
+            {/* ✅ Modules Matrix (Pull/Push لكل وحدة) */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 <Plug size={13} />
                 {t("odoo.sectionModules")}
               </h3>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleModules.map((key) => {
+
+              {/* رأس الجدول */}
+              <div className="mb-2 grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-slate-200 pb-2 text-[10px] font-bold uppercase text-slate-400">
+                <span>Module</span>
+                <span className="w-16 text-center">Pull ↓</span>
+                <span className="w-16 text-center">Push ↑</span>
+              </div>
+
+              {/* صفوف الجدول */}
+              <div className="space-y-1.5">
+                {ALL_SYNC_MODULES.map((key) => {
                   const Icon = MODULE_ICONS[key];
-                  const checked = form.sync_modules[key];
+                  const dir = form.sync_modules[key];
                   return (
-                    <label
+                    <div
                       key={key}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs transition-all hover:bg-slate-50"
-                      style={
-                        checked
-                          ? { borderColor: ODOO_PRIMARY, background: `${ODOO_PRIMARY}08` }
-                          : undefined
-                      }
+                      className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2"
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleModule(key)}
-                        className="h-3.5 w-3.5 rounded border-slate-300"
-                        style={{ accentColor: ODOO_PRIMARY }}
-                      />
-                      <Icon
-                        size={14}
-                        className={checked ? "" : "text-slate-400"}
-                        style={checked ? { color: ODOO_PRIMARY } : undefined}
-                      />
-                      <span className="text-xs font-medium text-slate-700">
-                        {t(`odoo.module.${key}`)}
-                      </span>
-                    </label>
+                      <div className="flex items-center gap-2">
+                        <Icon size={14} className="text-slate-500" />
+                        <span className="text-xs font-medium text-slate-700">
+                          {t(`odoo.module.${key}`)}
+                        </span>
+                      </div>
+
+                      {/* Pull */}
+                      <label className="flex w-16 cursor-pointer items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={dir.pull}
+                          onChange={() => toggleModuleDirection(key, "pull")}
+                          className="h-4 w-4 rounded border-slate-300"
+                          style={{ accentColor: ODOO_PRIMARY }}
+                          title="Pull (Odoo → AniXOS)"
+                        />
+                      </label>
+
+                      {/* Push */}
+                      <label className="flex w-16 cursor-pointer items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={dir.push}
+                          onChange={() => toggleModuleDirection(key, "push")}
+                          className="h-4 w-4 rounded border-slate-300"
+                          style={{ accentColor: ODOO_PRIMARY }}
+                          title="Push (AniXOS → Odoo)"
+                        />
+                      </label>
+                    </div>
                   );
                 })}
               </div>
