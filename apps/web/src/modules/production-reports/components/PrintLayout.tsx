@@ -28,33 +28,31 @@ export function PrintLayout({
   return (
     <>
       {/* CSS للطباعة */}
-      <style>{`
+<style>{`
   @media print {
     /* 1. إخفاء كل شيء في الصفحة */
-    html, body, #root {
+    html, body {
       height: auto !important;
       margin: 0 !important;
       padding: 0 !important;
       overflow: visible !important;
+      background: white !important;
     }
     
-    /* 2. إخفاء كل العناصر */
-    body > * {
+    /* 2. إخفاء جميع العناصر داخل #root (ما عدا #print-report-content) */
+    #root > * {
       display: none !important;
     }
     
     /* 3. إظهار التقرير فقط */
     #print-report-content {
       display: block !important;
-      position: absolute !important;
-      top: 0 !important;
-      left: 0 !important;
+      position: static !important;
       width: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
       background: white !important;
       color: black !important;
-      z-index: 9999 !important;
     }
     
     /* 4. إظهار محتوى التقرير */
