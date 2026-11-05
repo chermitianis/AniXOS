@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Building2, UserPlus } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { LanguageSwitcher } from "../../../shared/components/LanguageSwitcher";
@@ -18,6 +18,21 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
   const [ownerPassword, setOwnerPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; full_name: string } | null>(null);
+
+  // التحقق مما إذا كان المستخدم مسجلاً بالفعل (مثلاً عبر Google)
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) {
+        const meta = data.user.user_metadata;
+        setCurrentUser({
+          id: data.user.id,
+          email: data.user.email ?? "",
+          full_name: meta?.full_name ?? meta?.name ?? "",
+        });
+      }
+    });
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -25,30 +40,42 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
     setIsSubmitting(true);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("tenant-provisioning", {
-        body: {
-          company_name: companyName,
-          industry: industry || null,
-          owner_full_name: ownerFullName,
-          owner_email: ownerEmail,
-          owner_password: ownerPassword,
-        },
-      });
+      // إذا كان المستخدم موجوداً (Google)، نرسل existing_user_id
+      // وإلا نرسل بيانات إنشاء الحساب
+      const body = currentUser
+        ? {
+            company_name: companyName,
+            industry: industry || null,
+            owner_full_name: ownerFullName || currentUser.full_name,
+            owner_email: currentUser.email,
+            existing_user_id: currentUser.id,
+          }
+        : {
+            company_name: companyName,
+            industry: industry || null,
+            owner_full_name: ownerFullName,
+            owner_email: ownerEmail,
+            owner_password: ownerPassword,
+          };
+
+      const { data, error: fnError } = await supabase.functions.invoke("tenant-provisioning", { body });
 
       if (fnError || !data?.success) {
         setError(data?.message ?? "Erreur");
         return;
       }
 
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: ownerEmail,
-        password: ownerPassword,
-      });
-
-      if (signInError) {
-        setError(t("setup.autoLoginFailed"));
-        onSwitchToLogin();
-        return;
+      // إذا كان مستخدماً جديداً (بريد/كلمة مرور)، نقوم بتسجيل الدخول
+      if (!currentUser) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: ownerEmail,
+          password: ownerPassword,
+        });
+        if (signInError) {
+          setError(t("setup.autoLoginFailed"));
+          onSwitchToLogin();
+          return;
+        }
       }
 
       onCreated();
@@ -76,8 +103,13 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
               <Building2 size={26} />
             </div>
             <h1 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl">
-              {t("setup.createCompanyTitle")}
+              {currentUser ? t("setup.createYourCompany") : t("setup.createCompanyTitle")}
             </h1>
+            {currentUser && (
+              <p className="mt-1 text-xs text-slate-500">
+                {t("setup.loggedInAs", { email: currentUser.email })}
+              </p>
+            )}
           </div>
 
           <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.companyName")}</label>
@@ -96,35 +128,53 @@ export function CreateCompanyPage({ onCreated, onSwitchToLogin }: CreateCompanyP
             className={`mb-3 ${inputClass}`}
           />
 
-          <hr className="my-4 border-slate-200" />
+          {/* إذا لم يكن المستخدم موجوداً (تسجيل عادي)، نطلب بيانات المالك */}
+          {!currentUser && (
+            <>
+              <hr className="my-4 border-slate-200" />
 
-          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.ownerFullName")}</label>
-          <input
-            value={ownerFullName}
-            onChange={(e) => setOwnerFullName(e.target.value)}
-            className={`mb-3 ${inputClass}`}
-            required
-          />
+              <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.ownerFullName")}</label>
+              <input
+                value={ownerFullName}
+                onChange={(e) => setOwnerFullName(e.target.value)}
+                className={`mb-3 ${inputClass}`}
+                required
+              />
 
-          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.email")}</label>
-          <input
-            type="email"
-            value={ownerEmail}
-            onChange={(e) => setOwnerEmail(e.target.value)}
-            className={`mb-3 ${inputClass}`}
-            dir="ltr"
-            required
-          />
+              <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.email")}</label>
+              <input
+                type="email"
+                value={ownerEmail}
+                onChange={(e) => setOwnerEmail(e.target.value)}
+                className={`mb-3 ${inputClass}`}
+                dir="ltr"
+                required
+              />
 
-          <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.password")}</label>
-          <input
-            type="password"
-            value={ownerPassword}
-            onChange={(e) => setOwnerPassword(e.target.value)}
-            minLength={8}
-            className={`mb-4 ${inputClass}`}
-            required
-          />
+              <label className="mb-1 block text-sm font-semibold text-slate-600">{t("auth.password")}</label>
+              <input
+                type="password"
+                value={ownerPassword}
+                onChange={(e) => setOwnerPassword(e.target.value)}
+                minLength={8}
+                className={`mb-4 ${inputClass}`}
+                required
+              />
+            </>
+          )}
+
+          {/* إذا كان المستخدم موجوداً (Google)، نطلب فقط اسمه الكامل (إذا لم يكن موجوداً) */}
+          {currentUser && !currentUser.full_name && (
+            <>
+              <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.ownerFullName")}</label>
+              <input
+                value={ownerFullName}
+                onChange={(e) => setOwnerFullName(e.target.value)}
+                className={`mb-4 ${inputClass}`}
+                required
+              />
+            </>
+          )}
 
           {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600">{error}</div>}
 
