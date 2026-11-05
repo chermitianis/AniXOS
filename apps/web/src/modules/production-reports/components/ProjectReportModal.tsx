@@ -52,7 +52,7 @@ export function ProjectReportModal({ project, onClose }: ProjectReportModalProps
   return (
     <PrintLayout
       title={`Rapport de Projet : ${project.project_name}`}
-      subtitle={`Client : ${project.client_name ?? "—"}`}
+       subtitle={`Projet : ${project.project_name}`} 
       logoUrl={logoUrl}
       companyName={companyName}
       onClose={onClose}
