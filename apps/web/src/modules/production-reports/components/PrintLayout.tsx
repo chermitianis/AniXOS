@@ -31,33 +31,46 @@ export function PrintLayout({
 <style>{`
   @media print {
     /* 1. إخفاء كل شيء في الصفحة */
-    html, body {
-      height: auto !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      overflow: visible !important;
-      background: white !important;
+    body * {
+      visibility: hidden !important;
     }
     
-    /* 2. إخفاء جميع العناصر داخل #root (ما عدا #print-report-content) */
-    #root > * {
-      display: none !important;
+    /* 2. إظهار التقرير فقط */
+    #print-report-content, #print-report-content * {
+      visibility: visible !important;
     }
     
-    /* 3. إظهار التقرير فقط */
+    /* 3. تثبيت التقرير في أعلى الصفحة */
     #print-report-content {
-      display: block !important;
-      position: static !important;
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
       width: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
       background: white !important;
       color: black !important;
+      z-index: 9999 !important;
     }
     
-    /* 4. إظهار محتوى التقرير */
-    #print-report-content * {
-      visibility: visible !important;
+    /* 4. تجاوز قواعد Dark Mode */
+    #print-report-content .bg-white,
+    #print-report-content .bg-slate-50,
+    #print-report-content .bg-slate-100 {
+      background-color: white !important;
+    }
+    #print-report-content .text-slate-900,
+    #print-report-content .text-slate-800,
+    #print-report-content .text-slate-700 {
+      color: black !important;
+    }
+    #print-report-content .text-slate-500,
+    #print-report-content .text-slate-400 {
+      color: #666 !important;
+    }
+    #print-report-content .border-slate-200,
+    #print-report-content .border-slate-300 {
+      border-color: #ddd !important;
     }
     
     /* 5. منع قطع الجداول */
@@ -77,14 +90,18 @@ export function PrintLayout({
       break-after: avoid !important;
     }
     
-    /* 6. إعدادات الصفحة */
+    /* 6. إخفاء الأزرار */
+    .print-hidden, button, .print\\:hidden {
+      display: none !important;
+    }
+    
+    /* 7. إعدادات الصفحة */
     @page {
       size: A4;
       margin: 10mm;
     }
   }
 `}</style>
-
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden">
         <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
