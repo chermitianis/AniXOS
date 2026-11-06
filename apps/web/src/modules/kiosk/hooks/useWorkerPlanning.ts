@@ -3,7 +3,7 @@ import { fetchWorkerPlanningQueue, fetchProjectById, fetchPiecesForProject } fro
 import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { connectivityMonitor } from "../../../lib/connectivity";
-import { getLocalDeviceId } from "../../../lib/deviceContext"; // ✅ استيراد device_id
+import { getLocalDeviceId } from "../../../lib/deviceContext";
 import type { PlanningEntry, Project, PieceTask } from "../../../shared/types/database";
 
 export interface PlanningProjectOption {
@@ -11,7 +11,7 @@ export interface PlanningProjectOption {
   entries: PlanningEntry[];
 }
 
-// ✅ دالة لجلب القطع المشغولة حالياً على أجهزة أخرى
+// ✅ دالة مساعدة لجلب القطع المشغولة حالياً على أجهزة أخرى
 async function fetchBusyPiecesOnOtherDevices(
   companyId: string,
   currentDeviceId: string | null
@@ -99,14 +99,24 @@ export function useWorkerPlanning(workerId: string) {
     });
   }, [reload]);
 
-  /** قطع مشروع معيّن: القطع المخطَّطة أولاً، ثم بقية القطع.
-   *  القطع المنتهية والمشغولة على أجهزة أخرى تُستبعد تماماً. */
+  /** قطع مشروع معيّن: القطع المخطَّطة فقط، مع استبعاد المشغولة على أجهزة أخرى والمنتهية. */
   async function loadPiecesForOption(
     option: PlanningProjectOption
   ): Promise<{ activePieces: PieceTask[]; completedPieces: PieceTask[] }> {
-    const allPieces = await fetchPiecesForProject(option.project.id);
-    const plannedPieceIds = new Set(option.entries.map((e) => e.piece_task_id).filter(Boolean));
+    // ✅ جلب معرفات القطع المخططة لهذا العامل في هذا المشروع
+    const plannedPieceIds = new Set(
+      option.entries.map((e) => e.piece_task_id).filter((id): id is string => !!id)
+    );
 
+    if (plannedPieceIds.size === 0) {
+      return { activePieces: [], completedPieces: [] };
+    }
+
+    // ✅ جلب تفاصيل هذه القطع فقط
+    const allPieces = await fetchPiecesForProject(option.project.id);
+    const plannedPieces = allPieces.filter((p) => plannedPieceIds.has(p.id));
+
+    // ✅ ترتيب القطع حسب sequence_order في المخطط
     const plannedPieceOrder = new Map<string, number>();
     for (const entry of option.entries) {
       if (!entry.piece_task_id) continue;
@@ -122,26 +132,20 @@ export function useWorkerPlanning(workerId: string) {
     const companyId = option.project.company_id;
     const busyPieceIds = await fetchBusyPiecesOnOtherDevices(companyId, currentDeviceId);
 
-    // ✅ استبعاد القطع المنتهية والقطع المشغولة على أجهزة أخرى
-    const notCompleted = allPieces.filter(
-      (p) => p.status !== "completed" && !busyPieceIds.has(p.id)
-    );
-
-    const planned = notCompleted
-      .filter((p) => plannedPieceIds.has(p.id))
+    // ✅ فصل القطع النشطة عن المنتهية
+    const activePieces = plannedPieces
+      .filter((p) => p.status !== "completed" && !busyPieceIds.has(p.id))
       .sort((a, b) => {
         const oa = plannedPieceOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
         const ob = plannedPieceOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
         return oa - ob;
       });
-    const others = notCompleted.filter((p) => !plannedPieceIds.has(p.id));
 
-    // ✅ القطع المنتهية تظهر فقط في قسم "المكتملة" وليس في القائمة النشطة
-    const completedPieces = allPieces
+    const completedPieces = plannedPieces
       .filter((p) => p.status === "completed")
       .sort((a, b) => a.sequence_order - b.sequence_order);
 
-    return { activePieces: [...planned, ...others], completedPieces };
+    return { activePieces, completedPieces };
   }
 
   return { queue, projectOptions, isLoading, reload, loadPiecesForOption };
