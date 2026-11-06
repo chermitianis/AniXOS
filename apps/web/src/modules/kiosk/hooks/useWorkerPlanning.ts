@@ -3,11 +3,42 @@ import { fetchWorkerPlanningQueue, fetchProjectById, fetchPiecesForProject } fro
 import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { connectivityMonitor } from "../../../lib/connectivity";
+import { getLocalDeviceId } from "../../../lib/deviceContext"; // ✅ استيراد device_id
 import type { PlanningEntry, Project, PieceTask } from "../../../shared/types/database";
 
 export interface PlanningProjectOption {
   project: Project;
-  entries: PlanningEntry[]; // كل مدخلات المخطط الخاصة بهذا المشروع لهذا العامل، مرتبة زمنياً
+  entries: PlanningEntry[];
+}
+
+// ✅ دالة لجلب القطع المشغولة حالياً على أجهزة أخرى
+async function fetchBusyPiecesOnOtherDevices(
+  companyId: string,
+  currentDeviceId: string | null
+): Promise<Set<string>> {
+  const busyPieceIds = new Set<string>();
+
+  if (!connectivityMonitor.getStatus() || !companyId) return busyPieceIds;
+
+  const { data, error } = await supabase
+    .from("work_sessions")
+    .select("piece_task_id, device_id")
+    .eq("company_id", companyId)
+    .is("ended_at", null)
+    .is("voided_at", null)
+    .not("piece_task_id", "is", null);
+
+  if (error || !data) return busyPieceIds;
+
+  for (const session of data) {
+    if (!session.piece_task_id) continue;
+    // القطعة مشغولة إذا كانت الجلسة مفتوحة على جهاز مختلف
+    if (session.device_id && session.device_id !== currentDeviceId) {
+      busyPieceIds.add(session.piece_task_id);
+    }
+  }
+
+  return busyPieceIds;
 }
 
 export function useWorkerPlanning(workerId: string) {
@@ -20,7 +51,6 @@ export function useWorkerPlanning(workerId: string) {
     const entries = await fetchWorkerPlanningQueue(workerId);
     setQueue(entries);
 
-    // تجميع المدخلات حسب المشروع، بالحفاظ على ترتيب أول ظهور (= الأقرب زمنياً)
     const orderedProjectIds: string[] = [];
     const entriesByProject = new Map<string, PlanningEntry[]>();
 
@@ -49,7 +79,6 @@ export function useWorkerPlanning(workerId: string) {
     void reload();
   }, [reload]);
 
-  // بث حي: أي تغيير في ترتيب/تخصيص المخطط لهذا العامل يظهر فوراً في الكشك
   useEffect(() => {
     const channel = createSafeChannel(`planning-${workerId}`)
       .on(
@@ -70,18 +99,14 @@ export function useWorkerPlanning(workerId: string) {
     });
   }, [reload]);
 
-  /** قطع مشروع معيّن: القطع المخطَّطة أولاً (بالترتيب المحدَّد من المشرف في
-   *  المخطط عبر sequence_order)، ثم بقية القطع. المكتملة في مجموعة منفصلة. */
+  /** قطع مشروع معيّن: القطع المخطَّطة أولاً، ثم بقية القطع.
+   *  القطع المنتهية والمشغولة على أجهزة أخرى تُستبعد تماماً. */
   async function loadPiecesForOption(
     option: PlanningProjectOption
   ): Promise<{ activePieces: PieceTask[]; completedPieces: PieceTask[] }> {
     const allPieces = await fetchPiecesForProject(option.project.id);
     const plannedPieceIds = new Set(option.entries.map((e) => e.piece_task_id).filter(Boolean));
 
-    // ✅ NEW : Map { piece_task_id → sequence_order } depuis le planning
-    // L'admin a défini l'ordre des cartes dans chaque cellule ;
-    // la 1ère carte de la liste de l'opérateur doit correspondre à celle
-    // ayant le sequence_order le plus petit.
     const plannedPieceOrder = new Map<string, number>();
     for (const entry of option.entries) {
       if (!entry.piece_task_id) continue;
@@ -92,8 +117,16 @@ export function useWorkerPlanning(workerId: string) {
       }
     }
 
-    const notCompleted = allPieces.filter((p) => p.status !== "completed");
-    // ✅ NEW : trier les pièces planifiées selon sequence_order du planning
+    // ✅ جلب القطع المشغولة على أجهزة أخرى
+    const currentDeviceId = getLocalDeviceId();
+    const companyId = option.project.company_id;
+    const busyPieceIds = await fetchBusyPiecesOnOtherDevices(companyId, currentDeviceId);
+
+    // ✅ استبعاد القطع المنتهية والقطع المشغولة على أجهزة أخرى
+    const notCompleted = allPieces.filter(
+      (p) => p.status !== "completed" && !busyPieceIds.has(p.id)
+    );
+
     const planned = notCompleted
       .filter((p) => plannedPieceIds.has(p.id))
       .sort((a, b) => {
@@ -103,6 +136,7 @@ export function useWorkerPlanning(workerId: string) {
       });
     const others = notCompleted.filter((p) => !plannedPieceIds.has(p.id));
 
+    // ✅ القطع المنتهية تظهر فقط في قسم "المكتملة" وليس في القائمة النشطة
     const completedPieces = allPieces
       .filter((p) => p.status === "completed")
       .sort((a, b) => a.sequence_order - b.sequence_order);
