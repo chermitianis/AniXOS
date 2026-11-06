@@ -534,9 +534,9 @@ export async function toggleWorkerEvent(input: ToggleEventInput): Promise<WorkSe
 
 async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   const companyId = await resolveCompanyId();
-  if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
+  if (!companyId) throw new Error("Impossible de déterminer l'entreprise de l'appareil actuel");
 
-  // 🛡️ الحماية الجذرية: إذا لم يتم تمرير pieceTaskId، نحاول جلبه من الـ Planning
+  // 🛡️ Protection racine : si pieceTaskId n'est pas fourni, on tente de le récupérer depuis le Planning
   let finalPieceTaskId = input.pieceTaskId;
   if (!finalPieceTaskId && input.planningId) {
     if (connectivityMonitor.getStatus()) {
@@ -550,6 +550,14 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
       const planningEntry = await localDb.planning.get(input.planningId);
       finalPieceTaskId = planningEntry?.piece_task_id ?? null;
     }
+  }
+
+  // ✅ Récupérer le device_id actuel pour lier la session à l'appareil
+  let currentDeviceId: string | null = null;
+  try {
+    currentDeviceId = localStorage.getItem("anixos_device_id");
+  } catch {
+    // En cas d'indisponibilité du localStorage, on laisse null
   }
 
   const now = new Date().toISOString();
@@ -575,6 +583,7 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     voided_at: null,
     voided_by_staff_id: null,
     void_reason: null,
+    device_id: currentDeviceId, // ✅ Lier la session à l'appareil
   };
 
   await localDb.workSessions.put(newSession);
@@ -590,14 +599,13 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
       newSession.id,
       input.machineId,
       "piece_started",
-      "بدء العمل على القطعة",
+      "Début du travail sur la pièce",
       { piece_task_id: finalPieceTaskId, project_id: input.projectId }
     );
   }
 
   return newSession;
 }
-
 async function closeSession(session: WorkSession): Promise<WorkSession> {
   const now = new Date().toISOString();
   const closedSession: WorkSession = {
