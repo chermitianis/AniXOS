@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers, Plus,
+  PauseCircle, CheckCircle2, ArrowLeftRight, MessageSquareText, Layers, Plus, LogOut,
 } from "lucide-react";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
 import type { Machine, Project, PieceTask } from "../../../shared/types/database";
@@ -14,25 +14,20 @@ interface ContextBarProps {
   machine: Machine | null;
   project: Project | null;
   pieceTask: PieceTask | null;
-  /** ✅ la work package actuellement sélectionnée (CNC / Classique). */
   ofWorkPackageId?: string | null;
-  /** Temps total estimé pour la pièce (depuis piece_costing_operations). */
   estimatedTotalMinutes?: number | null;
-  /** ✅ NEW : temps consommé (secondes) depuis la 1ère ouverture de la pièce. */
   consumedSeconds?: number | null;
   onOpenSelector: () => void;
   onCompletePiece: () => void;
   onPausePiece: () => void;
   onChangePhase: (delta: number) => void;
-  /** ✅ NEW : ouvre le modal d'addition d'une pièce d'urgence. */
   onAddEmergencyPiece: () => void;
+  onLogout?: () => void;
 }
 
-/** ✅ دالة لتنظيف اسم المشروع واستخراج اسم العميل */
 function parseProjectName(projectName: string | undefined | null) {
   if (!projectName) return { projectName: "—", clientName: "" };
   
-  // النمط: CODE - CLIENT - PROJECT_NAME
   const match = projectName.match(/^([A-Z0-9]+)\s*-\s*(.+?)\s*-\s*(.+)$/);
   
   if (match) {
@@ -146,7 +141,6 @@ function DecisionButtons({
   );
 }
 
-/** Formate un nombre de minutes en "Xh YYmin" — retourne "—" si 0/null. */
 function formatMinutes(min: number | null | undefined): string {
   if (min === null || min === undefined) return "—";
   const abs = Math.abs(min);
@@ -170,6 +164,7 @@ export function ContextBar({
   onPausePiece,
   onChangePhase,
   onAddEmergencyPiece,
+  onLogout,
 }: ContextBarProps) {
   const { t } = useTranslation();
   const [isToolsOpen, setIsToolsOpen] = useState(false);
@@ -190,6 +185,59 @@ export function ContextBar({
 
   const { projectName, clientName } = parseProjectName(project?.name);
 
+  // ✅ حالة فارغة: لا توجد قطعة محددة
+  if (!pieceTask) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+            <Layers size={24} />
+          </div>
+          <div>
+            <h2 className="text-lg font-black text-slate-800">
+              {t("kiosk.noActiveProject")}
+            </h2>
+            <p className="text-sm text-slate-500">
+              {t("kiosk.manualSelection")}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onAddEmergencyPiece}
+            className="flex items-center gap-1.5 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50 px-4 py-2.5 text-xs font-black text-amber-700 transition hover:border-amber-500 hover:bg-amber-100 active:scale-95"
+          >
+            <Plus size={16} />
+            {t("kiosk.addEmergency.button")}
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenSelector}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-extrabold text-white shadow-lg shadow-indigo-200 transition-transform active:scale-95 hover:bg-indigo-700"
+          >
+            <ArrowLeftRight size={18} />
+            {t("kiosk.selectPiece")}
+          </button>
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              <LogOut size={16} />
+              {t("common.logout")}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ الحالة العادية (مع قطعة محددة)
   return (
     <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-100/70 px-4 py-3">
       <Field label={t("kiosk.operator")} value={worker.full_name} />
@@ -212,18 +260,17 @@ export function ContextBar({
           <button
             type="button"
             onClick={() => onChangePhase(-1)}
-            disabled={!pieceTask || Number(pieceTask.phase ?? "1") <= 1}
+            disabled={Number(pieceTask.phase ?? "1") <= 1}
             className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-base font-black text-slate-700 shadow-inner transition hover:bg-slate-200 disabled:opacity-30"
           >
             −
           </button>
           <span className="text-sm font-black text-indigo-600">
-            {pieceTask?.phase ?? "1"}
+            {pieceTask.phase ?? "1"}
           </span>
           <button
             type="button"
             onClick={() => onChangePhase(1)}
-            disabled={!pieceTask}
             className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-base font-black text-slate-700 shadow-inner transition hover:bg-slate-200 disabled:opacity-30"
           >
             +
@@ -231,25 +278,23 @@ export function ContextBar({
         </div>
       </div>
 
-      {/* ✅ اسم المشروع (في خانة مستقلة) */}
       <Field
         label={t("kiosk.projectName")}
         value={projectName}
         action={{ text: t("kiosk.change"), onClick: onOpenSelector }}
       />
 
-      {/* ✅ اسم العميل (في خانة مستقلة جديدة تحته) */}
       {clientName && (
         <Field label={t("kiosk.client", { defaultValue: "CLIENT" })} value={clientName} />
       )}
 
       <Field label={t("kiosk.projectCode")} value={project?.code ?? "—"} />
 
-      <Field label={t("kiosk.piece")} value={pieceTask?.name ?? "—"} />
+      <Field label={t("kiosk.piece")} value={pieceTask.name ?? "—"} />
 
       <Field
         label={t("kiosk.quantity")}
-        value={pieceTask?.quantity != null ? String(pieceTask.quantity) : "—"}
+        value={pieceTask.quantity != null ? String(pieceTask.quantity) : "—"}
       />
 
       <Field
@@ -306,34 +351,30 @@ export function ContextBar({
         {t("kiosk.addEmergency.button")}
       </button>
 
-      {pieceTask && (
-        <button
-          type="button"
-          onClick={() => setIsPassationOpen(true)}
-          className="relative flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-black text-amber-950 shadow-md shadow-amber-200/60 transition hover:bg-amber-300 active:scale-95"
-        >
-          {unreadCount > 0 && (
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-800 opacity-75"></span>
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-900"></span>
-            </span>
-          )}
-          <MessageSquareText size={16} />
-          {t("kiosk.passation")}
-          {unreadCount > 0 && (
-            <span className="rounded-full bg-amber-900 px-1.5 py-0.5 text-[10px] font-black text-white">
-              {unreadCount}
-            </span>
-          )}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setIsPassationOpen(true)}
+        className="relative flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-black text-amber-950 shadow-md shadow-amber-200/60 transition hover:bg-amber-300 active:scale-95"
+      >
+        {unreadCount > 0 && (
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-800 opacity-75"></span>
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-900"></span>
+          </span>
+        )}
+        <MessageSquareText size={16} />
+        {t("kiosk.passation")}
+        {unreadCount > 0 && (
+          <span className="rounded-full bg-amber-900 px-1.5 py-0.5 text-[10px] font-black text-white">
+            {unreadCount}
+          </span>
+        )}
+      </button>
 
-      {pieceTask && (
-        <DecisionButtons
-          onCompletePiece={onCompletePiece}
-          onPausePiece={onPausePiece}
-        />
-      )}
+      <DecisionButtons
+        onCompletePiece={onCompletePiece}
+        onPausePiece={onPausePiece}
+      />
 
       {isToolsOpen && machine && (
         <MachineToolsModal
