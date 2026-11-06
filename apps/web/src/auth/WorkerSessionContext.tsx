@@ -34,6 +34,9 @@ import {
   WorkerAlreadyConnectedError,
 } from "../modules/kiosk/api/kioskApi";
 import type { InterfaceType } from "../shared/types/database";
+// ✅ استيرادات جديدة للتعامل مع الجهاز
+import { getLocalDeviceId, recoverDeviceIdFromFingerprint } from "../lib/deviceContext";
+import { resolveCompanyId } from "../lib/companyContext";
 
 const WORKER_SESSION_STORAGE_KEY = "anixos_worker_session";
 
@@ -108,8 +111,6 @@ async function loginOnline(
       full_name: data.worker.full_name,
       photo_url: data.worker.photo_url,
       session_started_at: data.session_started_at,
-      // يُرجعه worker-login Edge Function؛ fallback 'both' إن لم يُرجع
-      // (لجلسات محفوظة قبل النشر أو للتوافق الخلفي)
       interface_type: (data.worker.interface_type ?? "both") as InterfaceType,
     },
   };
@@ -133,9 +134,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     try {
       let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> };
 
-      // لا يمكن ضمان قفل جهاز واحد أثناء غياب الخادم؛ لذلك لا نسمح
-      // بتسجيل دخول جديد للعامل أوفلاين. الجلسة المفتوحة تستمر بالعمل
-      // أوفلاين، لكن إنشاء جلسة جديدة يتطلب تحققاً مركزياً.
       if (!connectivityMonitor.getStatus()) {
         return { success: false, messageKey: "kioskLogin.connectionRequired" };
       }
@@ -146,9 +144,18 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
       }
 
       if (result.success && result.profile) {
+        // ✅ جلب device_id المحفوظ محلياً أو استرداده من قاعدة البيانات
+        let activeDeviceId = getLocalDeviceId();
+        if (!activeDeviceId) {
+          const companyId = await resolveCompanyId();
+          if (companyId) {
+            activeDeviceId = await recoverDeviceIdFromFingerprint(companyId);
+          }
+        }
+
         // تبدأ الحصة هنا فقط — عند دخول حقيقي، وليس عند كل إعادة تحميل صفحة
         try {
-          const shift = await startWorkerShift(result.profile.id, null);
+          const shift = await startWorkerShift(result.profile.id, activeDeviceId);
           setActiveWorker({ ...result.profile, shift_id: shift.id });
           return { success: true };
         } catch (error) {
@@ -157,21 +164,15 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
             (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED");
           if (!isAlreadyConnected) throw error;
 
-          // كلمة السر صحيحة، لكن توجد حصة مفتوحة أصلاً لهذا العامل نفسه —
-          // الأرجح أن بيانات الجهاز الذي بدأ بها الحصة فُقدت (متصفح مُفرَّغ،
-          // جهاز آخر) وليس أن العامل يعمل فعلياً على جهازين في آن واحد.
-          // نستأنف نفس الحصة بمعطياتها الحقيقية من السيرفر بدل رفض الدخول.
+          // كلمة السر صحيحة، لكن توجد حصة مفتوحة أصلاً لهذا العامل نفسه على نفس الجهاز
           const existingShift = await fetchOpenShiftForWorker(result.profile.id);
           if (!existingShift) {
-            // حالة سباق نادرة: الحصة أُغلقت للتو بين الفحصين — أعد المحاولة
             return { success: false, messageKey: "kioskLogin.alreadyConnected" };
           }
 
           await hydrateWorkerStateFromServer(result.profile.id, existingShift);
           setActiveWorker({
             ...result.profile,
-            // وقت البدء الحقيقي للحصة الأصلية، وليس لحظة إعادة الاتصال هذه —
-            // حتى لا يُعاد احتساب التايمر من الصفر ويُفقَد الوقت الفعلي المنقضي
             session_started_at: existingShift.started_at,
             shift_id: existingShift.id,
           });
@@ -195,8 +196,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     if (!activeWorker) return;
     setIsLoggingOut(true);
     try {
-      // تسجيل الخروج هو العملية الوحيدة التي تُنهي الحصة: يُغلق كل الأحداث
-      // المفتوحة أولاً (تُحسب ضمن الوقت الفعلي) ثم يُغلق الحصة نفسها
       await endWorkerShift(activeWorker.shift_id, activeWorker.id);
     } finally {
       setActiveWorker(null);
