@@ -176,31 +176,48 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
         // ✅ بدء الوردية (بدون deviceId)
         const shift = await startWorkerShift(result.profile.id);
 
-        // ✅ جلب الجلسات المفتوحة (إن وجدت) على هذا الجهاز
-        const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
-        const sessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
+// ✅ جلب الجلسات المفتوحة على هذا الجهاز من قاعدة البيانات مباشرة
+let openSessionsOnDevice: WorkSession[] = [];
 
-        if (sessionsOnDevice.length > 0) {
-          // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
-          const session = sessionsOnDevice[0];
-          await hydrateWorkerStateFromServer(result.profile.id, shift);
-          setActiveWorker({
-            ...result.profile,
-            session_started_at: session.started_at, // ✅ وقت الجلسة (وليس الوردية)
-            shift_id: shift.id,
-            device_name: deviceName,
-          });
-          return { success: true };
-        }
+if (connectivityMonitor.getStatus()) {
+  const { data: sessions, error } = await supabase
+    .from("work_sessions")
+    .select("*")
+    .eq("worker_id", result.profile.id)
+    .eq("device_id", activeDeviceId)
+    .is("ended_at", null)
+    .is("voided_at", null);
+  
+  if (!error && sessions) {
+    openSessionsOnDevice = sessions as WorkSession[];
+  }
+} else {
+  // Fallback: استخدام IndexedDB (قد لا يكون دقيقاً)
+  const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
+  openSessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
+}
 
-        // ✅ لا توجد جلسة مفتوحة -> استخدام وقت الوردية مؤقتاً
-        setActiveWorker({
-          ...result.profile,
-          session_started_at: shift.started_at, // مؤقتاً
-          shift_id: shift.id,
-          device_name: deviceName,
-        });
-        return { success: true };
+if (openSessionsOnDevice.length > 0) {
+  // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
+  const session = openSessionsOnDevice[0];
+  await hydrateWorkerStateFromServer(result.profile.id, shift);
+  setActiveWorker({
+    ...result.profile,
+    session_started_at: session.started_at, // ✅ وقت الجلسة
+    shift_id: shift.id,
+    device_name: deviceName,
+  });
+  return { success: true };
+}
+
+// ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> استخدام وقت الوردية مؤقتاً
+setActiveWorker({
+  ...result.profile,
+  session_started_at: shift.started_at, // مؤقتاً
+  shift_id: shift.id,
+  device_name: deviceName,
+});
+return { success: true };
       }
 
       return { success: false, messageKey: result.messageKey, messageParams: result.messageParams };

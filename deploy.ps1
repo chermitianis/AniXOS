@@ -1,10 +1,5 @@
 # ============================================================================
-# deploy.ps1 - AniXOS Deploy Script
-# ============================================================================
-# Usage:
-#   .\deploy.ps1                    -> auto message
-#   .\deploy.ps1 -Message "fix"     -> custom message
-#   .\deploy.ps1 -NoPush            -> commit only
+# deploy.ps1 - AniXOS Deploy Script (FORCE MODE) - FINAL v3
 # ============================================================================
 
 param(
@@ -12,7 +7,6 @@ param(
     [switch]$NoPush
 )
 
-# مهم: نخليو Continue ونعتمد على $LASTEXITCODE باش نتحكمو في الأخطاء
 $ErrorActionPreference = "Continue"
 $RepoRoot = "C:\Users\cherm\Music\AI-Projects\AniXOS"
 
@@ -21,13 +15,10 @@ function Write-Ok   { param($msg) Write-Host "OK $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "!! $msg" -ForegroundColor Yellow }
 function Write-Err  { param($msg) Write-Host "XX $msg" -ForegroundColor Red }
 
-# Helper: ينادي git بلا ما يموت على warnings
-function Invoke-Git {
-    param(
-        [Parameter(ValueFromRemainingArguments=$true)]
-        [string[]]$Args
-    )
-    $output = & git @Args 2>&1
+# ✅ الدالة الجديدة: تنفيذ git بأمر نصي واحد
+function Git-Exec {
+    param([string]$Command)
+    $output = Invoke-Expression "git $Command" 2>&1
     $code = $LASTEXITCODE
     return @{ Output = $output; Code = $code }
 }
@@ -36,13 +27,19 @@ Set-Location $RepoRoot
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "  AniXOS - Deploy Script" -ForegroundColor Magenta
+Write-Host "  AniXOS - Deploy Script (FORCE MODE)" -ForegroundColor Magenta
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
-# --- 1. Check status ---
+# --- 1. Nettoyage ---
+Write-Step "Cleaning up any previous rebase/merge..."
+Git-Exec "rebase --abort" | Out-Null
+Git-Exec "merge --abort" | Out-Null
+Write-Ok "Cleanup done."
+
+# --- 2. Vérification de l'état ---
 Write-Step "Checking git status..."
-$statusResult = Invoke-Git status --porcelain
+$statusResult = Git-Exec "status --porcelain"
 if ($statusResult.Code -ne 0) {
     Write-Err "git status failed:"
     $statusResult.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
@@ -51,178 +48,91 @@ if ($statusResult.Code -ne 0) {
 $status = @($statusResult.Output | Where-Object { $_ -and $_.Trim() -ne "" })
 
 if ($status.Count -eq 0) {
-    Write-Warn "No changes detected. Nothing to deploy."
+    Write-Warn "No local changes detected. Nothing to push."
+    if (-not $NoPush) {
+        Write-Step "Forcing push to remote (even if no local changes)..."
+        $pushResult = Git-Exec "push origin main --force"
+        $pushResult.Output | Out-Host
+        if ($pushResult.Code -eq 0) { Write-Ok "Force push successful." }
+    }
     exit 0
 }
 
-Write-Host "Detected changes:" -ForegroundColor Gray
+Write-Host "Detected local changes:" -ForegroundColor Gray
 $status | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 Write-Host ""
 
-# --- 2. Warn about build files ---
-$dangerousFiles = @(
-    "vercel.json",
-    ".github/workflows/ci.yml",
-    "apps/web/package.json",
-    "package.json",
-    "capacitor.config.ts",
-    "src-tauri/tauri.conf.json",
-    ".gitignore"
-)
-
-$stagedDangerous = @()
-foreach ($line in $status) {
-    # صيغة porcelain: "XY path" -> ناخذو من العمود 4
-    if ($line.Length -lt 4) { continue }
-    $filePath = $line.Substring(3).Trim().Trim('"')
-    foreach ($danger in $dangerousFiles) {
-        if ($filePath -eq $danger) {
-            $stagedDangerous += $filePath
-            break
-        }
-    }
-}
-
-if ($stagedDangerous.Count -gt 0) {
-    Write-Warn "You are about to modify build/deploy files:"
-    $stagedDangerous | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
-    Write-Host ""
-    $confirm = Read-Host "Are you sure? (y/N)"
-    if ($confirm -ne "y") {
-        Write-Err "Cancelled."
-        exit 1
-    }
-}
-
-# --- 3. Add safe files ---
-Write-Step "Adding src, public, supabase..."
-
-$safePaths = @(
-    "apps/web/src",
-    "apps/web/public",
-    "supabase"
-)
-
-foreach ($path in $safePaths) {
-    if (Test-Path $path) {
-        # 2>&1 + Out-Null = نبلعو stderr بلا ما نطيحو السكربت
-        $r = Invoke-Git add $path
-        if ($r.Code -ne 0) {
-            Write-Err "git add $path failed:"
-            $r.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
-            exit 1
-        }
-    }
-}
-
-# Add any other files except dangerous ones
-foreach ($line in $status) {
-    if ($line.Length -lt 4) { continue }
-    $filePath = $line.Substring(3).Trim().Trim('"')
-    $isDangerous = $false
-    foreach ($danger in $dangerousFiles) {
-        if ($filePath -eq $danger) { $isDangerous = $true; break }
-    }
-    if (-not $isDangerous) {
-        $r = Invoke-Git add $filePath
-        if ($r.Code -ne 0) {
-            Write-Err "git add $filePath failed:"
-            $r.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
-            exit 1
-        }
-    }
-}
-
-$stagedResult = Invoke-Git diff --cached --name-only
-if ($stagedResult.Code -ne 0) {
-    Write-Err "git diff failed:"
-    $stagedResult.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+# --- 3. Ajout de TOUS les fichiers locaux ---
+Write-Step "Adding all local files (including deleted, modified, untracked)..."
+$addResult = Git-Exec "add -A"
+if ($addResult.Code -ne 0) {
+    Write-Err "git add -A failed:"
+    $addResult.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     exit 1
 }
-$staged = @($stagedResult.Output | Where-Object { $_ -and $_.Trim() -ne "" })
+Write-Ok "All files staged."
 
-if ($staged.Count -eq 0) {
-    Write-Warn "No files staged."
-    exit 0
-}
-
-Write-Host "Staged files:" -ForegroundColor Gray
-$staged | ForEach-Object { Write-Host "  + $_" -ForegroundColor Gray }
-Write-Host ""
-
-# --- 4. Commit ---
+# --- 4. Création du commit ---
 if (-not $Message) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm"
-    $Message = "chore: update source files ($timestamp)"
+    $Message = "deploy: force update from local (Cursor) - $timestamp"
 }
 
 Write-Step "Creating commit..."
-$commitResult = Invoke-Git commit -m $Message
+$commitResult = Git-Exec "commit -m `"$Message`""
 $commitResult.Output | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 if ($commitResult.Code -ne 0) {
-    Write-Err "Commit failed."
-    exit 1
-}
-Write-Ok "Commit created."
-
-# --- 5. Pull with rebase ---
-Write-Step "Pulling latest changes from GitHub..."
-$pullResult = Invoke-Git pull --rebase origin main
-$pullResult.Output | Out-Host
-
-if ($pullResult.Code -ne 0) {
-    Write-Err "Rebase failed. Conflict detected."
-    Write-Host ""
-    Write-Host "Resolution steps:" -ForegroundColor Yellow
-    Write-Host "  1. Open conflicted files in VS Code" -ForegroundColor Yellow
-    Write-Host "  2. Click 'Accept Incoming Change'" -ForegroundColor Yellow
-    Write-Host "  3. Run: git add <file>" -ForegroundColor Yellow
-    Write-Host "  4. Run: git rebase --continue" -ForegroundColor Yellow
-    Write-Host "  5. Run this script again" -ForegroundColor Yellow
-    exit 1
+    if ($commitResult.Output -match "nothing to commit") {
+        Write-Warn "No changes to commit (maybe already committed)."
+    } else {
+        Write-Err "Commit failed."
+        exit 1
+    }
+} else {
+    Write-Ok "Commit created."
 }
 
-Write-Ok "Rebase successful."
-
-# --- 6. Push ---
+# --- 5. Force Push ---
 if ($NoPush) {
     Write-Warn "Push skipped (-NoPush)."
-    Write-Host "To push later: git push origin main" -ForegroundColor Yellow
+    Write-Host "To push later: git push origin main --force" -ForegroundColor Yellow
     exit 0
 }
 
-Write-Step "Pushing to GitHub..."
-$pushResult = Invoke-Git push origin main
-$pushResult.Output | Out-Host
-
-if ($pushResult.Code -ne 0) {
-    Write-Err "Push failed."
-    Write-Host "Try: git push origin main --force-with-lease" -ForegroundColor Yellow
+Write-Step "Force pushing to GitHub (overriding remote)..."
+Write-Host "This will replace the remote branch with your local version." -ForegroundColor Yellow
+$confirm = Read-Host "Are you sure? (y/N)"
+if ($confirm -ne "y") {
+    Write-Err "Cancelled by user."
     exit 1
 }
 
-Write-Ok "Push successful."
+$pushResult = Git-Exec "push origin main --force"
+$pushResult.Output | Out-Host
 
-# --- 7. Final info ---
+if ($pushResult.Code -ne 0) {
+    Write-Err "Force push failed."
+    Write-Host "Check your internet connection or GitHub permissions." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Ok "Force push successful."
+
+# --- 6. Nettoyage final ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Deploy Successful!" -ForegroundColor Green
+Write-Host "  Deploy Successful! (Force Mode)" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 
-$logResult = Invoke-Git log -1 --oneline
+$logResult = Git-Exec "log -1 --oneline"
 $latestCommit = ($logResult.Output | Select-Object -First 1)
 Write-Host "Latest commit: $latestCommit" -ForegroundColor Gray
 Write-Host ""
-
-Write-Host "Vercel will build the new deployment automatically in ~30 seconds." -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Monitor deployment at:" -ForegroundColor Cyan
-Write-Host "  https://vercel.com/dashboard" -ForegroundColor Blue
+Write-Host "Vercel will build the new deployment automatically." -ForegroundColor Cyan
 Write-Host ""
 
-Start-Sleep -Seconds 3
-
+Start-Sleep -Seconds 2
 $open = Read-Host "Open Vercel Dashboard? (y/N)"
 if ($open -eq "y") {
     Start-Process "https://vercel.com/dashboard"

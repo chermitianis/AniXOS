@@ -17,7 +17,7 @@ import {
   fetchConsumedSecondsForPiece,
 } from "../api/kioskApi";
 import type { PlanningProjectOption } from "./useWorkerPlanning";
-import { useWorkerSession } from "../../../auth/WorkerSessionContext"; // ✅ جديد
+import { useWorkerSession } from "../../../auth/WorkerSessionContext";
 import type {
   Machine,
   Project,
@@ -62,7 +62,6 @@ interface ActiveTaskState {
 }
 
 export function useActiveTask(workerId: string, shiftId: string | null): ActiveTaskState {
-  // ✅ جلب دالة تحديث session_started_at
   const { updateSessionStartedAt } = useWorkerSession();
 
   const [machine, setMachine] = useState<Machine | null>(null);
@@ -103,22 +102,30 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     return () => clearInterval(interval);
   }, [pieceTask?.id, refreshConsumedSeconds]);
 
+  // ✅ تحميل السياق الأولي مع تصفية الجلسات على الجهاز الحالي فقط
   useEffect(() => {
     let isMounted = true;
 
     async function loadInitialContext() {
       setIsLoadingContext(true);
 
-      const [planning, openSessions] = await Promise.all([
+      const [planning, allOpenSessions] = await Promise.all([
         fetchTodayPlanningForWorker(workerId),
         fetchOpenSessionsForWorker(workerId),
       ]);
+
+      // ✅ تصفية الجلسات على الجهاز الحالي فقط
+      const currentDeviceId = localStorage.getItem("anixos_device_id");
+      const openSessions = currentDeviceId
+        ? allOpenSessions.filter((s) => s.device_id === currentDeviceId)
+        : [];
 
       if (isMounted) setActiveSessions(openSessions);
 
       const openPieceId = openSessions.find((s) => s.piece_task_id)?.piece_task_id ?? null;
 
       if (openPieceId && isMounted) {
+        // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها
         const openSession = openSessions.find((s) => s.piece_task_id === openPieceId) ?? null;
         const piece = await fetchPieceTaskById(openPieceId);
         if (isMounted && piece) {
@@ -142,6 +149,9 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           await openShiftPieceWork(shiftId, workerId, piece.id, piece.project_id);
         }
       } else if (planning && isMounted) {
+        // ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> عرض أول قطعة من المخطط (إن وجدت)
+        // لكن، لا نُعيّنها كـ "pieceTask" (الواجهة تبدأ فارغة)
+        // سنتركها للمستخدم ليختار.
         setPlanningId(planning.id);
         setOfWorkPackageId(planning.of_work_package_id ?? null);
         if (planning.of_work_package_id) {
@@ -150,20 +160,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         } else {
           setOfWorkPackageInterface(null);
         }
-
-        const [machineData, projectData, pieceData] = await Promise.all([
-          planning.machine_id ? fetchMachineById(planning.machine_id) : Promise.resolve(null),
-          planning.project_id ? fetchProjectById(planning.project_id) : Promise.resolve(null),
-          planning.piece_task_id ? fetchPieceTaskById(planning.piece_task_id) : Promise.resolve(null),
-        ]);
-        if (isMounted) {
-          setMachine(machineData);
-          setProject(projectData);
-          setPieceTask(pieceData);
-          if (pieceData) {
-            await openShiftPieceWork(shiftId, workerId, pieceData.id, pieceData.project_id);
-          }
-        }
+        // لا نُعيّن pieceTask (الواجهة تبدأ فارغة)
       }
 
       if (isMounted) setIsLoadingContext(false);
@@ -173,7 +170,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     return () => { isMounted = false; };
   }, [workerId, shiftId]);
 
-  // ✅ دالة محدثة لاستقبال planningId و ofWorkPackageId كمعاملات اختيارية
   const selectPlanningOption = useCallback(
     async (
       option: PlanningProjectOption,
@@ -181,11 +177,9 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
       overridePlanningId?: string | null,
       overrideOfWorkPackageId?: string | null
     ) => {
-      // البحث عن entry المطابق للقطعة المختارة
       const matchingEntry =
         option.entries.find((e) => e.piece_task_id === piece?.id) ?? option.entries[0] ?? null;
 
-      // استخدام القيم الممررة (overrides) إذا وجدت، وإلا القيم المستخرجة من matchingEntry
       const targetPlanningId = overridePlanningId ?? matchingEntry?.id ?? null;
       const targetOfWpId = overrideOfWorkPackageId ?? matchingEntry?.of_work_package_id ?? null;
 
@@ -244,7 +238,6 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
         setActiveSessions(await fetchOpenSessionsForWorker(workerId));
         await refreshConsumedSeconds();
 
-        // ✅ تحديث session_started_at إذا كانت الجلسة جديدة
         const openSessions = await fetchOpenSessionsForWorker(workerId);
         const currentDeviceId = localStorage.getItem("anixos_device_id");
         const currentSession = openSessions.find(
