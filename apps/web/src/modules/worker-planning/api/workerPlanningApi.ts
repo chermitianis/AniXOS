@@ -1,40 +1,18 @@
 import { supabase } from "../../../lib/supabaseClient";
 import { parsePlanningQrToken } from "../../../shared/utils/planningQrToken";
+import type { KioskPlanningCard } from "../../kiosk/api/kioskApi";
 
 // ============================================================================
-// Client de la PWA Planning opérateur (/planning). Aucune session Supabase
-// Auth ici : l'app ne connaît que { companyId, secret, workerId, workerName }
-// (venant du QR + PIN vérifié), revérifiés par l'Edge Function
-// `worker-planning-access` à chaque appel.
-// Lecture seule stricte — cette API n'écrit jamais rien.
+// Client de la PWA Planning opérateur (/planning).
 // ============================================================================
 
 export interface PlanningSession {
   companyId: string;
   secret: string;
   companyName: string;
-  /** Identifiant de l'opérateur authentifié par son PIN (2FA). */
   workerId: string;
   workerName: string;
   interfaceType: string;
-}
-
-export interface PlanningRow {
-  planning_id: string;
-  machine_id: string;
-  machine_name: string;
-  project_id: string | null;
-  project_name: string | null;
-  piece_task_id: string | null;
-  piece_ref: string | null;
-  quantity: number | null;
-  material: string | null;
-  client_name: string | null;
-  planned_date: string;
-  status: string;
-  worker_id: string;
-  worker_name: string;
-  shift_number: string | null;
 }
 
 const SESSION_KEY = "anixos_planning_session";
@@ -53,7 +31,7 @@ export function savePlanningSession(session: PlanningSession) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
-    /* stockage indisponible — l'opérateur devra rescanner à chaque ouverture */
+    /* ignore */
   }
 }
 
@@ -61,7 +39,7 @@ export function clearPlanningSession() {
   try {
     localStorage.removeItem(SESSION_KEY);
   } catch {
-    /* ignoré */
+    /* ignore */
   }
 }
 
@@ -119,7 +97,7 @@ export async function verifyPlanningToken(
 }
 
 export interface FetchPlanningResult {
-  rows: PlanningRow[];
+  cards: KioskPlanningCard[];
   fetchedAt: string | null;
   fromCache: boolean;
   error?: "invalid_token" | "subscription_required" | "network_error" | "fetch_failed";
@@ -129,20 +107,28 @@ function cacheKey(companyId: string, date: string) {
   return `${CACHE_PREFIX}${companyId}:${date}`;
 }
 
-function readCache(companyId: string, date: string): { rows: PlanningRow[]; fetchedAt: string } | null {
+function readCache(
+  companyId: string,
+  date: string,
+): { cards: KioskPlanningCard[]; fetchedAt: string } | null {
   try {
     const raw = localStorage.getItem(cacheKey(companyId, date));
-    return raw ? (JSON.parse(raw) as { rows: PlanningRow[]; fetchedAt: string }) : null;
+    return raw ? (JSON.parse(raw) as { cards: KioskPlanningCard[]; fetchedAt: string }) : null;
   } catch {
     return null;
   }
 }
 
-function writeCache(companyId: string, date: string, rows: PlanningRow[], fetchedAt: string) {
+function writeCache(
+  companyId: string,
+  date: string,
+  cards: KioskPlanningCard[],
+  fetchedAt: string,
+) {
   try {
-    localStorage.setItem(cacheKey(companyId, date), JSON.stringify({ rows, fetchedAt }));
+    localStorage.setItem(cacheKey(companyId, date), JSON.stringify({ cards, fetchedAt }));
   } catch {
-    /* quota dépassé ou navigation privée */
+    /* quota dépassé */
   }
 }
 
@@ -152,22 +138,28 @@ export async function fetchPlanningForDate(
 ): Promise<FetchPlanningResult> {
   try {
     const { data, error } = await supabase.functions.invoke("worker-planning-access", {
-      body: { action: "fetch", company_id: session.companyId, secret: session.secret, date },
+      body: {
+        action: "fetch",
+        company_id: session.companyId,
+        secret: session.secret,
+        date,
+      },
     });
 
     if (error || !data?.success) {
       const cached = readCache(session.companyId, date);
       if (cached) return { ...cached, fromCache: true };
       const errCode = data?.error === "subscription_required" ? "subscription_required" : "invalid_token";
-      return { rows: [], fetchedAt: null, fromCache: false, error: errCode };
+      return { cards: [], fetchedAt: null, fromCache: false, error: errCode };
     }
 
+    const cards: KioskPlanningCard[] = (data.cards ?? []) as KioskPlanningCard[];
     const fetchedAt = data.server_time ?? new Date().toISOString();
-    writeCache(session.companyId, date, data.rows ?? [], fetchedAt);
-    return { rows: data.rows ?? [], fetchedAt, fromCache: false };
+    writeCache(session.companyId, date, cards, fetchedAt);
+    return { cards, fetchedAt, fromCache: false };
   } catch {
     const cached = readCache(session.companyId, date);
     if (cached) return { ...cached, fromCache: true };
-    return { rows: [], fetchedAt: null, fromCache: false, error: "network_error" };
+    return { cards: [], fetchedAt: null, fromCache: false, error: "network_error" };
   }
 }

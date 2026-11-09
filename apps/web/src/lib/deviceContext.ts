@@ -1,14 +1,14 @@
 // ============================================================================
-// إدارة "دور الجهاز" محلياً: يُقرأ مرة واحدة عند أول تشغيل، ثم يُحفظ بشكل
-// دائم في localStorage (وليس sessionStorage) لأن هذا القرار يجب أن يبقى
-// ثابتاً عبر عمليات إعادة التشغيل، بخلاف جلسة العامل التي تنتهي كل مناوبة.
+// إدارة "دور الجهاز" محلياً + استرداد تلقائي من قاعدة البيانات
 // ============================================================================
 
 import { supabase } from "./supabaseClient";
+import { getOrCreateFingerprint } from "./deviceFingerprint";
 
 export type LocalDeviceMode = "admin" | "kiosk";
 
 const DEVICE_MODE_STORAGE_KEY = "anixos_device_mode";
+const DEVICE_ID_STORAGE_KEY = "anixos_device_id";
 
 export function getLocalDeviceMode(): LocalDeviceMode | null {
   const stored = localStorage.getItem(DEVICE_MODE_STORAGE_KEY);
@@ -19,48 +19,106 @@ function setLocalDeviceMode(mode: LocalDeviceMode) {
   localStorage.setItem(DEVICE_MODE_STORAGE_KEY, mode);
 }
 
-/** يُستخدم فقط لأغراض الاختبار/إعادة الضبط اليدوي من شاشة إعدادات متقدمة لاحقاً */
 export function resetLocalDeviceMode() {
   localStorage.removeItem(DEVICE_MODE_STORAGE_KEY);
+  localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
+}
+
+export function setLocalDeviceId(deviceId: string) {
+  try {
+    localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+  } catch { /* ignore */ }
+}
+
+export function getLocalDeviceId(): string | null {
+  try {
+    return localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function recoverDeviceIdFromFingerprint(
+  companyId: string
+): Promise<string | null> {
+  const fingerprint = getOrCreateFingerprint();
+  if (!fingerprint) return null;
+
+  const { data, error } = await supabase
+    .from("devices")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("device_fingerprint", fingerprint)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  setLocalDeviceId(data.id);
+  return data.id;
+}
+
+// ✅ دالة جديدة لجلب اسم الجهاز من قاعدة البيانات
+export async function fetchDeviceById(
+  deviceId: string
+): Promise<{ id: string; device_name: string; device_mode: "admin" | "kiosk" } | null> {
+  const { data, error } = await supabase
+    .from("devices")
+    .select("id, device_name, device_mode")
+    .eq("id", deviceId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as { id: string; device_name: string; device_mode: "admin" | "kiosk" };
 }
 
 interface RegisterDeviceResult {
   success: boolean;
   message?: string;
+  errorCode?: string;
+  deviceId?: string;
 }
 
-/**
- * يُسجِّل الجهاز الحالي بدوره المختار. يجب أن يُستدعى بينما المستخدم لا يزال
- * مسجَّل دخوله كموظف (StaffAuth)، لأن الدالة تحتاج تلك الجلسة للتحقق من
- * الصلاحية. بعد النجاح في حالة Kiosk، تُستبدَل جلسة المتصفح بجلسة الجهاز
- * الدائمة فوراً (ويخرج الموظف تلقائياً من جلسته الشخصية على هذا الجهاز).
- */
 export async function registerCurrentDevice(
   deviceName: string,
   mode: LocalDeviceMode
 ): Promise<RegisterDeviceResult> {
+  const fingerprint = getOrCreateFingerprint();
+
   const { data, error } = await supabase.functions.invoke("register-device", {
-    body: { device_name: deviceName, device_mode: mode },
+    body: {
+      device_name: deviceName,
+      device_mode: mode,
+      device_fingerprint: fingerprint,
+    },
   });
 
   if (error || !data?.success) {
-    return { success: false, message: data?.message ?? "تعذر تسجيل الجهاز" };
+    let errorCode: string | undefined = data?.error;
+    let errorMessage: string | undefined = data?.message;
+
+    if (error && typeof error === "object" && "context" in error) {
+      try {
+        const ctx = (error as { context: Response }).context;
+        if (ctx && typeof ctx.json === "function") {
+          const body = await ctx.json();
+          errorCode = body?.error ?? errorCode;
+          errorMessage = body?.message ?? errorMessage;
+        }
+      } catch { /* ignore */ }
+    }
+
+    return {
+      success: false,
+      message: errorMessage ?? "تعذر تسجيل الجهاز",
+      errorCode,
+    };
   }
 
-  if (mode === "kiosk" && data.device_credentials) {
-    // استبدال الجلسة: خروج الموظف من جلسته الشخصية، ودخول بحساب الجهاز
-    // الدائم الذي أُنشئ للتو. هذا التبديل يحدث مرة واحدة فقط في حياة الجهاز.
-    await supabase.auth.signOut();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: data.device_credentials.email,
-      password: data.device_credentials.password,
-    });
-
-    if (signInError) {
-      return { success: false, message: "تم تسجيل الجهاز لكن تعذر تفعيل جلسته الدائمة" };
-    }
+  if (data.device?.id) {
+    setLocalDeviceId(data.device.id);
   }
 
   setLocalDeviceMode(mode);
-  return { success: true };
+  return { success: true, deviceId: data.device?.id };
 }

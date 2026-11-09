@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
 } from "recharts";
 import { Clock, TrendingUp, Package, DollarSign, Activity } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
@@ -32,6 +41,16 @@ function formatHours(seconds: number): string {
   return `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
+// Couleurs des charts (HEX direct pour Recharts)
+const CHART_COLORS = {
+  production: "#3b82f6", // blue-500
+  downtime: "#f97316", // orange-500
+  tooltipBg: "#1e293b",
+  tooltipBorder: "#334155",
+  tooltipText: "#f1f5f9",
+  axis: "#94a3b8",
+};
+
 export function OverviewTab({ dateRange }: OverviewTabProps) {
   const { t } = useTranslation();
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -52,7 +71,7 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
         supabase
           .from("work_sessions")
           .select(
-            "id, session_type, started_at, duration_seconds, project_id, worker_id, machine_id, task_types(name), stop_reasons(name)"
+            "id, session_type, started_at, duration_seconds, project_id, worker_id, machine_id, task_types(name), stop_reasons(name)",
           )
           .gte("started_at", fromISO)
           .lte("started_at", toISOStr)
@@ -77,7 +96,8 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
       setProjectsCount(projects.length);
       setCompletedCount(projects.filter((p) => p.status === "completed").length);
 
-      const inv = (invoicesRes.data as { invoice_items: { quantity: number; unit_price: number }[] }[] | null) ?? [];
+      const inv =
+        (invoicesRes.data as { invoice_items: { quantity: number; unit_price: number }[] }[] | null) ?? [];
       let total = 0;
       for (const i of inv) {
         for (const item of i.invoice_items ?? []) {
@@ -96,12 +116,18 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
   }, [dateRange.from, dateRange.to]);
 
   const totalProduction = useMemo(
-    () => sessions.filter((s) => s.session_type === "production").reduce((s, x) => s + (x.duration_seconds ?? 0), 0),
-    [sessions]
+    () =>
+      sessions
+        .filter((s) => s.session_type === "production")
+        .reduce((s, x) => s + (x.duration_seconds ?? 0), 0),
+    [sessions],
   );
   const totalDowntime = useMemo(
-    () => sessions.filter((s) => s.session_type === "downtime").reduce((s, x) => s + (x.duration_seconds ?? 0), 0),
-    [sessions]
+    () =>
+      sessions
+        .filter((s) => s.session_type === "downtime")
+        .reduce((s, x) => s + (x.duration_seconds ?? 0), 0),
+    [sessions],
   );
   const successRate = useMemo(() => {
     if (projectsCount === 0) return 0;
@@ -110,8 +136,16 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
 
   const pieData = useMemo(() => {
     return [
-      { name: t("reports.production"), value: Math.round(totalProduction / 60), color: "#3b82f6" },
-      { name: t("reports.downtime"), value: Math.round(totalDowntime / 60), color: "#f97316" },
+      {
+        name: t("reports.production"),
+        value: Math.round(totalProduction / 60),
+        color: CHART_COLORS.production,
+      },
+      {
+        name: t("reports.downtime"),
+        value: Math.round(totalDowntime / 60),
+        color: CHART_COLORS.downtime,
+      },
     ].filter((d) => d.value > 0);
   }, [totalProduction, totalDowntime, t]);
 
@@ -134,12 +168,18 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
   }, [sessions]);
 
   if (isLoading) {
-    return <div className="py-12 text-center text-sm text-slate-400">{t("common.loading")}</div>;
+    return (
+      <div className="py-12 text-center text-sm" style={{ color: "var(--text-tertiary)" }}>
+        {t("common.loading")}
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4">
-      {/* KPI Cards — 2 cols mobile, 4 desktop */}
+      {/* ============================================================ */}
+      {/* KPI ROW                                                      */}
+      {/* ============================================================ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           icon={Clock}
@@ -171,7 +211,9 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
         />
       </div>
 
-      {/* Charts */}
+      {/* ============================================================ */}
+      {/* CHARTS                                                       */}
+      {/* ============================================================ */}
       <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <ChartCard title={t("reports.charts.productionOverTime")}>
@@ -180,15 +222,40 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={dailyBars} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10, fill: CHART_COLORS.axis }}
+                    stroke={CHART_COLORS.axis}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: CHART_COLORS.axis }}
+                    stroke={CHART_COLORS.axis}
+                  />
                   <Tooltip
-                    contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                    contentStyle={{
+                      fontSize: 12,
+                      borderRadius: 8,
+                      backgroundColor: CHART_COLORS.tooltipBg,
+                      border: `1px solid ${CHART_COLORS.tooltipBorder}`,
+                      color: CHART_COLORS.tooltipText,
+                    }}
                     formatter={(value: number) => `${value} ${t("setup.hoursShort")}`}
                   />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="production" stackId="a" fill="#3b82f6" name={t("reports.production")} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="downtime" stackId="a" fill="#f97316" name={t("reports.downtime")} radius={[4, 4, 0, 0]} />
+                  <Legend wrapperStyle={{ fontSize: 11, color: CHART_COLORS.axis }} />
+                  <Bar
+                    dataKey="production"
+                    stackId="a"
+                    fill={CHART_COLORS.production}
+                    name={t("reports.production")}
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="downtime"
+                    stackId="a"
+                    fill={CHART_COLORS.downtime}
+                    name={t("reports.downtime")}
+                    radius={[4, 4, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -201,16 +268,29 @@ export function OverviewTab({ dateRange }: OverviewTabProps) {
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={3}>
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={45}
+                  outerRadius={75}
+                  paddingAngle={3}
+                >
                   {pieData.map((entry, i) => (
                     <Cell key={i} fill={entry.color} />
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                  contentStyle={{
+                    fontSize: 12,
+                    borderRadius: 8,
+                    backgroundColor: CHART_COLORS.tooltipBg,
+                    border: `1px solid ${CHART_COLORS.tooltipBorder}`,
+                    color: CHART_COLORS.tooltipText,
+                  }}
                   formatter={(value: number) => `${value} min`}
                 />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: CHART_COLORS.axis }} />
               </PieChart>
             </ResponsiveContainer>
           )}

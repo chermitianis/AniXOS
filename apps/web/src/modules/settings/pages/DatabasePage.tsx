@@ -353,39 +353,48 @@ export function DatabasePage() {
     if (!companyId) return;
     const toDelete = resetCategories.filter((table) => resetSelections[table]);
     if (toDelete.length === 0) return;
+    
     setIsResetting(true);
     setResetMessage(null);
+
     try {
-      for (const table of DELETE_ORDER) {
-        if (!toDelete.includes(table)) continue;
-        const { error } = await supabase.from(table).delete().eq("company_id", companyId);
-        if (error) {
-          console.warn(`[reset] ${table}:`, error.message);
-        }
+      console.log("🔥 [Reset] Starting reset for:", toDelete);
+
+      // استدعاء الدالة RPC
+      const { data, error } = await supabase.rpc("reset_company_data", {
+        p_company_id: companyId,
+        p_tables: toDelete,
+      });
+
+      if (error) {
+        console.error("❌ [Reset] RPC Error:", error);
+        throw error;
       }
-      // Vider les caches Dexie pour éviter toute réapparition de données locales
+
+      console.log("✅ [Reset] RPC Success:", data);
+
+      // مسح الكاش المحلي
       await Promise.all([
-        localDb.workers.clear(),
-        localDb.machines.clear(),
-        localDb.projects.clear(),
-        localDb.piecesTasks.clear(),
-        localDb.taskTypes.clear(),
-        localDb.stopReasons.clear(),
-        localDb.planning.clear(),
-        localDb.workShifts.clear(),
-        localDb.shiftPieceWork.clear(),
-        localDb.workSessions.clear(),
-        localDb.workSessionCorrections.clear(),
-        localDb.activityLog.clear(),
-        localDb.pieceHandoffs.clear(),
-        localDb.workshopReclamations.clear(),
-        localDb.machineTools.clear(),
+        localDb.workers.clear(), localDb.machines.clear(), localDb.projects.clear(),
+        localDb.piecesTasks.clear(), localDb.taskTypes.clear(), localDb.stopReasons.clear(),
+        localDb.planning.clear(), localDb.workShifts.clear(), localDb.shiftPieceWork.clear(),
+        localDb.workSessions.clear(), localDb.workSessionCorrections.clear(),
+        localDb.activityLog.clear(), localDb.pieceHandoffs.clear(),
+        localDb.workshopReclamations.clear(), localDb.machineTools.clear(),
         localDb.workerCredentials.clear(),
       ]);
+      
+      console.log("✅ [Reset] Local cache cleared");
+
       setResetMessage(t("database.resetSuccess"));
       setResetSelections({});
+      
+      // 🔥 التحديث القسري (بدون كاش)
+      console.log("🔄 [Reset] Reloading page...");
+      window.location.href = window.location.href; 
+
     } catch (err) {
-      console.error("[reset]", err);
+      console.error("❌ [Reset] Failed:", err);
       setResetMessage(t("database.resetError"));
     } finally {
       setIsResetting(false);

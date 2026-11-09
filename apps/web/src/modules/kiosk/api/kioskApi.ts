@@ -1,14 +1,5 @@
 // ============================================================================
 // kioskApi: طبقة وصول موحدة لبيانات الكشك (أونلاين أولاً، كاش أوفلاين تلقائياً)
-// كل دالة هنا: تحاول أونلاين → تُحدِّث الكاش المحلي عند النجاح → أو تقرأ من
-// الكاش مباشرة عند الانقطاع.
-//
-// إضافات 2026-10-02 :
-//   - Correction: planning.status utilise 'done' (contrainte DB).
-//   - fetchConsumedSecondsForPiece: temps consommé pour calcul du temps restant.
-//   - fetchWorkerPlanningQueue: tri par sequence_order.
-//   - fetchAllProjectsForWorker / searchPiecesInCompany / createEmergencyPieceTask.
-//   - fetchDayPlanningForKiosk: vue planning complète (jour) pour le Kiosk.
 // ============================================================================
 
 import { supabase } from "../../../lib/supabaseClient";
@@ -216,7 +207,7 @@ export async function fetchActiveMachinesList(): Promise<Machine[]> {
 }
 
 // ============================================================================
-// WorkShift (حصة العامل)
+// WorkShift (الوردية)
 // ============================================================================
 export class WorkerAlreadyConnectedError extends Error {
   constructor() {
@@ -225,16 +216,23 @@ export class WorkerAlreadyConnectedError extends Error {
   }
 }
 
-export async function startWorkerShift(workerId: string, deviceId: string | null): Promise<WorkShift> {
+/**
+ * تبدأ وردية للعامل (أو تعيد الوردية المفتوحة إن وجدت).
+ */
+export async function startWorkerShift(workerId: string): Promise<WorkShift> {
   const companyId = await resolveCompanyId();
-  if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
+  if (!companyId) throw new Error("Impossible de déterminer l'entreprise de l'appareil actuel");
 
+  // ✅ البحث عن وردية مفتوحة للعامل
   const localExisting = await localDb.workShifts
     .where("worker_id")
     .equals(workerId)
     .filter((shift) => shift.ended_at === null)
     .first();
-  if (localExisting) throw new WorkerAlreadyConnectedError();
+
+  if (localExisting) {
+    return localExisting;
+  }
 
   if (connectivityMonitor.getStatus()) {
     const { data: existing, error: existingError } = await supabase
@@ -244,25 +242,34 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
       .is("ended_at", null)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (existing) throw new WorkerAlreadyConnectedError();
+    if (existing) {
+      await localDb.workShifts.put(existing as WorkShift);
+      return existing as WorkShift;
+    }
   }
 
   const now = new Date().toISOString();
+  
   const shift: WorkShift = {
     id: crypto.randomUUID(),
     company_id: companyId,
     worker_id: workerId,
-    device_id: deviceId,
     started_at: now,
     ended_at: null,
     source: connectivityMonitor.getStatus() ? "online" : "offline_sync",
     created_at: now,
+    is_force_closed: false,
+    extended_at: null,
+    closed_by_staff_id: null,
+    close_reason: null,
   };
 
   await localDb.workShifts.put(shift);
   if (connectivityMonitor.getStatus()) {
     const { error } = await supabase.from("work_shifts").insert(shift as never);
     if (!error) return shift;
+    
+    // ✅ إذا حدث Conflict (23505)، فهذا يعني أن وردية أخرى أُنشئت في نفس اللحظة
     if (error.code === "23505") {
       const { data: winner } = await supabase
         .from("work_shifts")
@@ -271,8 +278,8 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
         .is("ended_at", null)
         .maybeSingle();
       if (winner) {
-        await localDb.workShifts.delete(shift.id);
-        throw new WorkerAlreadyConnectedError();
+        await localDb.workShifts.put(winner as WorkShift);
+        return winner as WorkShift;
       }
     }
   }
@@ -280,35 +287,91 @@ export async function startWorkerShift(workerId: string, deviceId: string | null
   return shift;
 }
 
-export async function endWorkerShift(shiftId: string, workerId: string): Promise<void> {
-  await closeAllOpenSessionsForWorker(workerId);
+/**
+ * ✅ إغلاق الوردية (إذا لم تكن هناك جلسات أخرى مفتوحة).
+ * ✅ إغلاق الجلسات على الجهاز الحالي فقط.
+ */
+export async function endWorkerShift(
+  shiftId: string,
+  workerId: string,
+  options?: { endShift?: boolean }
+): Promise<void> {
   const now = new Date().toISOString();
-  await closeAllOpenShiftPieceWorkForShift(shiftId, now);
+  const currentDeviceId = localStorage.getItem("anixos_device_id");
 
-  const cached = await localDb.workShifts.get(shiftId);
-  const closedShift: WorkShift = cached
-    ? { ...cached, ended_at: now }
-    : {
-        id: shiftId,
-        company_id: (await resolveCompanyId()) ?? "",
-        worker_id: workerId,
-        device_id: null,
-        started_at: now,
-        ended_at: now,
-        source: "online",
-        created_at: now,
-      };
+  // ✅ إغلاق الجلسات المفتوحة على الجهاز الحالي فقط
+  if (currentDeviceId) {
+    const currentSessions = await localDb.workSessions
+      .where("shift_id")
+      .equals(shiftId)
+      .filter((s) => s.ended_at === null && !s.voided_at && s.device_id === currentDeviceId)
+      .toArray();
 
-  await localDb.workShifts.put(closedShift);
-  if (connectivityMonitor.getStatus()) {
-    const { error } = await supabase.from("work_shifts").update({ ended_at: now }).eq("id", shiftId);
-    if (!error) {
-      await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion");
-      return;
+    for (const session of currentSessions) {
+      await closeSession(session);
     }
   }
-  await enqueueSync("work_shifts", "update", closedShift as unknown as Record<string, unknown>);
-  await logActivity(workerId, null, null, "shift_end", "Fin de session — déconnexion (hors ligne)");
+
+  // ✅ إذا طلب العامل إنهاء الوردية (endShift = true)، نغلق الوردية
+  if (options?.endShift) {
+    // ✅ التحقق من عدم وجود جلسات أخرى مفتوحة (على أجهزة أخرى)
+    const otherOpenSessions = await localDb.workSessions
+      .where("shift_id")
+      .equals(shiftId)
+      .filter((s) => s.ended_at === null && !s.voided_at)
+      .toArray();
+
+    if (otherOpenSessions.length > 0) {
+      return; // لا تزال هناك جلسات مفتوحة -> لا نغلق الوردية
+    }
+
+    // ✅ إغلاق الوردية
+    const cached = await localDb.workShifts.get(shiftId);
+    const closedShift: WorkShift = cached
+      ? { ...cached, ended_at: now }
+      : {
+          id: shiftId,
+          company_id: (await resolveCompanyId()) ?? "",
+          worker_id: workerId,
+          started_at: now,
+          ended_at: now,
+          source: "online",
+          created_at: now,
+          is_force_closed: false,
+          extended_at: null,
+          closed_by_staff_id: null,
+          close_reason: null,
+        };
+
+    await localDb.workShifts.put(closedShift);
+    if (connectivityMonitor.getStatus()) {
+      const { error } = await supabase.from("work_shifts").update({ ended_at: now }).eq("id", shiftId);
+      if (!error) {
+        await logActivity(workerId, null, null, "shift_end", "Fin de poste");
+        return;
+      }
+    }
+    await enqueueSync("work_shifts", "update", closedShift as unknown as Record<string, unknown>);
+    await logActivity(workerId, null, null, "shift_end", "Fin de poste (hors ligne)");
+  }
+}
+
+export async function extendWorkerShift(shiftId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  if (connectivityMonitor.getStatus()) {
+    const { error } = await supabase
+      .from("work_shifts")
+      .update({ extended_at: now })
+      .eq("id", shiftId)
+      .is("ended_at", null);
+    if (!error) return;
+  }
+
+  await enqueueSync("work_shifts", "update", {
+    id: shiftId,
+    extended_at: now,
+  } as unknown as Record<string, unknown>);
 }
 
 export async function fetchOpenShiftForWorker(workerId: string): Promise<WorkShift | null> {
@@ -483,7 +546,7 @@ export async function switchShiftPiece(
 }
 
 // ============================================================================
-// WorkSession (الأحداث)
+// WorkSession (الجلسات)
 // ============================================================================
 
 interface ToggleEventInput {
@@ -523,9 +586,36 @@ export async function toggleWorkerEvent(input: ToggleEventInput): Promise<WorkSe
   return startSession(input);
 }
 
+/**
+ * ✅ تبدأ جلسة جديدة مرتبطة بالوردية، الجهاز، الآلة، والقطعة.
+ */
 async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   const companyId = await resolveCompanyId();
-  if (!companyId) throw new Error("تعذر تحديد شركة الجهاز الحالي");
+  if (!companyId) throw new Error("Impossible de déterminer l'entreprise de l'appareil actuel");
+
+  // ✅ جلب pieceTaskId من planning إذا لم يُمرر
+  let finalPieceTaskId = input.pieceTaskId;
+  if (!finalPieceTaskId && input.planningId) {
+    if (connectivityMonitor.getStatus()) {
+      const { data } = await supabase
+        .from("planning")
+        .select("piece_task_id")
+        .eq("id", input.planningId)
+        .maybeSingle();
+      finalPieceTaskId = (data as { piece_task_id: string | null } | null)?.piece_task_id ?? null;
+    } else {
+      const planningEntry = await localDb.planning.get(input.planningId);
+      finalPieceTaskId = planningEntry?.piece_task_id ?? null;
+    }
+  }
+
+  // ✅ جلب deviceId من localStorage
+  let currentDeviceId: string | null = null;
+  try {
+    currentDeviceId = localStorage.getItem("anixos_device_id");
+  } catch {
+    // ...
+  }
 
   const now = new Date().toISOString();
   const newSession: WorkSession = {
@@ -533,9 +623,10 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
     company_id: companyId,
     worker_id: input.workerId,
     shift_id: input.shiftId,
+    device_id: currentDeviceId,
     machine_id: input.machineId,
     project_id: input.projectId,
-    piece_task_id: input.pieceTaskId,
+    piece_task_id: finalPieceTaskId,
     planning_id: input.planningId,
     of_work_package_id: input.ofWorkPackageId,
     session_type: input.sessionType,
@@ -555,8 +646,19 @@ async function startSession(input: ToggleEventInput): Promise<WorkSession> {
   await localDb.workSessions.put(newSession);
   await persistSessionChange(newSession, "insert");
 
-  if (input.sessionType === "production" && input.pieceTaskId) {
-    await updatePieceTaskStatusIfPending(input.pieceTaskId);
+  if (input.sessionType === "production" && finalPieceTaskId) {
+    await updatePieceTaskStatusIfPending(finalPieceTaskId);
+  }
+
+  if (finalPieceTaskId) {
+    await logActivity(
+      input.workerId,
+      newSession.id,
+      input.machineId,
+      "piece_started",
+      "Début du travail sur la pièce",
+      { piece_task_id: finalPieceTaskId, project_id: input.projectId }
+    );
   }
 
   return newSession;
@@ -616,6 +718,7 @@ async function logActivity(
   machineId: string | null,
   eventType: string,
   eventLabel: string,
+  metadata: Record<string, unknown> = {},
 ): Promise<void> {
   const companyId = await resolveCompanyId();
   const entry = {
@@ -626,7 +729,7 @@ async function logActivity(
     machine_id: machineId,
     event_type: eventType,
     event_label: eventLabel,
-    metadata: {},
+    metadata: metadata,
     event_time: new Date().toISOString(),
   };
 
@@ -648,106 +751,149 @@ export async function markPieceTaskComplete(
   shiftId: string | null,
   ofWorkPackageId: string | null,
 ): Promise<void> {
-  const cachedPiece = await localDb.piecesTasks.get(pieceTaskId);
-  if (cachedPiece?.status === "completed") return;
-
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await closeShiftPieceWork(shiftId, pieceTaskId);
 
-  if (!connectivityMonitor.getStatus()) {
-    if (cachedPiece) {
-      await localDb.piecesTasks.put({ ...cachedPiece, status: "completed", production_status: "completed" });
-      await enqueueSync("pieces_tasks", "update", {
-        ...cachedPiece,
-        status: "completed",
-        production_status: "completed",
-      } as unknown as Record<string, unknown>);
-    }
-    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓ (hors ligne)");
+  const nowIso = new Date().toISOString();
+  const companyId = await resolveCompanyId();
+
+  const { data: pieceData } = await supabase
+    .from("pieces_tasks")
+    .select("id, project_id, manufacturing_order_id, status, production_status")
+    .eq("id", pieceTaskId)
+    .eq("company_id", companyId ?? "")
+    .maybeSingle();
+
+  if (!pieceData) return;
+
+  const manufacturingOrderId = pieceData.manufacturing_order_id;
+
+  if (!manufacturingOrderId) {
+    await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
+    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
     return;
   }
 
-  const nowIso = new Date().toISOString();
+  const { data: wps } = await supabase
+    .from("of_work_packages")
+    .select("id, status, interface_type")
+    .eq("company_id", companyId ?? "")
+    .eq("manufacturing_order_id", manufacturingOrderId);
 
-  if (ofWorkPackageId) {
-    await supabase
-      .from("of_work_packages")
-      .update({
-        status: "completed",
-        completed_at: nowIso,
-        completed_by_worker_id: workerId,
-      })
-      .eq("id", ofWorkPackageId);
+  const packages = wps ?? [];
+
+  if (packages.length === 0) {
+    await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
+    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
+    return;
   }
 
-  let allWpDone = false;
-  let ofId: string | null = null;
-  if (ofWorkPackageId) {
-    const { data: wpRow } = await supabase
-      .from("of_work_packages")
-      .select("manufacturing_order_id")
-      .eq("id", ofWorkPackageId)
+  let targetWpId = ofWorkPackageId;
+
+  if (!targetWpId) {
+    const { data: worker } = await supabase
+      .from("workers")
+      .select("interface_type")
+      .eq("id", workerId)
+      .eq("company_id", companyId ?? "")
       .maybeSingle();
-    ofId = (wpRow as { manufacturing_order_id: string | null } | null)?.manufacturing_order_id ?? null;
 
-    if (ofId) {
-      const { data: siblings } = await supabase
-        .from("of_work_packages")
-        .select("status")
-        .eq("manufacturing_order_id", ofId);
-      const all = (siblings ?? []) as { status: string }[];
-      allWpDone = all.length > 0 && all.every((w) => w.status === "completed");
-
-      if (allWpDone) {
-        await supabase
-          .from("manufacturing_orders")
-          .update({ status: "completed", completed_at: nowIso })
-          .eq("id", ofId);
-      } else {
-        await supabase
-          .from("manufacturing_orders")
-          .update({ status: "in_progress" })
-          .eq("id", ofId);
+    if (worker?.interface_type) {
+      const matchingWp = packages.find((wp) => wp.interface_type === worker.interface_type);
+      if (matchingWp) {
+        targetWpId = matchingWp.id;
       }
     }
   }
 
+  if (targetWpId) {
+    await supabase
+      .from("of_work_packages")
+      .update({ status: "completed", completed_at: nowIso })
+      .eq("id", targetWpId)
+      .eq("company_id", companyId ?? "");
+
+    await supabase
+      .from("planning")
+      .update({ status: "done", completed_at: nowIso })
+      .eq("of_work_package_id", targetWpId)
+      .eq("worker_id", workerId)
+      .eq("company_id", companyId ?? "")
+      .in("status", ["scheduled", "in_progress"]);
+  } else {
+    console.warn(`[markPieceTaskComplete] Could not determine target work package for piece ${pieceTaskId}.`);
+  }
+
+  const { data: updatedWps } = await supabase
+    .from("of_work_packages")
+    .select("id, status")
+    .eq("company_id", companyId ?? "")
+    .eq("manufacturing_order_id", manufacturingOrderId);
+
+  const allPackagesCompleted = (updatedWps ?? []).every((wp) => wp.status === "completed");
+
+  if (allPackagesCompleted) {
+    await completePiece(pieceTaskId, workerId, companyId, pieceData.project_id, nowIso);
+    await logActivity(workerId, null, null, "piece_completed", "Pièce terminée ✓", { piece_task_id: pieceTaskId });
+  } else {
+    console.log(`[markPieceTaskComplete] Piece "${pieceTaskId}" has incomplete packages. Keeping status as in_progress.`);
+    await logActivity(workerId, null, null, "piece_completed", "Session terminée (en attente d'autres packages)", { piece_task_id: pieceTaskId });
+  }
+}
+
+async function completePiece(
+  pieceTaskId: string,
+  workerId: string,
+  companyId: string | null,
+  projectId: string | null,
+  nowIso: string,
+): Promise<void> {
   await supabase
     .from("pieces_tasks")
-    .update({
-      status: allWpDone ? "completed" : "in_progress",
-      production_status: allWpDone ? "completed" : "partially_done",
-      completed_at: allWpDone ? nowIso : null,
-    })
-    .eq("id", pieceTaskId);
+    .update({ status: "completed", production_status: "completed", completed_at: nowIso })
+    .eq("id", pieceTaskId)
+    .eq("company_id", companyId ?? "");
 
   await localDb.piecesTasks.update(pieceTaskId, {
-    status: allWpDone ? "completed" : "in_progress",
-    production_status: allWpDone ? "completed" : "partially_done",
-    completed_at: allWpDone ? nowIso : null,
+    status: "completed",
+    production_status: "completed",
+    completed_at: nowIso,
   });
 
   await supabase
     .from("planning")
-    .update({ status: "done" })
+    .update({ status: "done", completed_at: nowIso })
     .eq("piece_task_id", pieceTaskId)
     .eq("worker_id", workerId)
-    .eq("company_id", (await resolveCompanyId()) ?? "")
+    .eq("company_id", companyId ?? "")
     .in("status", ["scheduled", "in_progress"]);
 
-  await logActivity(
-    workerId,
-    null,
-    null,
-    allWpDone ? "piece_completed" : "package_completed",
-    allWpDone ? "Pièce terminée ✓" : "Paquet terminé — en attente des autres paquets",
-  );
+  if (projectId) {
+    const { data: siblingPieces } = await supabase
+      .from("pieces_tasks")
+      .select("status")
+      .eq("project_id", projectId)
+      .eq("company_id", companyId ?? "");
+
+    if (siblingPieces && siblingPieces.length > 0) {
+      const allPiecesDone = siblingPieces.every((p) => p.status === "completed");
+      if (allPiecesDone) {
+        await supabase
+          .from("projects")
+          .update({ status: "completed" })
+          .eq("id", projectId)
+          .eq("company_id", companyId ?? "");
+
+        await localDb.projects.update(projectId, { status: "completed" });
+      }
+    }
+  }
 }
 
 export async function pauseWorkOnPiece(pieceTaskId: string, workerId: string): Promise<void> {
   await closeOpenSessionsForWorkerPiece(workerId, pieceTaskId);
   await updatePieceTaskStatusIfPending(pieceTaskId);
-  await logActivity(workerId, null, null, "piece_paused", "Mise en pause — travail toujours en cours");
+  await logActivity(workerId, null, null, "piece_paused", "Mise en pause — travail toujours en cours", { piece_task_id: pieceTaskId });
 }
 
 export async function updatePiecePhase(pieceTaskId: string, phase: number): Promise<void> {
@@ -1059,24 +1205,19 @@ export async function fetchOfWorkPackageById(
 
 export async function fetchConsumedSecondsForPiece(pieceTaskId: string): Promise<number> {
   const nowMs = Date.now();
+  const companyId = await resolveCompanyId();
+  if (!companyId) return 0;
 
   if (connectivityMonitor.getStatus()) {
-    const { data, error } = await supabase
+    const { data: sessions, error } = await supabase
       .from("work_sessions")
       .select("started_at, ended_at, duration_seconds, voided_at")
       .eq("piece_task_id", pieceTaskId)
       .is("voided_at", null);
 
-    if (!error && data) {
-      const rows = data as Array<{
-        started_at: string;
-        ended_at: string | null;
-        duration_seconds: number | null;
-        voided_at: string | null;
-      }>;
+    if (!error && sessions) {
       let total = 0;
-      for (const r of rows) {
-        if (r.voided_at) continue;
+      for (const r of sessions as any[]) {
         if (r.ended_at) {
           total += r.duration_seconds ?? Math.round((new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()) / 1000);
         } else {
@@ -1197,7 +1338,7 @@ export async function createEmergencyPieceTask(
       status: "in_progress",
       production_status: "in_progress",
       costing_status: "non_etudie",
-      technical_status: "en_attente",
+      technical_status: "pending",
       technical_notes: input.technicalNotes,
       sequence_order: 0,
       created_at: now,
@@ -1330,7 +1471,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
   if (!companyId) return [];
   if (!connectivityMonitor.getStatus()) return [];
 
-  // 1. Planning + joins
   const { data, error } = await supabase
     .from("planning")
     .select(
@@ -1353,7 +1493,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     return [];
   }
 
-  // 2. Cell workers pour la même date
   const { data: cwData } = await supabase
     .from("planning_cell_workers")
     .select("machine_id, shift_number, worker_id")
@@ -1372,7 +1511,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     cellWorkerIds.add(cw.worker_id);
   }
 
-  // 3. Noms des cell workers
   const workersMap = new Map<string, string>();
   for (const r of data as unknown as Array<{ workers: { id?: string; full_name?: string } | null }>) {
     if (r.workers?.id && r.workers.full_name) {
@@ -1390,7 +1528,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     }
   }
 
-  // 4. Opérations de chiffrage pour toutes les pièces du jour
   const pieceIds = Array.from(
     new Set(
       (data as unknown as Array<{ piece_task_id: string | null }>)
@@ -1419,7 +1556,6 @@ export async function fetchDayPlanningForKiosk(date: string): Promise<KioskPlann
     }
   }
 
-  // 5. Construire les cartes
   const rows = data as unknown as Array<{
     id: string;
     machine_id: string | null;

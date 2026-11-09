@@ -3,6 +3,7 @@ import { AppRouter } from "./app/AppRouter";
 import { WorkerPlanningApp } from "./modules/worker-planning/pages/WorkerPlanningApp";
 import { startAutoSync } from "./lib/syncEngine";
 import { supabase } from "./lib/supabaseClient";
+import { OdooAutoSync } from "./modules/settings/components/OdooAutoSync";
 
 // La PWA "Planning opérateur" (Mission 1) vit sur sa propre route /planning,
 // totalement hors du flux Admin/Kiosk/StaffAuth : ni session Supabase Auth,
@@ -23,7 +24,6 @@ function AppWithSync() {
   useEffect(() => {
     let stopSync: (() => void) | null = null;
 
-    // استماع لتغيرات الجلسة وتفعيل طابور المزامنة العام فقط عند وجود جلسة نشطة
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
         if (!stopSync) stopSync = startAutoSync();
@@ -41,7 +41,12 @@ function AppWithSync() {
     };
   }, []);
 
-  return <AppRouter />;
+  return (
+    <>
+      <OdooAutoSync /> {/* 👈 تمت إضافة هذا السطر هنا */}
+      <AppRouter />
+    </>
+  );
 }
 
 export default App;

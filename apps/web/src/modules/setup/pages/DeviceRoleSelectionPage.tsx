@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { Monitor, Factory, CheckCircle2 } from "lucide-react";
+import { Monitor, Factory, CheckCircle2, AlertCircle } from "lucide-react";
 import { registerCurrentDevice } from "../../../lib/deviceContext";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 
@@ -15,27 +15,34 @@ export function DeviceRoleSelectionPage({ onRegistered }: DeviceRoleSelectionPag
   const [selectedMode, setSelectedMode] = useState<"admin" | "kiosk" | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   async function handleConfirm() {
     if (!selectedMode || !deviceName.trim()) return;
     setIsSubmitting(true);
     setError(null);
+    setNameError(null);
 
     const result = await registerCurrentDevice(deviceName.trim(), selectedMode);
 
     if (!result.success) {
-      setError(result.message ?? "Erreur");
+      // ✅ إذا كان الخطأ هو تكرار الاسم، نعرضه تحت الحقل
+      if (result.errorCode === "name_taken") {
+        setNameError(result.message ?? "Ce nom existe déjà.");
+      } else {
+        setError(result.message ?? "Erreur");
+      }
       setIsSubmitting(false);
       return;
     }
 
     onRegistered();
-    // إعادة تحميل كاملة إجبارية: القرار بين واجهة الكشك والواجهة الإدارية
-    // يُتَّخذ في AppRouter (المكوّن الأب)، وهو لا يُعاد تقييمه تلقائياً عند
-    // تغيّر الحالة داخل مكوّن ابن مثل هذه الصفحة. إعادة التحميل تضمن قراءة
-    // device_mode المُحدَّث للتو من localStorage من الصفر، وهذا مقبول تماماً
-    // لأن هذا إجراء لمرة واحدة فقط في حياة الجهاز (وليس تدفقاً متكرراً).
     window.location.reload();
+  }
+
+  function handleNameChange(value: string) {
+    setDeviceName(value);
+    if (nameError) setNameError(null); // مسح الخطأ عند التعديل
   }
 
   return (
@@ -86,19 +93,33 @@ export function DeviceRoleSelectionPage({ onRegistered }: DeviceRoleSelectionPag
             <label className="mb-1 block text-sm font-semibold text-slate-600">{t("setup.deviceNameLabel")}</label>
             <input
               value={deviceName}
-              onChange={(e) => setDeviceName(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
               placeholder={selectedMode === "kiosk" ? t("setup.kioskNamePlaceholder") : t("setup.adminNamePlaceholder")}
-              className="mb-4 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-50"
+              className={`w-full rounded-xl border px-4 py-2.5 focus:bg-white focus:outline-none focus:ring-4 ${
+                nameError
+                  ? "border-red-400 bg-red-50 focus:border-red-500 focus:ring-red-100"
+                  : "border-slate-200 bg-slate-50 focus:border-indigo-400 focus:ring-indigo-50"
+              }`}
             />
+            {nameError && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-red-600">
+                <AlertCircle size={14} />
+                {nameError}
+              </div>
+            )}
           </>
         )}
 
-        {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600">{error}</div>}
+        {error && (
+          <div className="mb-4 mt-3 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600">
+            {error}
+          </div>
+        )}
 
         <button
           onClick={handleConfirm}
-          disabled={!selectedMode || !deviceName.trim() || isSubmitting}
-          className="w-full rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 py-3 font-bold text-white shadow-lg shadow-indigo-200 transition-transform active:scale-[0.98] disabled:opacity-40"
+          disabled={!selectedMode || !deviceName.trim() || isSubmitting || !!nameError}
+          className="mt-4 w-full rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 py-3 font-bold text-white shadow-lg shadow-indigo-200 transition-transform active:scale-[0.98] disabled:opacity-40"
         >
           {isSubmitting ? t("setup.saving") : t("setup.confirmButton")}
         </button>

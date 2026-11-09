@@ -292,14 +292,12 @@ export function ProjectsAdminPage() {
     if (!companyId) return;
     setBusyPieceId(piece.id);
     try {
-      // Passer la pièce en 'en_attente' (état "en étude" pour le chiffrage)
       await supabase
         .from("pieces_tasks")
         .update({ costing_status: "en_attente" } as never)
         .eq("id", piece.id)
         .eq("company_id", companyId);
 
-      // Créer une nomenclature si elle n'existe pas encore
       const { data: existingNom } = await supabase
         .from("nomenclatures")
         .select("id")
@@ -383,10 +381,33 @@ export function ProjectsAdminPage() {
         .eq("company_id", companyId)
         .maybeSingle();
       const projectCode = (proj as { code: string | null } | null)?.code ?? "PRJ";
+      
+      // 1. جلب القطع الموجودة مسبقاً في المشروع
       const currentPieces = piecesByProject[pieceProjectId] ?? [];
+      const existingNames = new Set(
+        currentPieces.map((p) => p.name.trim().toLowerCase())
+      );
+
+      // 2. تصفية القطع الجديدة: تجاهل أي قطعة تحمل نفس الاسم
+      const newDrafts = pieceDrafts.filter(
+        (p) => !existingNames.has(p.name.trim().toLowerCase())
+      );
+
+      // 3. إذا كانت كل القطع مكررة، نعرض رسالة تنبيه
+      if (newDrafts.length === 0) {
+        alert("القطع التالية موجودة مسبقاً في هذا المشروع ولا يمكن إضافتها مرة أخرى.");
+        setIsImportingPieces(false);
+        return;
+      }
+
+      // 4. إذا كانت بعض القطع مكررة، نعرض رسالة تنبيه ثم نضيف الجديدة فقط
+      if (newDrafts.length < pieceDrafts.length) {
+        alert(`تم تجاهل بعض القطع لأنها موجودة مسبقاً. سيتم إضافة ${newDrafts.length} قطعة جديدة فقط.`);
+      }
+
       const offset = currentPieces.length;
 
-      const rows = pieceDrafts.map((p, i) => ({
+      const rows = newDrafts.map((p, i) => ({
         company_id: companyId,
         project_id: pieceProjectId,
         name: p.name.trim(),
@@ -396,7 +417,18 @@ export function ProjectsAdminPage() {
         production_status: "not_sent",
       }));
 
-      await supabase.from("pieces_tasks").insert(rows);
+      const { error } = await supabase.from("pieces_tasks").insert(rows);
+      
+      if (error) {
+        if (error.code === "23505") {
+          alert("خطأ: القطعة موجودة مسبقاً في هذا المشروع (قيد فريد).");
+        } else {
+          alert(`خطأ أثناء الإضافة: ${error.message}`);
+        }
+        setIsImportingPieces(false);
+        return;
+      }
+      
       setShowPieceForm(false);
       setPieceDrafts([]);
       await loadPieces(pieceProjectId);

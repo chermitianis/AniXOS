@@ -7,6 +7,7 @@ import {
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { useNav } from "../../../app/NavContext";
+import { ForgottenShiftsBanner } from "../components/ForgottenShiftsBanner";
 import type { PieceTask, ManufacturingOrder } from "../../../shared/types/database";
 
 type ProductionStatus =
@@ -170,6 +171,9 @@ export function ProductionDashboardPage() {
       {error && (
         <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
       )}
+
+      {/* ✅ NEW — Bandeau sessions non clôturées (8h20 sans confirmation) */}
+      <ForgottenShiftsBanner />
 
       {/* 5 KPIs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">

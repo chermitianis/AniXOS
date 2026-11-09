@@ -1,28 +1,8 @@
 // ============================================================================
 // WorkerSessionContext: جلسة العامل داخل الكشك.
-// هذه جلسة "منطقية" على مستوى التطبيق فقط، وليست Supabase Auth إطلاقاً —
-// جلسة الجهاز نفسه (Device Auth Session) تبقى ثابتة في الخلفية طوال الوقت.
-//
-// حرج: تُخزَّن في localStorage (وليس sessionStorage) لأن المتطلب صريح:
-// إغلاق التطبيق/المتصفح أو انقطاع الكهرباء أو إعادة تشغيل الجهاز يجب ألا
-// يُنهي جلسة العامل أبداً — فقط تسجيل الخروج الصريح ينهيها.
-//
-// تدعم مسارين للتحقق من كلمة السر:
-//   1) أونلاين: عبر worker-login Edge Function (تحقق آمن + قفل مركزي)
-//   2) بعد الدخول: تستمر الجلسة المفتوحة أوفلاين، لكن لا يبدأ دخول جديد
-//      أوفلاين لأن قفل الجهاز الواحد يحتاج تحققاً مركزياً.
-//
-// الفصل بين الحصة والحدث: تسجيل الدخول الحقيقي (وليس كل إعادة تحميل صفحة)
-// يبدأ "حصة" (work_shifts) عبر startWorkerShift، وتسجيل الخروج الصريح فقط
-// هو ما يُنهيها عبر endWorkerShift (والذي يُغلق أيضاً أي أحداث مفتوحة).
-//
-// ملاحظة معمارية مهمة: هذه الطبقة (منطق أعمال) لا تُعيد نصوصاً مترجَمة
-// جاهزة أبداً، بل "مفتاح ترجمة" (messageKey) + معطياته. الترجمة الفعلية
-// تحدث فقط في طبقة العرض (WorkerLoginPage) عبر t(). هذا يضمن عمل تبديل
-// اللغة بشكل صحيح دون أي اعتماد هش على مطابقة نصوص حرفية.
 // ============================================================================
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { connectivityMonitor } from "../lib/connectivity";
 import {
@@ -31,9 +11,14 @@ import {
   fetchOpenSessionsForWorker,
   fetchOpenShiftForWorker,
   hydrateWorkerStateFromServer,
-  WorkerAlreadyConnectedError,
 } from "../modules/kiosk/api/kioskApi";
 import type { InterfaceType } from "../shared/types/database";
+import {
+  getLocalDeviceId,
+  recoverDeviceIdFromFingerprint,
+  fetchDeviceById,
+} from "../lib/deviceContext";
+import { resolveCompanyId } from "../lib/companyContext";
 
 const WORKER_SESSION_STORAGE_KEY = "anixos_worker_session";
 
@@ -42,13 +27,9 @@ export interface ActiveWorkerProfile {
   full_name: string;
   photo_url: string | null;
   session_started_at: string;
-  /** حصة الدوام الحالية — تُغلق فقط عند تسجيل الخروج الصريح */
   shift_id: string;
-  /**
-   * نوع واجهة العامل: 'cnc' | 'classique' | 'both' | 'manual'.
-   * يحدد أي أزرار (task_types + stop_reasons) تظهر له في الكشك.
-   */
   interface_type: InterfaceType;
+  device_name: string;
 }
 
 export interface WorkerLoginResult {
@@ -63,10 +44,10 @@ interface WorkerSessionState {
   isLoggingIn: boolean;
   isLoggingOut: boolean;
   login: (username: string, password: string) => Promise<WorkerLoginResult>;
-  /** يتحقق من وجود أحداث نشطة على قطعة قبل الإغلاق، ليعرض المستدعي تأكيداً
-   * واضحاً للعامل قبل المتابعة (البند 8) بدل السماح بخروج صامت */
   hasOpenPieceEvents: () => Promise<boolean>;
-  logout: () => Promise<void>;
+  hasOtherOpenSessions: () => Promise<boolean>;
+  logout: (options?: { endShift?: boolean }) => Promise<void>;
+  updateSessionStartedAt: (startedAt: string) => void;
 }
 
 const WorkerSessionContext = createContext<WorkerSessionState | undefined>(undefined);
@@ -76,9 +57,9 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<ActiveWorkerProfile>;
-    // جلسات قديمة محفوظة قبل إضافة shift_id أو interface_type: غير صالحة،
-    // يجب إعادة الدخول للحصول على البيانات الكاملة من السيرفر.
-    if (!parsed.id || !parsed.shift_id || !parsed.interface_type) return null;
+    if (!parsed.id || !parsed.shift_id || !parsed.interface_type || !parsed.device_name) {
+      return null;
+    }
     return parsed as ActiveWorkerProfile;
   } catch {
     return null;
@@ -88,7 +69,7 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
 async function loginOnline(
   username: string,
   password: string
-): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> }> {
+): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name"> }> {
   const { data, error } = await supabase.functions.invoke("worker-login", {
     body: { username, password },
   });
@@ -108,8 +89,6 @@ async function loginOnline(
       full_name: data.worker.full_name,
       photo_url: data.worker.photo_url,
       session_started_at: data.session_started_at,
-      // يُرجعه worker-login Edge Function؛ fallback 'both' إن لم يُرجع
-      // (لجلسات محفوظة قبل النشر أو للتوافق الخلفي)
       interface_type: (data.worker.interface_type ?? "both") as InterfaceType,
     },
   };
@@ -120,6 +99,34 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  // ✅ التحقق من صلاحية الجلسة المحفوظة في قاعدة البيانات عند التحميل
+  useEffect(() => {
+    async function validatePersistedSession() {
+      if (!activeWorker) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("work_shifts")
+          .select("id, ended_at")
+          .eq("id", activeWorker.shift_id)
+          .maybeSingle();
+
+        if (error || !data || data.ended_at !== null) {
+          setActiveWorker(null);
+          localStorage.removeItem(WORKER_SESSION_STORAGE_KEY);
+        }
+      } catch {
+        if (connectivityMonitor.getStatus()) {
+          setActiveWorker(null);
+          localStorage.removeItem(WORKER_SESSION_STORAGE_KEY);
+        }
+      }
+    }
+
+    void validatePersistedSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (activeWorker) {
       localStorage.setItem(WORKER_SESSION_STORAGE_KEY, JSON.stringify(activeWorker));
@@ -128,14 +135,16 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [activeWorker]);
 
+  // ✅ تحديث session_started_at (عند اختيار قطعة جديدة)
+  const updateSessionStartedAt = useCallback((startedAt: string) => {
+    setActiveWorker((prev) => (prev ? { ...prev, session_started_at: startedAt } : prev));
+  }, []);
+
   async function login(username: string, password: string): Promise<WorkerLoginResult> {
     setIsLoggingIn(true);
     try {
-      let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id"> };
+      let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name"> };
 
-      // لا يمكن ضمان قفل جهاز واحد أثناء غياب الخادم؛ لذلك لا نسمح
-      // بتسجيل دخول جديد للعامل أوفلاين. الجلسة المفتوحة تستمر بالعمل
-      // أوفلاين، لكن إنشاء جلسة جديدة يتطلب تحققاً مركزياً.
       if (!connectivityMonitor.getStatus()) {
         return { success: false, messageKey: "kioskLogin.connectionRequired" };
       }
@@ -146,37 +155,52 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
       }
 
       if (result.success && result.profile) {
-        // تبدأ الحصة هنا فقط — عند دخول حقيقي، وليس عند كل إعادة تحميل صفحة
-        try {
-          const shift = await startWorkerShift(result.profile.id, null);
-          setActiveWorker({ ...result.profile, shift_id: shift.id });
-          return { success: true };
-        } catch (error) {
-          const isAlreadyConnected =
-            error instanceof WorkerAlreadyConnectedError ||
-            (error instanceof Error && error.message === "WORKER_ALREADY_CONNECTED");
-          if (!isAlreadyConnected) throw error;
-
-          // كلمة السر صحيحة، لكن توجد حصة مفتوحة أصلاً لهذا العامل نفسه —
-          // الأرجح أن بيانات الجهاز الذي بدأ بها الحصة فُقدت (متصفح مُفرَّغ،
-          // جهاز آخر) وليس أن العامل يعمل فعلياً على جهازين في آن واحد.
-          // نستأنف نفس الحصة بمعطياتها الحقيقية من السيرفر بدل رفض الدخول.
-          const existingShift = await fetchOpenShiftForWorker(result.profile.id);
-          if (!existingShift) {
-            // حالة سباق نادرة: الحصة أُغلقت للتو بين الفحصين — أعد المحاولة
-            return { success: false, messageKey: "kioskLogin.alreadyConnected" };
+        // ✅ جلب device_id المحفوظ محلياً أو استرداده
+        let activeDeviceId = getLocalDeviceId();
+        if (!activeDeviceId) {
+          const companyId = await resolveCompanyId();
+          if (companyId) {
+            activeDeviceId = await recoverDeviceIdFromFingerprint(companyId);
           }
+        }
 
-          await hydrateWorkerStateFromServer(result.profile.id, existingShift);
+        if (!activeDeviceId) {
+          return { success: false, messageKey: "kioskLogin.deviceNotRegistered" };
+        }
+
+        // ✅ جلب اسم الجهاز
+        let deviceName = "—";
+        const device = await fetchDeviceById(activeDeviceId);
+        if (device) deviceName = device.device_name;
+
+        // ✅ بدء الوردية (بدون deviceId)
+        const shift = await startWorkerShift(result.profile.id);
+
+        // ✅ جلب الجلسات المفتوحة (إن وجدت) على هذا الجهاز
+        const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
+        const sessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
+
+        if (sessionsOnDevice.length > 0) {
+          // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
+          const session = sessionsOnDevice[0];
+          await hydrateWorkerStateFromServer(result.profile.id, shift);
           setActiveWorker({
             ...result.profile,
-            // وقت البدء الحقيقي للحصة الأصلية، وليس لحظة إعادة الاتصال هذه —
-            // حتى لا يُعاد احتساب التايمر من الصفر ويُفقَد الوقت الفعلي المنقضي
-            session_started_at: existingShift.started_at,
-            shift_id: existingShift.id,
+            session_started_at: session.started_at, // ✅ وقت الجلسة (وليس الوردية)
+            shift_id: shift.id,
+            device_name: deviceName,
           });
           return { success: true };
         }
+
+        // ✅ لا توجد جلسة مفتوحة -> استخدام وقت الوردية مؤقتاً
+        setActiveWorker({
+          ...result.profile,
+          session_started_at: shift.started_at, // مؤقتاً
+          shift_id: shift.id,
+          device_name: deviceName,
+        });
+        return { success: true };
       }
 
       return { success: false, messageKey: result.messageKey, messageParams: result.messageParams };
@@ -191,13 +215,38 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     return open.some((s) => Boolean(s.piece_task_id));
   }
 
-  async function logout(): Promise<void> {
+  // ✅ تصحيح: التحقق من الجلسات من قاعدة البيانات مباشرة (وليس IndexedDB المحلي)
+  async function hasOtherOpenSessions(): Promise<boolean> {
+    if (!activeWorker) return false;
+
+    const currentDeviceId = getLocalDeviceId();
+    if (!currentDeviceId) return false;
+
+    if (connectivityMonitor.getStatus()) {
+      const { data, error } = await supabase
+        .from("work_sessions")
+        .select("id, device_id")
+        .eq("worker_id", activeWorker.id)
+        .is("ended_at", null)
+        .is("voided_at", null)
+        .neq("device_id", currentDeviceId);
+
+      if (!error && data) {
+        return data.length > 0;
+      }
+    }
+
+    // Fallback في حالة عدم الاتصال (قد لا يكون دقيقاً)
+    const open = await fetchOpenSessionsForWorker(activeWorker.id);
+    const otherSessions = open.filter((s) => s.device_id !== currentDeviceId);
+    return otherSessions.length > 0;
+  }
+
+  async function logout(options?: { endShift?: boolean }): Promise<void> {
     if (!activeWorker) return;
     setIsLoggingOut(true);
     try {
-      // تسجيل الخروج هو العملية الوحيدة التي تُنهي الحصة: يُغلق كل الأحداث
-      // المفتوحة أولاً (تُحسب ضمن الوقت الفعلي) ثم يُغلق الحصة نفسها
-      await endWorkerShift(activeWorker.shift_id, activeWorker.id);
+      await endWorkerShift(activeWorker.shift_id, activeWorker.id, options);
     } finally {
       setActiveWorker(null);
       setIsLoggingOut(false);
@@ -206,7 +255,16 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
 
   return (
     <WorkerSessionContext.Provider
-      value={{ activeWorker, isLoggingIn, isLoggingOut, login, hasOpenPieceEvents, logout }}
+      value={{
+        activeWorker,
+        isLoggingIn,
+        isLoggingOut,
+        login,
+        hasOpenPieceEvents,
+        hasOtherOpenSessions,
+        logout,
+        updateSessionStartedAt,
+      }}
     >
       {children}
     </WorkerSessionContext.Provider>

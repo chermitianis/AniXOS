@@ -51,6 +51,7 @@ export function MachinesAdminPage() {
   const [machineType, setMachineType] = useState("");
   const [interfaceType, setInterfaceType] = useState<InterfaceType>("classique");
   const [toolCount, setToolCount] = useState("0");
+  const [hourlyCost, setHourlyCost] = useState(""); // ✅ جديد
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +82,7 @@ export function MachinesAdminPage() {
     setMachineType("");
     setInterfaceType("classique");
     setToolCount("0");
+    setHourlyCost(""); // ✅ جديد
   }
 
   function startEditing(machine: Machine) {
@@ -90,6 +92,7 @@ export function MachinesAdminPage() {
     setMachineType(machine.machine_type ?? "");
     setInterfaceType((machine.interface_type as InterfaceType) ?? "classique");
     setToolCount(String(machine.tool_count ?? 0));
+    setHourlyCost(String(machine.hourly_cost ?? "")); // ✅ جديد
     setError(null);
   }
 
@@ -129,6 +132,7 @@ export function MachinesAdminPage() {
       current_status: "idle",
       is_active: true,
       interface_type: interfaceType,
+      hourly_cost: Number(hourlyCost) || 0, // ✅ جديد
       created_at: now,
       updated_at: now,
     };
@@ -167,6 +171,7 @@ export function MachinesAdminPage() {
       machine_type: machineType || null,
       interface_type: interfaceType,
       tool_count: requestedToolCount,
+      hourly_cost: Number(hourlyCost) || 0, // ✅ جديد
       updated_at: new Date().toISOString(),
     };
 
@@ -288,6 +293,23 @@ export function MachinesAdminPage() {
           />
         </AdminField>
 
+        {/* ✅ حقل أجر الساعة الجديد */}
+        <AdminField label={t("setup.machineHourlyCost")}>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              step="0.01"
+              value={hourlyCost}
+              onChange={(e) => setHourlyCost(e.target.value)}
+              placeholder="Ex: 15.00"
+              className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <span className="flex items-center rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500 whitespace-nowrap" dir="ltr">
+              TND / h
+            </span>
+          </div>
+        </AdminField>
+
         {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
         <button
@@ -329,6 +351,12 @@ export function MachinesAdminPage() {
                         <InterfaceIcon size={9} />
                         {t(interfaceMeta.labelKey)}
                       </span>
+                      {/* ✅ عرض أجر الساعة في القائمة */}
+                      {m.hourly_cost > 0 && (
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          {m.hourly_cost} TND/h
+                        </span>
+                      )}
                     </div>
                   </button>
                   <button

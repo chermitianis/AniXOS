@@ -9,7 +9,13 @@ interface ProjectPieceSelectorModalProps {
   loadPiecesForOption: (
     option: PlanningProjectOption
   ) => Promise<{ activePieces: PieceTask[]; completedPieces: PieceTask[] }>;
-  onSelect: (option: PlanningProjectOption, piece: PieceTask | null) => void;
+  // ✅ تعديل التوقيع ليمرر planningId و ofWorkPackageId
+  onSelect: (
+    option: PlanningProjectOption,
+    piece: PieceTask | null,
+    planningId: string | null,
+    ofWorkPackageId: string | null
+  ) => void;
   onClose: () => void;
 }
 
@@ -32,6 +38,20 @@ export function ProjectPieceSelectorModal({
     setActivePieces(active);
     setCompletedPieces(completed);
     setIsLoadingPieces(false);
+  }
+
+  function handleSelectPiece(piece: PieceTask) {
+    if (!selectedOption) return;
+
+    // ✅ البحث عن الـ planningId و ofWorkPackageId المرتبطين بهذه القطعة
+    const matchingEntry = selectedOption.entries.find((e) => e.piece_task_id === piece.id);
+
+    onSelect(
+      selectedOption,
+      piece,
+      matchingEntry?.id ?? null,
+      matchingEntry?.of_work_package_id ?? null
+    );
   }
 
   return (
@@ -83,7 +103,7 @@ export function ProjectPieceSelectorModal({
                     {activePieces.map((piece) => (
                       <li key={piece.id}>
                         <button
-                          onClick={() => onSelect(selectedOption, piece)}
+                          onClick={() => handleSelectPiece(piece)}
                           className="flex w-full items-center justify-between rounded-lg border border-slate-200 p-3 text-right hover:bg-slate-50"
                         >
                           <div>
@@ -101,8 +121,6 @@ export function ProjectPieceSelectorModal({
                   </ul>
                 )}
 
-                {/* قسم منفصل تماماً للقطع المكتملة — للعرض فقط، لا تُعاد إسنادها
-                    بشكل عادي (البند 7 و11) */}
                 {completedPieces.length > 0 && (
                   <div className="mt-5 border-t border-slate-100 pt-3">
                     <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-600">

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, LogOut } from "lucide-react";
 import { useWorkerSession } from "../../../auth/WorkerSessionContext";
 import { useActiveTask } from "../hooks/useActiveTask";
 import { useWorkerPlanning } from "../hooks/useWorkerPlanning";
+import { useShiftOvertimeCheck } from "../hooks/useShiftOvertimeCheck";
 import type { ActiveWorkerProfile } from "../../../auth/WorkerSessionContext";
 import { TopNavBar } from "../components/TopNavBar";
 import { ContextBar } from "../components/ContextBar";
@@ -15,29 +16,42 @@ import { ProjectPieceSelectorModal } from "../components/ProjectPieceSelectorMod
 import { AddEmergencyPieceModal } from "../components/AddEmergencyPieceModal";
 import { SessionCorrectionModal } from "../components/SessionCorrectionModal";
 import { LogoutConfirmModal } from "../components/LogoutConfirmModal";
+import { ShiftExtensionModal } from "../components/ShiftExtensionModal";
 import { startCredentialsSync } from "../../../lib/credentialsSync";
 import { getStageInterface } from "../../nomenclature/lib/costingConstants";
 import {
   fetchPieceOperationsWithEstimate,
+  extendWorkerShift,
   type PieceOperationEstimate,
 } from "../api/kioskApi";
 import type { WorkSession } from "../../../shared/types/database";
+import { OdooAutoSync } from "../../settings/components/OdooAutoSync";
+import type { PlanningProjectOption } from "../hooks/useWorkerPlanning";
+import type { PieceTask } from "../../../shared/types/database";
 
 export function KioskMainPage() {
-  const { activeWorker, logout, hasOpenPieceEvents } = useWorkerSession();
+  const { activeWorker, logout, hasOpenPieceEvents, hasOtherOpenSessions } = useWorkerSession();
 
   if (!activeWorker) return null;
 
-  return <KioskWorkspace worker={activeWorker} onLogout={logout} hasOpenPieceEvents={hasOpenPieceEvents} />;
+  return (
+    <KioskWorkspace
+      worker={activeWorker}
+      onLogout={logout}
+      hasOpenPieceEvents={hasOpenPieceEvents}
+      hasOtherOpenSessions={hasOtherOpenSessions}
+    />
+  );
 }
 
 interface KioskWorkspaceProps {
   worker: ActiveWorkerProfile;
-  onLogout: () => Promise<void>;
+  onLogout: (options?: { endShift?: boolean }) => Promise<void>;
   hasOpenPieceEvents: () => Promise<boolean>;
+  hasOtherOpenSessions: () => Promise<boolean>;
 }
 
-function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspaceProps) {
+function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents, hasOtherOpenSessions }: KioskWorkspaceProps) {
   const { t } = useTranslation();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
@@ -47,6 +61,14 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logRefreshSignal, setLogRefreshSignal] = useState(0);
   const [pieceOperations, setPieceOperations] = useState<PieceOperationEstimate[]>([]);
+  
+  // ✅ حالة جديدة لنافذة "Fin de poste ?"
+  const [showEndShiftConfirm, setShowEndShiftConfirm] = useState(false);
+
+  const overtimeCheck = useShiftOvertimeCheck(
+    worker.shift_id,
+    worker.session_started_at,
+  );
 
   useEffect(() => {
     const stopCredentialsSync = startCredentialsSync();
@@ -64,6 +86,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
   const {
     machine,
     project,
+    clientName,
     pieceTask,
     ofWorkPackageId,
     ofWorkPackageInterface,
@@ -80,7 +103,6 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
 
   const { projectOptions, loadPiecesForOption, reload: reloadPlanning } = useWorkerPlanning(worker.id);
 
-  // Charger les opérations estimées à chaque changement de pièce
   useEffect(() => {
     let isMounted = true;
     if (!pieceTask?.id) {
@@ -95,16 +117,20 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     };
   }, [pieceTask?.id]);
 
-  // ✅ Filtrer les opérations par interface de la WP active
   const estimatedTotalMinutes = pieceOperations
     .filter((op) => {
-      if (!ofWorkPackageInterface) return true; // pas de WP → total global
+      if (!ofWorkPackageInterface) return true;
       return getStageInterface(op.stage) === ofWorkPackageInterface;
     })
     .reduce((sum, op) => sum + Math.round(op.estimated_hours * 60), 0);
 
-  async function handleSelectFromModal(...args: Parameters<typeof selectPlanningOption>) {
-    await selectPlanningOption(...args);
+  async function handleSelectFromModal(
+    option: PlanningProjectOption,
+    piece: PieceTask | null,
+    planningId: string | null,
+    ofWorkPackageId: string | null
+  ) {
+    await selectPlanningOption(option, piece, planningId, ofWorkPackageId);
     setIsSelectorOpen(false);
   }
 
@@ -118,31 +144,60 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
     void reloadPlanning();
   }
 
-  /** ✅ NEW : après création d'une pièce d'urgence, on recharge le planning
-   *  et on ouvre le sélecteur pour permettre à l'opérateur de la choisir. */
   async function handleEmergencyPieceCreated(_pieceTaskId: string, _planningId: string) {
     await reloadPlanning();
-    // Ouvre le sélecteur pour que l'opérateur retrouve sa pièce dans la liste.
     setIsSelectorOpen(true);
   }
 
+  // ✅ تعديل handleLogoutRequest
   async function handleLogoutRequest() {
     if (await hasOpenPieceEvents()) {
       setIsLogoutConfirmOpen(true);
-    } else {
-      setIsLoggingOut(true);
-      await onLogout();
+      return;
     }
+
+    // ✅ التحقق من وجود جلسات أخرى مفتوحة
+    const hasOtherSessions = await hasOtherOpenSessions();
+    
+    if (hasOtherSessions) {
+      // ✅ يوجد جلسات أخرى -> فقط اخرج من الجلسة الحالية (لا تُنهِ الوردية)
+      setIsLoggingOut(true);
+      await onLogout({ endShift: false });
+    } else {
+      // ✅ لا توجد جلسات أخرى -> اسأل "Fin de poste ?"
+      setShowEndShiftConfirm(true);
+    }
+  }
+
+  // ✅ تأكيد "Terminer le poste"
+  async function handleEndShiftConfirm() {
+    setShowEndShiftConfirm(false);
+    setIsLoggingOut(true);
+    await onLogout({ endShift: true });
+  }
+
+  // ✅ إلغاء "Fin de poste" (متابعة العمل)
+  async function handleEndShiftCancel() {
+    setShowEndShiftConfirm(false);
+    setIsLoggingOut(true);
+    await onLogout({ endShift: false });
   }
 
   async function confirmLogoutAnyway() {
     setIsLogoutConfirmOpen(false);
     setIsLoggingOut(true);
-    await onLogout();
+    await onLogout({ endShift: false });
+  }
+
+  async function handleEndShiftFromOvertime() {
+    setIsLoggingOut(true);
+    await onLogout({ endShift: true });
   }
 
   return (
     <div className="flex h-screen flex-col bg-slate-100">
+      <OdooAutoSync />
+
       <TopNavBar
         sessionStartedAt={worker.session_started_at}
         workerId={worker.id}
@@ -154,6 +209,7 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         worker={worker}
         machine={machine}
         project={project}
+        clientName={clientName}
         pieceTask={pieceTask}
         ofWorkPackageId={ofWorkPackageId}
         estimatedTotalMinutes={estimatedTotalMinutes || null}
@@ -206,12 +262,11 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
         <ProjectPieceSelectorModal
           projectOptions={projectOptions}
           loadPiecesForOption={loadPiecesForOption}
-          onSelect={(option, piece) => void handleSelectFromModal(option, piece)}
+          onSelect={handleSelectFromModal}
           onClose={() => setIsSelectorOpen(false)}
         />
       )}
 
-      {/* ✅ NEW : Modal d'ajout d'une pièce d'urgence */}
       {isEmergencyOpen && (
         <AddEmergencyPieceModal
           workerId={worker.id}
@@ -241,6 +296,65 @@ function KioskWorkspace({ worker, onLogout, hasOpenPieceEvents }: KioskWorkspace
           onCancel={() => setIsLogoutConfirmOpen(false)}
           onConfirm={() => void confirmLogoutAnyway()}
         />
+      )}
+
+      {overtimeCheck.shouldPrompt && worker.shift_id && (
+        <ShiftExtensionModal
+          shiftId={worker.shift_id}
+          hoursOpen={overtimeCheck.hoursOpen}
+          onExtended={overtimeCheck.markExtended}
+          onEndShift={handleEndShiftFromOvertime}
+          extendShift={extendWorkerShift}
+        />
+      )}
+
+      {/* ✅ نافذة "Fin de poste ?" */}
+      {showEndShiftConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                <LogOut size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">
+                  {t("kiosk.endShiftTitle", { defaultValue: "Fin de poste ?" })}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {t("kiosk.endShiftSubtitle", { defaultValue: "Voulez-vous terminer votre poste ?" })}
+                </p>
+              </div>
+            </div>
+            <p className="mb-6 text-sm text-slate-600">
+              {t("kiosk.endShiftBody", {
+                defaultValue:
+                  "Si vous refusez, le poste restera ouvert pour continuer sur un autre appareil.",
+              })}
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => void handleEndShiftCancel()}
+                disabled={isLoggingOut}
+                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {t("kiosk.endShiftContinue", { defaultValue: "Continuer" })}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEndShiftConfirm()}
+                disabled={isLoggingOut}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-red-200 hover:bg-red-700 disabled:opacity-50"
+              >
+                {isLoggingOut ? (
+                  <span className="mx-auto block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  t("kiosk.endShiftTerminate", { defaultValue: "Terminer le poste" })
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
