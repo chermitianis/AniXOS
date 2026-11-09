@@ -12,7 +12,7 @@ import {
   fetchOpenShiftForWorker,
   hydrateWorkerStateFromServer,
 } from "../modules/kiosk/api/kioskApi";
-import type { InterfaceType } from "../shared/types/database";
+import type { InterfaceType, WorkSession } from "../shared/types/database";
 import {
   getLocalDeviceId,
   recoverDeviceIdFromFingerprint,
@@ -30,6 +30,7 @@ export interface ActiveWorkerProfile {
   shift_id: string;
   interface_type: InterfaceType;
   device_name: string;
+  machine_id: string | null; // ✅ جديد: الآلة المرتبطة بالجهاز
 }
 
 export interface WorkerLoginResult {
@@ -60,6 +61,8 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
     if (!parsed.id || !parsed.shift_id || !parsed.interface_type || !parsed.device_name) {
       return null;
     }
+    // ✅ إذا كانت الجلسة القديمة لا تحتوي على machine_id (من قبل التعديل)، نعتبرها غير صالحة
+    if (!("machine_id" in parsed)) return null;
     return parsed as ActiveWorkerProfile;
   } catch {
     return null;
@@ -69,7 +72,7 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
 async function loginOnline(
   username: string,
   password: string
-): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name"> }> {
+): Promise<WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name" | "machine_id"> }> {
   const { data, error } = await supabase.functions.invoke("worker-login", {
     body: { username, password },
   });
@@ -143,7 +146,7 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
   async function login(username: string, password: string): Promise<WorkerLoginResult> {
     setIsLoggingIn(true);
     try {
-      let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name"> };
+      let result: WorkerLoginResult & { profile?: Omit<ActiveWorkerProfile, "shift_id" | "device_name" | "machine_id"> };
 
       if (!connectivityMonitor.getStatus()) {
         return { success: false, messageKey: "kioskLogin.connectionRequired" };
@@ -168,56 +171,62 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
           return { success: false, messageKey: "kioskLogin.deviceNotRegistered" };
         }
 
-        // ✅ جلب اسم الجهاز
+        // ✅ جلب اسم الجهاز والآلة المرتبطة به
         let deviceName = "—";
+        let machineId: string | null = null;
         const device = await fetchDeviceById(activeDeviceId);
-        if (device) deviceName = device.device_name;
+        if (device) {
+          deviceName = device.device_name;
+          machineId = device.default_machine_id;
+        }
 
         // ✅ بدء الوردية (بدون deviceId)
         const shift = await startWorkerShift(result.profile.id);
 
-// ✅ جلب الجلسات المفتوحة على هذا الجهاز من قاعدة البيانات مباشرة
-let openSessionsOnDevice: WorkSession[] = [];
+        // ✅ جلب الجلسات المفتوحة على هذا الجهاز من قاعدة البيانات مباشرة
+        let openSessionsOnDevice: WorkSession[] = [];
 
-if (connectivityMonitor.getStatus()) {
-  const { data: sessions, error } = await supabase
-    .from("work_sessions")
-    .select("*")
-    .eq("worker_id", result.profile.id)
-    .eq("device_id", activeDeviceId)
-    .is("ended_at", null)
-    .is("voided_at", null);
-  
-  if (!error && sessions) {
-    openSessionsOnDevice = sessions as WorkSession[];
-  }
-} else {
-  // Fallback: استخدام IndexedDB (قد لا يكون دقيقاً)
-  const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
-  openSessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
-}
+        if (connectivityMonitor.getStatus()) {
+          const { data: sessions, error } = await supabase
+            .from("work_sessions")
+            .select("*")
+            .eq("worker_id", result.profile.id)
+            .eq("device_id", activeDeviceId)
+            .is("ended_at", null)
+            .is("voided_at", null);
 
-if (openSessionsOnDevice.length > 0) {
-  // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
-  const session = openSessionsOnDevice[0];
-  await hydrateWorkerStateFromServer(result.profile.id, shift);
-  setActiveWorker({
-    ...result.profile,
-    session_started_at: session.started_at, // ✅ وقت الجلسة
-    shift_id: shift.id,
-    device_name: deviceName,
-  });
-  return { success: true };
-}
+          if (!error && sessions) {
+            openSessionsOnDevice = sessions as WorkSession[];
+          }
+        } else {
+          // Fallback: استخدام IndexedDB (قد لا يكون دقيقاً)
+          const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
+          openSessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
+        }
 
-// ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> استخدام وقت الوردية مؤقتاً
-setActiveWorker({
-  ...result.profile,
-  session_started_at: shift.started_at, // مؤقتاً
-  shift_id: shift.id,
-  device_name: deviceName,
-});
-return { success: true };
+        if (openSessionsOnDevice.length > 0) {
+          // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
+          const session = openSessionsOnDevice[0];
+          await hydrateWorkerStateFromServer(result.profile.id, shift);
+          setActiveWorker({
+            ...result.profile,
+            session_started_at: session.started_at, // ✅ وقت الجلسة
+            shift_id: shift.id,
+            device_name: deviceName,
+            machine_id: machineId, // ✅ الآلة المرتبطة بالجهاز
+          });
+          return { success: true };
+        }
+
+        // ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> استخدام وقت الوردية مؤقتاً
+        setActiveWorker({
+          ...result.profile,
+          session_started_at: shift.started_at, // مؤقتاً
+          shift_id: shift.id,
+          device_name: deviceName,
+          machine_id: machineId, // ✅ الآلة المرتبطة بالجهاز
+        });
+        return { success: true };
       }
 
       return { success: false, messageKey: result.messageKey, messageParams: result.messageParams };
@@ -232,7 +241,7 @@ return { success: true };
     return open.some((s) => Boolean(s.piece_task_id));
   }
 
-  // ✅ تصحيح: التحقق من الجلسات من قاعدة البيانات مباشرة (وليس IndexedDB المحلي)
+  // ✅ التحقق من الجلسات من قاعدة البيانات مباشرة (وليس IndexedDB المحلي)
   async function hasOtherOpenSessions(): Promise<boolean> {
     if (!activeWorker) return false;
 

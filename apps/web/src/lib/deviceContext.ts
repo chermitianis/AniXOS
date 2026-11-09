@@ -19,11 +19,13 @@ function setLocalDeviceMode(mode: LocalDeviceMode) {
   localStorage.setItem(DEVICE_MODE_STORAGE_KEY, mode);
 }
 
+/** يُستخدم فقط لأغراض الاختبار/إعادة الضبط اليدوي */
 export function resetLocalDeviceMode() {
   localStorage.removeItem(DEVICE_MODE_STORAGE_KEY);
   localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
 }
 
+// ✅ تخزين device_id محلياً
 export function setLocalDeviceId(deviceId: string) {
   try {
     localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
@@ -38,6 +40,9 @@ export function getLocalDeviceId(): string | null {
   }
 }
 
+/**
+ * ✅ استرداد device_id تلقائياً من قاعدة البيانات باستخدام البصمة
+ */
 export async function recoverDeviceIdFromFingerprint(
   companyId: string
 ): Promise<string | null> {
@@ -58,18 +63,53 @@ export async function recoverDeviceIdFromFingerprint(
   return data.id;
 }
 
-// ✅ دالة جديدة لجلب اسم الجهاز من قاعدة البيانات
+/**
+ * ✅ جلب اسم الجهاز والآلة المرتبطة به
+ */
 export async function fetchDeviceById(
   deviceId: string
-): Promise<{ id: string; device_name: string; device_mode: "admin" | "kiosk" } | null> {
+): Promise<{
+  id: string;
+  device_name: string;
+  device_mode: "admin" | "kiosk";
+  default_machine_id: string | null;
+} | null> {
   const { data, error } = await supabase
     .from("devices")
-    .select("id, device_name, device_mode")
+    .select("id, device_name, device_mode, default_machine_id")
     .eq("id", deviceId)
     .maybeSingle();
 
   if (error || !data) return null;
-  return data as { id: string; device_name: string; device_mode: "admin" | "kiosk" };
+  return data as {
+    id: string;
+    device_name: string;
+    device_mode: "admin" | "kiosk";
+    default_machine_id: string | null;
+  };
+}
+
+/**
+ * ✅ ربط الجهاز بآلة (أو إلغاء الربط إذا كان machineId = null)
+ */
+export async function setDeviceMachine(
+  deviceId: string,
+  machineId: string | null
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const { error } = await supabase
+      .from("devices")
+      .update({ default_machine_id: machineId })
+      .eq("id", deviceId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "تعذر ربط الجهاز بالآلة",
+    };
+  }
 }
 
 interface RegisterDeviceResult {
@@ -79,6 +119,9 @@ interface RegisterDeviceResult {
   deviceId?: string;
 }
 
+/**
+ * يُسجِّل الجهاز الحالي بدوره المختار.
+ */
 export async function registerCurrentDevice(
   deviceName: string,
   mode: LocalDeviceMode
@@ -115,6 +158,7 @@ export async function registerCurrentDevice(
     };
   }
 
+  // ✅ حفظ device_id محلياً
   if (data.device?.id) {
     setLocalDeviceId(data.device.id);
   }

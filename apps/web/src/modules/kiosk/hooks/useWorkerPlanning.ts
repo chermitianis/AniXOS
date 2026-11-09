@@ -4,6 +4,7 @@ import { supabase } from "../../../lib/supabaseClient";
 import { createSafeChannel } from "../../../lib/realtimeChannel";
 import { connectivityMonitor } from "../../../lib/connectivity";
 import { getLocalDeviceId } from "../../../lib/deviceContext";
+import { useWorkerSession } from "../../../auth/WorkerSessionContext";
 import type { PlanningEntry, Project, PieceTask } from "../../../shared/types/database";
 
 export interface PlanningProjectOption {
@@ -42,19 +43,39 @@ async function fetchBusyPiecesOnOtherDevices(
 }
 
 export function useWorkerPlanning(workerId: string) {
+  const { activeWorker } = useWorkerSession();
+  
+  // ✅ الآلة المرتبطة بالجهاز
+  const deviceMachineId = activeWorker?.machine_id ?? null;
+
   const [queue, setQueue] = useState<PlanningEntry[]>([]);
   const [projectOptions, setProjectOptions] = useState<PlanningProjectOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setIsLoading(true);
+    
+    // ✅ إذا لم تكن هناك آلة مرتبطة، لا نعرض أي قطع
+    if (!deviceMachineId) {
+      setQueue([]);
+      setProjectOptions([]);
+      setIsLoading(false);
+      return;
+    }
+
     const entries = await fetchWorkerPlanningQueue(workerId);
-    setQueue(entries);
+    
+    // ✅ تصفية القطع المخططة حسب الآلة المرتبطة بالجهاز
+    const filteredEntries = entries.filter(
+      (e) => e.machine_id === deviceMachineId
+    );
+    
+    setQueue(filteredEntries);
 
     const orderedProjectIds: string[] = [];
     const entriesByProject = new Map<string, PlanningEntry[]>();
 
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       if (!entry.project_id) continue;
       if (!entriesByProject.has(entry.project_id)) {
         entriesByProject.set(entry.project_id, []);
@@ -73,7 +94,7 @@ export function useWorkerPlanning(workerId: string) {
 
     setProjectOptions(options);
     setIsLoading(false);
-  }, [workerId]);
+  }, [workerId, deviceMachineId]);
 
   useEffect(() => {
     void reload();
@@ -103,7 +124,7 @@ export function useWorkerPlanning(workerId: string) {
   async function loadPiecesForOption(
     option: PlanningProjectOption
   ): Promise<{ activePieces: PieceTask[]; completedPieces: PieceTask[] }> {
-    // ✅ جلب معرفات القطع المخططة لهذا العامل في هذا المشروع
+    // ✅ جلب معرفات القطع المخططة لهذا العامل في هذا المشروع (على هذه الآلة فقط)
     const plannedPieceIds = new Set(
       option.entries.map((e) => e.piece_task_id).filter((id): id is string => !!id)
     );

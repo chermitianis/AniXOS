@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2, Save, Clock, Cpu, Wrench, Calendar, FolderOpen, RotateCcw, Image as ImageIcon, Upload, X,
-  Monitor, HardHat, Settings2, RefreshCw, Trash2, AlertTriangle, Plus,
+  Monitor, HardHat, Settings2, RefreshCw, Trash2, AlertTriangle, Link2, Plus,
 } from "lucide-react";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
 import { supabase } from "../../../lib/supabaseClient";
@@ -13,7 +13,7 @@ import {
   type WorkSettings,
 } from "../../../shared/api/companyWorkSettingsApi";
 import { getOrCreateFingerprint } from "../../../lib/deviceFingerprint";
-import { registerCurrentDevice } from "../../../lib/deviceContext";
+import { registerCurrentDevice, setDeviceMachine } from "../../../lib/deviceContext";
 
 const DAYS: { n: number; labelKey: string }[] = [
   { n: 1, labelKey: "production.planning.workSettings.monday" },
@@ -32,6 +32,14 @@ interface DeviceRow {
   is_active: boolean;
   last_seen_at: string | null;
   registered_at: string;
+  default_machine_id: string | null;
+}
+
+interface MachineRow {
+  id: string;
+  name: string;
+  code: string;
+  interface_type: string;
 }
 
 type TabKey = "settings" | "devices";
@@ -63,6 +71,10 @@ export function CompanyWorkSettingsPage() {
   const [deletingDeviceId, setDeletingDeviceId] = useState<string | null>(null);
   const [deviceToDelete, setDeviceToDelete] = useState<DeviceRow | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [changingMachineForDevice, setChangingMachineForDevice] = useState<string | null>(null);
+
+  // ✅ حالة الآلات
+  const [machines, setMachines] = useState<MachineRow[]>([]);
 
   // ✅ الجهاز الحالي (للمقارنة)
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
@@ -102,7 +114,7 @@ export function CompanyWorkSettingsPage() {
     try {
       const { data, error: dbError } = await supabase
         .from("devices")
-        .select("id, device_name, device_mode, is_active, last_seen_at, registered_at")
+        .select("id, device_name, device_mode, is_active, last_seen_at, registered_at, default_machine_id")
         .eq("company_id", companyId)
         .order("registered_at", { ascending: false });
 
@@ -115,9 +127,26 @@ export function CompanyWorkSettingsPage() {
     }
   }, [companyId]);
 
+  const loadMachines = useCallback(async () => {
+    if (!companyId) return;
+    try {
+      const { data, error: dbError } = await supabase
+        .from("machines")
+        .select("id, name, code, interface_type")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .order("name");
+      if (dbError) throw dbError;
+      setMachines((data as MachineRow[]) ?? []);
+    } catch (err) {
+      console.error("[loadMachines]", err);
+    }
+  }, [companyId]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadMachines();
+  }, [load, loadMachines]);
 
   useEffect(() => {
     if (activeTab === "devices") {
@@ -278,6 +307,28 @@ export function CompanyWorkSettingsPage() {
     }
   }
 
+  // ✅ تغيير الآلة المرتبطة بالجهاز
+  async function handleChangeMachine(deviceId: string, machineId: string | null) {
+    if (!companyId) return;
+    setDeviceError(null);
+    setChangingMachineForDevice(deviceId);
+    try {
+      const result = await setDeviceMachine(deviceId, machineId);
+      if (!result.success) {
+        setDeviceError(result.message ?? "Erreur");
+        return;
+      }
+
+      setDevices((prev) =>
+        prev.map((d) => (d.id === deviceId ? { ...d, default_machine_id: machineId } : d))
+      );
+    } catch (err) {
+      setDeviceError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setChangingMachineForDevice(null);
+    }
+  }
+
   // ✅ حذف جهاز
   async function handleConfirmDeleteDevice() {
     if (!deviceToDelete || !companyId) return;
@@ -307,7 +358,7 @@ export function CompanyWorkSettingsPage() {
     }
   }
 
-  // ✅ تسجيل الجهاز الحالي (إذا لم يكن مسجلاً)
+  // ✅ تسجيل الجهاز الحالي
   async function handleRegisterCurrentDevice() {
     if (!companyId) return;
     setDeviceError(null);
@@ -653,13 +704,13 @@ export function CompanyWorkSettingsPage() {
                       })}
                     </th>
                     <th className="px-3 py-2">
-                      {t("production.planning.workSettings.deviceStatus", {
-                        defaultValue: "Statut",
+                      {t("production.planning.workSettings.machine", {
+                        defaultValue: "Machine",
                       })}
                     </th>
                     <th className="px-3 py-2">
-                      {t("production.planning.workSettings.deviceLastSeen", {
-                        defaultValue: "Dernière activité",
+                      {t("production.planning.workSettings.deviceStatus", {
+                        defaultValue: "Statut",
                       })}
                     </th>
                     <th className="px-3 py-2 text-right">
@@ -673,8 +724,10 @@ export function CompanyWorkSettingsPage() {
                   {devices.map((device) => {
                     const isCurrent = device.id === currentDeviceId;
                     const isChanging = changingDeviceId === device.id;
+                    const isChangingMachine = changingMachineForDevice === device.id;
                     const isDeleting = deletingDeviceId === device.id;
                     const isAdmin = device.device_mode === "admin";
+                    const linkedMachine = machines.find((m) => m.id === device.default_machine_id);
 
                     return (
                       <tr
@@ -720,6 +773,37 @@ export function CompanyWorkSettingsPage() {
                           </span>
                         </td>
                         <td className="px-3 py-3">
+                          {/* ✅ قائمة منسدلة لاختيار الآلة المرتبطة */}
+                          <div className="flex items-center gap-1.5">
+                            <Link2 size={14} className="text-slate-400" />
+                            <select
+                              value={device.default_machine_id ?? ""}
+                              onChange={(e) =>
+                                void handleChangeMachine(
+                                  device.id,
+                                  e.target.value || null
+                                )
+                              }
+                              disabled={isChangingMachine}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 focus:border-indigo-400 focus:outline-none disabled:opacity-50"
+                            >
+                              <option value="">
+                                {t("production.planning.workSettings.noMachine", {
+                                  defaultValue: "— Aucune —",
+                                })}
+                              </option>
+                              {machines.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} ({m.interface_type})
+                                </option>
+                              ))}
+                            </select>
+                            {isChangingMachine && (
+                              <Loader2 size={12} className="animate-spin text-slate-400" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
                           <span
                             className={`inline-flex items-center gap-1 text-xs font-semibold ${
                               device.is_active ? "text-emerald-600" : "text-slate-400"
@@ -734,11 +818,6 @@ export function CompanyWorkSettingsPage() {
                               ? t("common.active", { defaultValue: "Actif" })
                               : t("common.inactive", { defaultValue: "Inactif" })}
                           </span>
-                        </td>
-                        <td className="px-3 py-3 text-xs text-slate-500">
-                          {device.last_seen_at
-                            ? new Date(device.last_seen_at).toLocaleString()
-                            : "—"}
                         </td>
                         <td className="px-3 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -831,7 +910,7 @@ export function CompanyWorkSettingsPage() {
             <p className="mb-6 text-sm text-slate-600">
               {t("production.planning.workSettings.deleteDeviceWarning", {
                 defaultValue:
-                  "Cette action est irréversible. L'appareil sera supprimé et toutes ses sessions actives seront fermées. Cette action est tracée et visible dans les rapports.",
+                  "Cette action est irréversible. L'appareil sera supprimé et toutes ses sessions actives seront fermées.",
               })}
             </p>
             <div className="flex gap-3">

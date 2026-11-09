@@ -1108,7 +1108,9 @@
 "deleteDeviceTitle": "Supprimer cet appareil ?",
 "deleteDeviceWarning": "Cette action est irréversible. L'appareil sera supprimé et toutes ses sessions actives seront fermées.",
 "cannotDeleteCurrent": "Impossible de supprimer l'appareil actuel",
-"deviceModeChangedReload": "Le mode de cet appareil a été modifié. L'application va se recharger pour appliquer le nouveau mode."
+"deviceModeChangedReload": "Le mode de cet appareil a été modifié. L'application va se recharger pour appliquer le nouveau mode.",
+"production.planning.workSettings.machine": "Machine",
+"production.planning.workSettings.noMachine": "— Aucune —"
       }
     }
   },

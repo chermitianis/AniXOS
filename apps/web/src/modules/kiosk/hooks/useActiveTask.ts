@@ -62,7 +62,10 @@ interface ActiveTaskState {
 }
 
 export function useActiveTask(workerId: string, shiftId: string | null): ActiveTaskState {
-  const { updateSessionStartedAt } = useWorkerSession();
+  const { updateSessionStartedAt, activeWorker } = useWorkerSession();
+  
+  // ✅ الآلة المرتبطة بالجهاز (من WorkerSessionContext)
+  const deviceMachineId = activeWorker?.machine_id ?? null;
 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [project, setProject] = useState<Project | null>(null);
@@ -102,12 +105,21 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
     return () => clearInterval(interval);
   }, [pieceTask?.id, refreshConsumedSeconds]);
 
-  // ✅ تحميل السياق الأولي مع تصفية الجلسات على الجهاز الحالي فقط
+  // ✅ تحميل السياق الأولي: تصفية الجلسات على الجهاز الحالي فقط
   useEffect(() => {
     let isMounted = true;
 
     async function loadInitialContext() {
       setIsLoadingContext(true);
+
+      // ✅ التحقق من وجود آلة مرتبطة بالجهاز
+      if (!deviceMachineId) {
+        // لا توجد آلة مرتبطة -> الواجهة فارغة (العامل لا يمكنه العمل)
+        if (isMounted) {
+          setIsLoadingContext(false);
+        }
+        return;
+      }
 
       const [planning, allOpenSessions] = await Promise.all([
         fetchTodayPlanningForWorker(workerId),
@@ -122,6 +134,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
       if (isMounted) setActiveSessions(openSessions);
 
+      // ✅ البحث عن جلسة مفتوحة على هذا الجهاز (إن وجدت)
       const openPieceId = openSessions.find((s) => s.piece_task_id)?.piece_task_id ?? null;
 
       if (openPieceId && isMounted) {
@@ -149,9 +162,8 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
           await openShiftPieceWork(shiftId, workerId, piece.id, piece.project_id);
         }
       } else if (planning && isMounted) {
-        // ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> عرض أول قطعة من المخطط (إن وجدت)
-        // لكن، لا نُعيّنها كـ "pieceTask" (الواجهة تبدأ فارغة)
-        // سنتركها للمستخدم ليختار.
+        // ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> الواجهة تبدأ فارغة
+        // (نتركها للمستخدم ليختار)
         setPlanningId(planning.id);
         setOfWorkPackageId(planning.of_work_package_id ?? null);
         if (planning.of_work_package_id) {
@@ -168,7 +180,7 @@ export function useActiveTask(workerId: string, shiftId: string | null): ActiveT
 
     void loadInitialContext();
     return () => { isMounted = false; };
-  }, [workerId, shiftId]);
+  }, [workerId, shiftId, deviceMachineId]);
 
   const selectPlanningOption = useCallback(
     async (
