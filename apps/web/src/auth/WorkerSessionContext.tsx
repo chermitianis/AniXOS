@@ -30,7 +30,7 @@ export interface ActiveWorkerProfile {
   shift_id: string;
   interface_type: InterfaceType;
   device_name: string;
-  machine_id: string | null; // ✅ جديد: الآلة المرتبطة بالجهاز
+  machine_id: string | null;
 }
 
 export interface WorkerLoginResult {
@@ -61,7 +61,6 @@ function loadPersistedSession(): ActiveWorkerProfile | null {
     if (!parsed.id || !parsed.shift_id || !parsed.interface_type || !parsed.device_name) {
       return null;
     }
-    // ✅ إذا كانت الجلسة القديمة لا تحتوي على machine_id (من قبل التعديل)، نعتبرها غير صالحة
     if (!("machine_id" in parsed)) return null;
     return parsed as ActiveWorkerProfile;
   } catch {
@@ -102,7 +101,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // ✅ التحقق من صلاحية الجلسة المحفوظة في قاعدة البيانات عند التحميل
   useEffect(() => {
     async function validatePersistedSession() {
       if (!activeWorker) return;
@@ -138,7 +136,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [activeWorker]);
 
-  // ✅ تحديث session_started_at (عند اختيار قطعة جديدة)
   const updateSessionStartedAt = useCallback((startedAt: string) => {
     setActiveWorker((prev) => (prev ? { ...prev, session_started_at: startedAt } : prev));
   }, []);
@@ -158,7 +155,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
       }
 
       if (result.success && result.profile) {
-        // ✅ جلب device_id المحفوظ محلياً أو استرداده
         let activeDeviceId = getLocalDeviceId();
         if (!activeDeviceId) {
           const companyId = await resolveCompanyId();
@@ -171,7 +167,6 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
           return { success: false, messageKey: "kioskLogin.deviceNotRegistered" };
         }
 
-        // ✅ جلب اسم الجهاز والآلة المرتبطة به
         let deviceName = "—";
         let machineId: string | null = null;
         const device = await fetchDeviceById(activeDeviceId);
@@ -180,10 +175,9 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
           machineId = device.default_machine_id;
         }
 
-        // ✅ بدء الوردية (بدون deviceId)
         const shift = await startWorkerShift(result.profile.id);
 
-        // ✅ جلب الجلسات المفتوحة على هذا الجهاز من قاعدة البيانات مباشرة
+        // ✅ البحث عن جلسة مفتوحة على هذا الجهاز
         let openSessionsOnDevice: WorkSession[] = [];
 
         if (connectivityMonitor.getStatus()) {
@@ -199,32 +193,31 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
             openSessionsOnDevice = sessions as WorkSession[];
           }
         } else {
-          // Fallback: استخدام IndexedDB (قد لا يكون دقيقاً)
           const openSessions = await fetchOpenSessionsForWorker(result.profile.id);
           openSessionsOnDevice = openSessions.filter((s) => s.device_id === activeDeviceId);
         }
 
         if (openSessionsOnDevice.length > 0) {
-          // ✅ هناك جلسة مفتوحة على هذا الجهاز -> استئنافها (باستخدام وقت الجلسة)
+          // ✅ هناك جلسة مفتوحة -> استئنافها
           const session = openSessionsOnDevice[0];
           await hydrateWorkerStateFromServer(result.profile.id, shift);
           setActiveWorker({
             ...result.profile,
-            session_started_at: session.started_at, // ✅ وقت الجلسة
+            session_started_at: session.started_at, // ✅ وقت الجلسة (استئناف)
             shift_id: shift.id,
             device_name: deviceName,
-            machine_id: machineId, // ✅ الآلة المرتبطة بالجهاز
+            machine_id: machineId,
           });
           return { success: true };
         }
 
-        // ✅ لا توجد جلسة مفتوحة على هذا الجهاز -> استخدام وقت الوردية مؤقتاً
+        // ✅ لا توجد جلسة مفتوحة -> الوقت الحالي (يبدأ من الصفر)
         setActiveWorker({
           ...result.profile,
-          session_started_at: shift.started_at, // مؤقتاً
+          session_started_at: new Date().toISOString(), // ✅ الوقت الحالي
           shift_id: shift.id,
           device_name: deviceName,
-          machine_id: machineId, // ✅ الآلة المرتبطة بالجهاز
+          machine_id: machineId,
         });
         return { success: true };
       }
@@ -241,31 +234,26 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     return open.some((s) => Boolean(s.piece_task_id));
   }
 
-  // ✅ التحقق من الجلسات من قاعدة البيانات مباشرة (وليس IndexedDB المحلي)
+  // ✅ التحقق من وجود وردية مفتوحة (وليس جلسات)
   async function hasOtherOpenSessions(): Promise<boolean> {
     if (!activeWorker) return false;
 
-    const currentDeviceId = getLocalDeviceId();
-    if (!currentDeviceId) return false;
-
     if (connectivityMonitor.getStatus()) {
       const { data, error } = await supabase
-        .from("work_sessions")
-        .select("id, device_id")
+        .from("work_shifts")
+        .select("id")
         .eq("worker_id", activeWorker.id)
         .is("ended_at", null)
-        .is("voided_at", null)
-        .neq("device_id", currentDeviceId);
+        .maybeSingle();
 
       if (!error && data) {
-        return data.length > 0;
+        return true; // ✅ هناك وردية مفتوحة -> لا تظهر "Fin de poste"
       }
+      return false;
     }
 
-    // Fallback في حالة عدم الاتصال (قد لا يكون دقيقاً)
-    const open = await fetchOpenSessionsForWorker(activeWorker.id);
-    const otherSessions = open.filter((s) => s.device_id !== currentDeviceId);
-    return otherSessions.length > 0;
+    const shift = await fetchOpenShiftForWorker(activeWorker.id);
+    return shift !== null;
   }
 
   async function logout(options?: { endShift?: boolean }): Promise<void> {
@@ -274,6 +262,7 @@ export function WorkerSessionProvider({ children }: { children: ReactNode }) {
     try {
       await endWorkerShift(activeWorker.shift_id, activeWorker.id, options);
     } finally {
+      localStorage.removeItem(WORKER_SESSION_STORAGE_KEY);
       setActiveWorker(null);
       setIsLoggingOut(false);
     }
