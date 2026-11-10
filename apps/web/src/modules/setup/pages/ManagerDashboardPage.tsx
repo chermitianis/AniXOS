@@ -15,6 +15,8 @@ import {
   Bell,
   Timer,
   ArrowLeft,
+  CheckCircle2,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   Bar,
@@ -59,6 +61,8 @@ type DashboardView =
   | "of"
   | "projects"
   | "alerts";
+
+type DashboardTab = "overview" | "upcoming";
 
 interface MachineRow {
   id: string;
@@ -127,6 +131,17 @@ interface ProjectRow {
   piecesTotal: number;
 }
 
+interface UpcomingProjectRow {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+  due_date: string | null;
+  client_name: string | null;
+  days_left: number | null;
+  display_status: "pending" | "studying" | "in_production" | "completed";
+}
+
 interface KpiData {
   machinesRunning: number;
   machinesAvailable: number;
@@ -173,6 +188,103 @@ function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m === 0 ? `${h} h` : `${h} h ${m}`;
+}
+
+async function fetchUpcomingProjects(companyId: string): Promise<UpcomingProjectRow[]> {
+  // ✅ جلب المشاريع غير المسلمة (is_delivered = false) وليست ملغاة
+  const { data: projects, error } = await supabase
+    .from("projects")
+    .select(`
+      id,
+      name,
+      code,
+      status,
+      due_date,
+      is_delivered,
+      clients (
+        name
+      )
+    `)
+    .eq("company_id", companyId)
+    .eq("is_delivered", false)
+    .neq("status", "cancelled")
+    .neq("status", "draft")
+    .not("due_date", "is", null)
+    .order("due_date", { ascending: true });
+
+  if (error || !projects) {
+    console.error("[fetchUpcomingProjects]", error);
+    return [];
+  }
+
+  // ✅ جلب حالات القطع لكل مشروع (لحساب الحالة المعروضة)
+  const projectIds = projects.map((p) => p.id);
+  const { data: pieces } = await supabase
+    .from("pieces_tasks")
+    .select("project_id, production_status")
+    .eq("company_id", companyId)
+    .in("project_id", projectIds)
+    .neq("status", "cancelled");
+
+  const piecesByProject = new Map<string, { total: number; completed: number; inProduction: number }>();
+  for (const piece of (pieces ?? []) as any[]) {
+    if (!piece.project_id) continue;
+    const stats = piecesByProject.get(piece.project_id) ?? { total: 0, completed: 0, inProduction: 0 };
+    stats.total++;
+    if (piece.production_status === "completed") stats.completed++;
+    if (
+      piece.production_status === "in_progress" ||
+      piece.production_status === "partially_done" ||
+      piece.production_status === "sent" ||
+      piece.production_status === "in_preparation" ||
+      piece.production_status === "ready_to_start" ||
+      piece.production_status === "scheduled"
+    ) {
+      stats.inProduction++;
+    }
+    piecesByProject.set(piece.project_id, stats);
+  }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  return projects.map((p) => {
+    const due = p.due_date ? new Date(p.due_date) : null;
+    const daysLeft = due ? Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+
+    // ✅ حساب الحالة المعروضة في الجدول
+    const stats = piecesByProject.get(p.id) ?? { total: 0, completed: 0, inProduction: 0 };
+    
+    let displayStatus: "pending" | "studying" | "in_production" | "completed";
+    
+    // إذا كانت جميع القطع منتهية -> complété
+    if (stats.total > 0 && stats.completed === stats.total) {
+      displayStatus = "completed";
+    }
+    // إذا كانت هناك قطعة واحدة على الأقل قيد الإنتاج -> en production
+    else if (stats.inProduction > 0) {
+      displayStatus = "in_production";
+    }
+    // إذا كان المشروع في مرحلة الدراسة -> en étude
+    else if (p.status === "studying" || p.status === "studied") {
+      displayStatus = "studying";
+    }
+    // خلاف ذلك -> en attente
+    else {
+      displayStatus = "pending";
+    }
+
+    return {
+      id: p.id,
+      name: p.name,
+      code: p.code,
+      status: p.status,
+      due_date: p.due_date,
+      client_name: (p.clients as { name: string } | null)?.name ?? null,
+      days_left: daysLeft,
+      display_status: displayStatus, // ✅ الحالة المعروضة
+    };
+  });
 }
 
 // ============================================================================
@@ -269,7 +381,23 @@ export function ManagerDashboardPage() {
   const { t, i18n } = useTranslation();
   const { staffUser } = useStaffAuth();
 
-  const [view, setView] = useState<DashboardView>("home");
+  const [view, setView] = useState<DashboardView>(() => {
+    try {
+      const saved = localStorage.getItem("anixos_dashboard_view");
+      return (saved as DashboardView) ?? "home";
+    } catch {
+      return "home";
+    }
+  });
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => {
+    try {
+      const saved = localStorage.getItem("anixos_dashboard_tab");
+      return saved === "upcoming" ? "upcoming" : "overview";
+    } catch {
+      return "overview";
+    }
+  });
+
   const [isLoading, setIsLoading] = useState(true);
   const [kpi, setKpi] = useState<KpiData>({
     machinesRunning: 0,
@@ -288,9 +416,28 @@ export function ManagerDashboardPage() {
   const [production, setProduction] = useState<ProductionPoint[]>([]);
   const [ofRows, setOfRows] = useState<OfRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [upcomingProjects, setUpcomingProjects] = useState<UpcomingProjectRow[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
 
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // ✅ حفظ activeTab في localStorage عند التغيير
+  useEffect(() => {
+    try {
+      localStorage.setItem("anixos_dashboard_tab", activeTab);
+    } catch {
+      // ignore
+    }
+  }, [activeTab]);
+
+  // ✅ حفظ view في localStorage عند التغيير
+  useEffect(() => {
+    try {
+      localStorage.setItem("anixos_dashboard_view", view);
+    } catch {
+      // ignore
+    }
+  }, [view]);
 
   // --------------------------------------------------------------------------
   // Load data
@@ -831,6 +978,10 @@ export function ManagerDashboardPage() {
         }),
       );
 
+      // ===== Step 9b — Upcoming projects =====
+      const upcoming = await fetchUpcomingProjects(companyId);
+      setUpcomingProjects(upcoming);
+
       // ===== Step 10 — Alerts =====
       const alertList: AlertItem[] = [];
 
@@ -933,6 +1084,26 @@ export function ManagerDashboardPage() {
       setIsLoading(false);
     }
   }, [staffUser?.company_id, i18n.language]);
+
+  // ✅ تغيير حالة المشروع إلى "livré"
+  async function handleMarkAsDelivered(projectId: string) {
+    if (!confirm(t("dashboard.upcomingProjects.confirmDeliver", {
+      defaultValue: "Marquer ce projet comme livré ? Il disparaîtra du tableau.",
+    }))) return;
+  
+    // ✅ تحديث is_delivered بدلاً من status
+    const { error } = await supabase
+      .from("projects")
+      .update({ is_delivered: true })
+      .eq("id", projectId);
+  
+    if (error) {
+      alert(error.message);
+      return;
+    }
+  
+    void load(); // إعادة تحميل البيانات (سيختفي المشروع من الجدول)
+  }
 
   // Initial load
   useEffect(() => {
@@ -1502,39 +1673,27 @@ export function ManagerDashboardPage() {
                           </span>
                         </td>
                         <td className="px-3 py-3">
-                          <Badge
-                            variant={
-                              of.status === "done"
-                                ? "info"
-                                : of.status === "late"
-                                  ? "danger"
-                                  : of.status === "in_progress"
-                                    ? "success"
-                                    : of.status === "partial"
-                                      ? "warning"
-                                      : "neutral"
-                            }
-                            size="sm"
-                            dot
-                          >
-                            {of.status === "done"
-                              ? t("dashboard.of.done", { defaultValue: "Terminée" })
-                              : of.status === "late"
-                                ? t("dashboard.of.late", {
-                                    defaultValue: "En retard",
-                                  })
-                                : of.status === "in_progress"
-                                  ? t("dashboard.of.inProgress", {
-                                      defaultValue: "En cours",
-                                    })
-                                  : of.status === "partial"
-                                    ? t("dashboard.of.partial", {
-                                        defaultValue: "Partiel",
-                                      })
-                                    : t("dashboard.of.pending", {
-                                        defaultValue: "En attente",
-                                      })}
-                          </Badge>
+                        <Badge
+  variant={
+    p.display_status === "completed"
+      ? "info"
+      : p.display_status === "in_production"
+        ? "success"
+        : p.display_status === "studying"
+          ? "neutral"
+          : "warning"
+  }
+  size="sm"
+  dot
+>
+  {p.display_status === "completed"
+    ? t("dashboard.upcomingProjects.statusCompleted", { defaultValue: "Complété" })
+    : p.display_status === "in_production"
+      ? t("dashboard.upcomingProjects.statusInProduction", { defaultValue: "En production" })
+      : p.display_status === "studying"
+        ? t("dashboard.upcomingProjects.statusStudying", { defaultValue: "En étude" })
+        : t("dashboard.upcomingProjects.statusPending", { defaultValue: "En attente" })}
+</Badge>
                         </td>
                         <td
                           className="px-4 py-3 text-xs"
@@ -1809,776 +1968,941 @@ export function ManagerDashboardPage() {
   // ==========================================================================
   return (
     <div className="space-y-5">
-      {/* HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1
-            className="text-2xl font-black tracking-tight"
-            style={{ color: "var(--text-primary)" }}
-          >
-            {t("nav.dashboard", { defaultValue: "Tableau de bord" })}
-          </h1>
-          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            {t("dashboard.subtitle", {
-              defaultValue: "Vue d'ensemble de votre production",
-            })}
-          </p>
-        </div>
-        <div
-          className="flex items-center gap-4 text-sm"
-          style={{ color: "var(--text-secondary)" }}
+      {/* ✅ TABS */}
+      <div className="flex border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveTab("overview")}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-bold transition ${
+            activeTab === "overview"
+              ? "border-b-2 border-indigo-600 text-indigo-600"
+              : "text-slate-500 hover:text-slate-700"
+          }`}
         >
-          <span className="inline-flex items-center gap-1.5">
-            <Calendar size={14} />
-            {today}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Clock size={14} />
-            {currentTime}
-          </span>
-        </div>
+          <LayoutDashboard size={16} />
+          {t("dashboard.tabs.overview", { defaultValue: "Vue d'ensemble" })}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("upcoming")}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-bold transition ${
+            activeTab === "upcoming"
+              ? "border-b-2 border-indigo-600 text-indigo-600"
+              : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Package size={16} />
+          {t("dashboard.tabs.upcoming", { defaultValue: "Projets à livrer" })}
+        </button>
       </div>
 
-      {/* KPI ROW */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <div onClick={() => setView("machines")} className="cursor-pointer">
-          <KpiCard
-            icon={<Monitor size={20} />}
-            iconColor="blue"
-            label={t("dashboard.kpi.machinesRunning", {
-              defaultValue: "Machines en production",
-            })}
-            value={kpi.machinesRunning}
-            total={kpi.machinesAvailable}
-            progress={
-              kpi.machinesAvailable > 0
-                ? Math.round((kpi.machinesRunning / kpi.machinesAvailable) * 100)
-                : 0
-            }
-            progressColor="green"
-            caption={
-              kpi.machinesTotal > kpi.machinesAvailable
-                ? `${kpi.machinesTotal - kpi.machinesAvailable} ${t(
-                    "dashboard.kpi.inMaintenance",
-                    { defaultValue: "en maintenance" },
-                  )}`
-                : undefined
-            }
-          />
-        </div>
-
-        <div onClick={() => setView("operators")} className="cursor-pointer">
-          <KpiCard
-            icon={<Users size={20} />}
-            iconColor="purple"
-            label={t("dashboard.kpi.workersActive", {
-              defaultValue: "Opérateurs présents",
-            })}
-            value={kpi.workersPresent}
-            total={kpi.workersTotal}
-            progress={
-              kpi.workersTotal > 0
-                ? Math.round((kpi.workersPresent / kpi.workersTotal) * 100)
-                : 0
-            }
-            progressColor="purple"
-            caption={
-              kpi.workersProductive > 0
-                ? `${kpi.workersProductive} ${t("dashboard.kpi.inProduction", {
-                    defaultValue: "en production",
-                  })}`
-                : undefined
-            }
-          />
-        </div>
-
-        <div onClick={() => setView("of")} className="cursor-pointer">
-          <KpiCard
-            icon={<Package size={20} />}
-            iconColor="green"
-            label={t("dashboard.kpi.ofInProgress", {
-              defaultValue: "Ordres de fabrication",
-            })}
-            value={kpi.ofInProgress}
-            caption={
-              kpi.ofLate > 0
-                ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", {
-                    defaultValue: "en retard",
-                  })}`
-                : undefined
-            }
-          />
-        </div>
-
-        <KpiCard
-          icon={<TrendingUp size={20} />}
-          iconColor="orange"
-          label={t("dashboard.kpi.globalEfficiency", {
-            defaultValue: "Rendement global",
-          })}
-          value={`${kpi.globalEfficiency}%`}
-          progress={kpi.globalEfficiency}
-          progressColor="green"
-        />
-
-        <div onClick={() => setView("alerts")} className="cursor-pointer">
-          <KpiCard
-            icon={<Bell size={20} />}
-            iconColor={kpi.alertsCount > 0 ? "orange" : "green"}
-            label={t("dashboard.kpi.alertsActive", {
-              defaultValue: "Alertes actives",
-            })}
-            value={kpi.alertsCount}
-            caption={
-              kpi.alertsCount === 0
-                ? t("dashboard.kpi.allClear", { defaultValue: "Tout est calme" })
-                : undefined
-            }
-          />
-        </div>
-      </div>
-
-      {/* MAIN GRID */}
-      <div className="grid gap-4 lg:grid-cols-12">
-        {/* Chart */}
-        <Card className="lg:col-span-5">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <CardTitle size="md">
-                {t("dashboard.production.title", { defaultValue: "Production" })}
-              </CardTitle>
-              <span
-                className="text-xs font-semibold"
-                style={{ color: "var(--text-tertiary)" }}
+      {activeTab === "overview" ? (
+        <>
+          {/* HEADER */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1
+                className="text-2xl font-black tracking-tight"
+                style={{ color: "var(--text-primary)" }}
               >
-                —{" "}
-                {t("dashboard.production.subtitle", {
-                  defaultValue: "7 derniers jours",
+                {t("nav.dashboard", { defaultValue: "Tableau de bord" })}
+              </h1>
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                {t("dashboard.subtitle", {
+                  defaultValue: "Vue d'ensemble de votre production",
                 })}
+              </p>
+            </div>
+            <div
+              className="flex items-center gap-4 text-sm"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Calendar size={14} />
+                {today}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Clock size={14} />
+                {currentTime}
               </span>
             </div>
-            <div className="flex items-center gap-3 text-[10px] font-bold">
-              <span
-                className="inline-flex items-center gap-1.5"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                <span
-                  className="h-2 w-2 rounded-sm"
-                  style={{ backgroundColor: "var(--accent-blue)" }}
-                />
-                {t("dashboard.production.legendHours", {
-                  defaultValue: "Heures de production",
-                })}
-              </span>
-              <span
-                className="inline-flex items-center gap-1.5"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                <span
-                  className="h-2 w-2 rounded-sm"
-                  style={{ backgroundColor: "#f97316" }}
-                />
-                {t("dashboard.production.legendPieces", {
-                  defaultValue: "Pièces terminées",
-                })}
-              </span>
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div className="h-[260px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={production}
-                  margin={{ top: 5, right: 5, bottom: 5, left: -20 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#94a3b833"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="day"
-                    stroke="#94a3b8"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    yAxisId="left"
-                    stroke="#94a3b8"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    stroke="#94a3b8"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#1e293b",
-                      border: "1px solid #334155",
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                      color: "#f1f5f9",
-                    }}
-                  />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="hours"
-                    fill="#3b82f6"
-                    radius={[6, 6, 0, 0]}
-                    maxBarSize={32}
-                  />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="pieces"
-                    stroke="#f97316"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </CardBody>
-        </Card>
+          </div>
 
-        {/* Machines (compact) */}
-        <Card className="lg:col-span-4">
-          <CardHeader>
-            <CardTitle size="md">
-              {t("dashboard.machines.title", {
-                defaultValue: "État des machines",
+          {/* KPI ROW */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div onClick={() => setView("machines")} className="cursor-pointer">
+              <KpiCard
+                icon={<Monitor size={20} />}
+                iconColor="blue"
+                label={t("dashboard.kpi.machinesRunning", {
+                  defaultValue: "Machines en production",
+                })}
+                value={kpi.machinesRunning}
+                total={kpi.machinesAvailable}
+                progress={
+                  kpi.machinesAvailable > 0
+                    ? Math.round((kpi.machinesRunning / kpi.machinesAvailable) * 100)
+                    : 0
+                }
+                progressColor="green"
+                caption={
+                  kpi.machinesTotal > kpi.machinesAvailable
+                    ? `${kpi.machinesTotal - kpi.machinesAvailable} ${t(
+                        "dashboard.kpi.inMaintenance",
+                        { defaultValue: "en maintenance" },
+                      )}`
+                    : undefined
+                }
+              />
+            </div>
+
+            <div onClick={() => setView("operators")} className="cursor-pointer">
+              <KpiCard
+                icon={<Users size={20} />}
+                iconColor="purple"
+                label={t("dashboard.kpi.workersActive", {
+                  defaultValue: "Opérateurs présents",
+                })}
+                value={kpi.workersPresent}
+                total={kpi.workersTotal}
+                progress={
+                  kpi.workersTotal > 0
+                    ? Math.round((kpi.workersPresent / kpi.workersTotal) * 100)
+                    : 0
+                }
+                progressColor="purple"
+                caption={
+                  kpi.workersProductive > 0
+                    ? `${kpi.workersProductive} ${t("dashboard.kpi.inProduction", {
+                        defaultValue: "en production",
+                      })}`
+                    : undefined
+                }
+              />
+            </div>
+
+            <div onClick={() => setView("of")} className="cursor-pointer">
+              <KpiCard
+                icon={<Package size={20} />}
+                iconColor="green"
+                label={t("dashboard.kpi.ofInProgress", {
+                  defaultValue: "Ordres de fabrication",
+                })}
+                value={kpi.ofInProgress}
+                caption={
+                  kpi.ofLate > 0
+                    ? `${kpi.ofLate} ${t("dashboard.kpi.ofLate", {
+                        defaultValue: "en retard",
+                      })}`
+                    : undefined
+                }
+              />
+            </div>
+
+            <KpiCard
+              icon={<TrendingUp size={20} />}
+              iconColor="orange"
+              label={t("dashboard.kpi.globalEfficiency", {
+                defaultValue: "Rendement global",
               })}
-            </CardTitle>
-            <CardAction>
-              <button
-                type="button"
-                onClick={() => setView("machines")}
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </button>
-            </CardAction>
-          </CardHeader>
-          <CardBody className="!px-0 !pb-0">
-            <ul className="max-h-[340px] overflow-y-auto">
-              {machines.slice(0, 8).map((m, idx) => {
-                const badgeVariant =
-                  m.display_status === "running"
-                    ? "success"
-                    : m.display_status === "warning"
-                      ? "warning"
-                      : m.display_status === "maintenance"
-                        ? "danger"
-                        : "neutral";
-                const badgeLabel =
-                  m.display_status === "running"
-                    ? m.activity ||
-                      t("dashboard.machines.running", { defaultValue: "En production" })
-                    : m.display_status === "warning"
-                      ? m.activity ||
-                        t("dashboard.machines.warning", { defaultValue: "En arrêt" })
-                      : m.display_status === "maintenance"
-                        ? t("dashboard.machines.maintenance", {
-                            defaultValue: "Maintenance",
-                          })
-                        : m.display_status === "occupied"
-                          ? t("dashboard.machines.occupied", {
-                              defaultValue: "Occupée",
-                            })
-                          : t("dashboard.machines.idle", {
-                              defaultValue: "Disponible",
-                            });
+              value={`${kpi.globalEfficiency}%`}
+              progress={kpi.globalEfficiency}
+              progressColor="green"
+            />
 
-                const hasContext =
-                  m.current_project || m.current_piece || m.current_worker;
-                const showProgress =
-                  m.elapsed_minutes !== null &&
-                  m.estimated_minutes !== null &&
-                  m.estimated_minutes > 0;
-                const progressPct = showProgress
-                  ? Math.min(
-                      100,
-                      Math.round(
-                        (m.elapsed_minutes! / m.estimated_minutes!) * 100,
-                      ),
-                    )
-                  : 0;
+            <div onClick={() => setView("alerts")} className="cursor-pointer">
+              <KpiCard
+                icon={<Bell size={20} />}
+                iconColor={kpi.alertsCount > 0 ? "orange" : "green"}
+                label={t("dashboard.kpi.alertsActive", {
+                  defaultValue: "Alertes actives",
+                })}
+                value={kpi.alertsCount}
+                caption={
+                  kpi.alertsCount === 0
+                    ? t("dashboard.kpi.allClear", { defaultValue: "Tout est calme" })
+                    : undefined
+                }
+              />
+            </div>
+          </div>
 
-                return (
-                  <li
-                    key={m.id}
-                    className="flex items-center gap-3 px-5 py-3"
-                    style={{
-                      borderTop:
-                        idx > 0 ? "1px solid var(--border-subtle)" : "none",
-                    }}
+          {/* MAIN GRID */}
+          <div className="grid gap-4 lg:grid-cols-12">
+            {/* Chart */}
+            <Card className="lg:col-span-5">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CardTitle size="md">
+                    {t("dashboard.production.title", { defaultValue: "Production" })}
+                  </CardTitle>
+                  <span
+                    className="text-xs font-semibold"
+                    style={{ color: "var(--text-tertiary)" }}
                   >
-                    <div
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                    —{" "}
+                    {t("dashboard.production.subtitle", {
+                      defaultValue: "7 derniers jours",
+                    })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[10px] font-bold">
+                  <span
+                    className="inline-flex items-center gap-1.5"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-sm"
+                      style={{ backgroundColor: "var(--accent-blue)" }}
+                    />
+                    {t("dashboard.production.legendHours", {
+                      defaultValue: "Heures de production",
+                    })}
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1.5"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-sm"
+                      style={{ backgroundColor: "#f97316" }}
+                    />
+                    {t("dashboard.production.legendPieces", {
+                      defaultValue: "Pièces terminées",
+                    })}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardBody>
+                <div className="h-[260px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart
+                      data={production}
+                      margin={{ top: 5, right: 5, bottom: 5, left: -20 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="#94a3b833"
+                        vertical={false}
+                      />
+                      <XAxis
+                        dataKey="day"
+                        stroke="#94a3b8"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        stroke="#94a3b8"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        stroke="#94a3b8"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        allowDecimals={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1e293b",
+                          border: "1px solid #334155",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                          color: "#f1f5f9",
+                        }}
+                      />
+                      <Bar
+                        yAxisId="left"
+                        dataKey="hours"
+                        fill="#3b82f6"
+                        radius={[6, 6, 0, 0]}
+                        maxBarSize={32}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="pieces"
+                        stroke="#f97316"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Machines (compact) */}
+            <Card className="lg:col-span-4">
+              <CardHeader>
+                <CardTitle size="md">
+                  {t("dashboard.machines.title", {
+                    defaultValue: "État des machines",
+                  })}
+                </CardTitle>
+                <CardAction>
+                  <button
+                    type="button"
+                    onClick={() => setView("machines")}
+                    className="text-xs font-semibold hover:underline"
+                    style={{ color: "var(--accent-blue)" }}
+                  >
+                    {t("common.viewAll", { defaultValue: "Voir tout →" })}
+                  </button>
+                </CardAction>
+              </CardHeader>
+              <CardBody className="!px-0 !pb-0">
+                <ul className="max-h-[340px] overflow-y-auto">
+                  {machines.slice(0, 8).map((m, idx) => {
+                    const badgeVariant =
+                      m.display_status === "running"
+                        ? "success"
+                        : m.display_status === "warning"
+                          ? "warning"
+                          : m.display_status === "maintenance"
+                            ? "danger"
+                            : "neutral";
+                    const badgeLabel =
+                      m.display_status === "running"
+                        ? m.activity ||
+                          t("dashboard.machines.running", { defaultValue: "En production" })
+                        : m.display_status === "warning"
+                          ? m.activity ||
+                            t("dashboard.machines.warning", { defaultValue: "En arrêt" })
+                          : m.display_status === "maintenance"
+                            ? t("dashboard.machines.maintenance", {
+                                defaultValue: "Maintenance",
+                              })
+                            : m.display_status === "occupied"
+                              ? t("dashboard.machines.occupied", {
+                                  defaultValue: "Occupée",
+                                })
+                              : t("dashboard.machines.idle", {
+                                  defaultValue: "Disponible",
+                                });
+
+                    const hasContext =
+                      m.current_project || m.current_piece || m.current_worker;
+                    const showProgress =
+                      m.elapsed_minutes !== null &&
+                      m.estimated_minutes !== null &&
+                      m.estimated_minutes > 0;
+                    const progressPct = showProgress
+                      ? Math.min(
+                          100,
+                          Math.round(
+                            (m.elapsed_minutes! / m.estimated_minutes!) * 100,
+                          ),
+                        )
+                      : 0;
+
+                    return (
+                      <li
+                        key={m.id}
+                        className="flex items-center gap-3 px-5 py-3"
+                        style={{
+                          borderTop:
+                            idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                        }}
+                      >
+                        <div
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                          style={{
+                            backgroundColor: "var(--bg-muted)",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          <Cog size={18} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="truncate text-sm font-bold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {m.code}
+                            </span>
+                            <Badge variant={badgeVariant} size="sm" dot>
+                              {badgeLabel}
+                            </Badge>
+                          </div>
+                          <div
+                            className="mt-0.5 text-[11px]"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            {m.model}
+                          </div>
+                          {hasContext && (
+                            <div
+                              className="mt-0.5 truncate text-[11px] font-semibold"
+                              style={{ color: "var(--text-secondary)" }}
+                            >
+                              {m.current_project && <span>{m.current_project}</span>}
+                              {m.current_piece && (
+                                <>
+                                  {m.current_project && <span> · </span>}
+                                  <span>{m.current_piece}</span>
+                                </>
+                              )}
+                              {m.current_worker && (
+                                <>
+                                  {(m.current_project || m.current_piece) && (
+                                    <span> · </span>
+                                  )}
+                                  <span>{m.current_worker}</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {showProgress && m.display_status !== "idle" && (
+                            <div className="mt-1.5">
+                              <ProgressBar
+                                value={progressPct}
+                                color={
+                                  m.display_status === "warning" ? "orange" : "green"
+                                }
+                                size="xs"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {machines.length === 0 && (
+                    <li
+                      className="px-5 py-6 text-center text-xs"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {t("setup.noDataYet", { defaultValue: "Aucune machine active" })}
+                    </li>
+                  )}
+                </ul>
+              </CardBody>
+            </Card>
+
+            {/* Alerts (compact) */}
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle size="md">
+                  {t("dashboard.alerts.title", { defaultValue: "Alertes" })}
+                </CardTitle>
+                <CardAction>
+                  <button
+                    type="button"
+                    onClick={() => setView("alerts")}
+                    className="text-xs font-semibold hover:underline"
+                    style={{ color: "var(--accent-blue)" }}
+                  >
+                    {kpi.alertsCount > 0
+                      ? t("common.viewAll", { defaultValue: "Voir tout →" })
+                      : ""}
+                  </button>
+                </CardAction>
+              </CardHeader>
+              <CardBody className="!px-0 !pb-2">
+                <ul className="max-h-[340px] space-y-1 overflow-y-auto">
+                  {alerts.length === 0 && (
+                    <li
+                      className="px-5 py-6 text-center text-xs"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {t("dashboard.alerts.empty", {
+                        defaultValue: "Aucune alerte — tout est sous contrôle.",
+                      })}
+                    </li>
+                  )}
+                  {alerts.slice(0, 6).map((a) => {
+                    const IconComp =
+                      a.kind === "reclamation"
+                        ? Bell
+                        : a.kind === "of_late"
+                          ? AlertCircle
+                          : a.kind === "session_suspect"
+                            ? Timer
+                            : a.kind === "maintenance"
+                              ? Wrench
+                              : FileText;
+
+                    const iconBg =
+                      a.severity === "danger"
+                        ? "rgba(239, 68, 68, 0.12)"
+                        : a.severity === "warning"
+                          ? "rgba(245, 158, 11, 0.12)"
+                          : "rgba(59, 130, 246, 0.12)";
+
+                    const iconColor =
+                      a.severity === "danger"
+                        ? "#ef4444"
+                        : a.severity === "warning"
+                          ? "#f59e0b"
+                          : "#3b82f6";
+
+                    return (
+                      <li key={a.id}>
+                        <div className="flex items-start gap-3 px-5 py-2.5">
+                          <div
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                            style={{ backgroundColor: iconBg, color: iconColor }}
+                          >
+                            <IconComp size={15} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className="truncate text-xs font-bold"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              {a.title}
+                            </p>
+                            <p
+                              className="line-clamp-2 text-[11px]"
+                              style={{ color: "var(--text-tertiary)" }}
+                            >
+                              {a.message}
+                            </p>
+                          </div>
+                          <span
+                            className="shrink-0 text-[10px]"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            {timeAgo(a.created_at, i18n.language)}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </CardBody>
+            </Card>
+          </div>
+
+          {/* SECOND GRID */}
+          <div className="grid gap-4 lg:grid-cols-12">
+            {/* OF (compact) */}
+            <Card className="lg:col-span-7">
+              <CardHeader>
+                <CardTitle size="md">
+                  {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
+                </CardTitle>
+                <CardAction>
+                  <button
+                    type="button"
+                    onClick={() => setView("of")}
+                    className="text-xs font-semibold hover:underline"
+                    style={{ color: "var(--accent-blue)" }}
+                  >
+                    {t("common.viewAll", { defaultValue: "Voir tout →" })}
+                  </button>
+                </CardAction>
+              </CardHeader>
+              <CardBody className="!px-0 !pb-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                        {[
+                          t("dashboard.of.colNumber", { defaultValue: "N° OF" }),
+                          t("dashboard.of.colProject", { defaultValue: "Projet" }),
+                          t("dashboard.of.colProduct", { defaultValue: "Produit" }),
+                          t("dashboard.of.colQty", { defaultValue: "Qté" }),
+                          t("dashboard.of.colProgress", { defaultValue: "Progression" }),
+                          t("dashboard.of.colStatus", { defaultValue: "Statut" }),
+                          t("dashboard.of.colDeadline", { defaultValue: "Échéance" }),
+                        ].map((label, i) => (
+                          <th
+                            key={i}
+                            className={`px-${i === 0 || i === 6 ? "5" : "3"} py-2 text-[10px] font-bold uppercase tracking-wider ${
+                              i === 3 ? "text-center" : "text-start"
+                            }`}
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ofRows.slice(0, 8).map((of) => {
+                        const wpIncomplete = of.wps_total < 2;
+                        return (
+                          <tr
+                            key={of.id}
+                            style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                          >
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`h-2 w-2 shrink-0 rounded-full ${
+                                    of.status === "done"
+                                      ? "bg-blue-500"
+                                      : of.status === "late"
+                                        ? "bg-red-500"
+                                        : of.status === "in_progress"
+                                          ? "bg-emerald-500"
+                                          : of.status === "partial"
+                                            ? "bg-amber-500"
+                                            : "bg-slate-400"
+                                  }`}
+                                />
+                                <span
+                                  className="font-mono text-xs font-semibold"
+                                  style={{ color: "var(--text-primary)" }}
+                                  dir="ltr"
+                                >
+                                  {of.number}
+                                </span>
+                              </div>
+                            </td>
+                            <td
+                              className="px-3 py-3 text-xs"
+                              style={{ color: "var(--text-secondary)" }}
+                            >
+                              {of.project_name}
+                            </td>
+                            <td
+                              className="px-3 py-3 text-xs"
+                              style={{ color: "var(--text-secondary)" }}
+                            >
+                              {of.product}
+                            </td>
+                            <td
+                              className="px-3 py-3 text-center text-xs tabular-nums"
+                              style={{ color: "var(--text-secondary)" }}
+                              dir="ltr"
+                            >
+                              {of.quantity}
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex min-w-[110px] items-center gap-2">
+                                <div className="flex-1">
+                                  <ProgressBar value={of.progress} size="xs" />
+                                </div>
+                                {wpIncomplete && (
+                                  <span
+                                    title={t("dashboard.of.wpIncompleteHint", {
+                                      defaultValue:
+                                        "Work packages incomplets (attendu : cnc + classique)",
+                                    })}
+                                    className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold leading-none text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                                  >
+                                    !
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className="mt-0.5 block text-[10px]"
+                                style={{ color: "var(--text-tertiary)" }}
+                                dir="ltr"
+                              >
+                                {of.wps_done}/{of.wps_total}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3">
+                              <Badge
+                                variant={
+                                  of.status === "done"
+                                    ? "info"
+                                    : of.status === "late"
+                                      ? "danger"
+                                      : of.status === "in_progress"
+                                        ? "success"
+                                        : of.status === "partial"
+                                          ? "warning"
+                                          : "neutral"
+                                }
+                                size="sm"
+                                dot
+                              >
+                                {of.status === "done"
+                                  ? t("dashboard.of.done", { defaultValue: "Terminée" })
+                                  : of.status === "late"
+                                    ? t("dashboard.of.late", {
+                                        defaultValue: "En retard",
+                                      })
+                                    : of.status === "in_progress"
+                                      ? t("dashboard.of.inProgress", {
+                                          defaultValue: "En cours",
+                                        })
+                                      : of.status === "partial"
+                                        ? t("dashboard.of.partial", {
+                                            defaultValue: "Partiel",
+                                          })
+                                        : t("dashboard.of.pending", {
+                                            defaultValue: "En attente",
+                                          })}
+                              </Badge>
+                            </td>
+                            <td
+                              className="px-5 py-3 text-xs"
+                              style={{ color: "var(--text-tertiary)" }}
+                            >
+                              <span dir="ltr">{of.deadline}</span>
+                              {of.days_left !== null && of.status !== "done" && (
+                                <span
+                                  className="mt-0.5 block text-[10px]"
+                                  style={{
+                                    color:
+                                      of.days_left < 0
+                                        ? "#ef4444"
+                                        : of.days_left <= 2
+                                          ? "#f59e0b"
+                                          : "var(--text-tertiary)",
+                                  }}
+                                  dir="ltr"
+                                >
+                                  {of.days_left < 0
+                                    ? `${Math.abs(of.days_left)} j`
+                                    : `${of.days_left} j`}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {ofRows.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="px-5 py-6 text-center text-xs"
+                            style={{ color: "var(--text-tertiary)" }}
+                          >
+                            {t("setup.noDataYet", {
+                              defaultValue: "Aucun ordre de fabrication",
+                            })}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Projects (compact) */}
+            <Card className="lg:col-span-5">
+              <CardHeader>
+                <CardTitle size="md">
+                  {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
+                </CardTitle>
+                <CardAction>
+                  <button
+                    type="button"
+                    onClick={() => setView("projects")}
+                    className="text-xs font-semibold hover:underline"
+                    style={{ color: "var(--accent-blue)" }}
+                  >
+                    {t("common.viewAll", { defaultValue: "Voir tout →" })}
+                  </button>
+                </CardAction>
+              </CardHeader>
+              <CardBody className="!px-0 !pb-0">
+                <ul className="max-h-[340px] overflow-y-auto">
+                  {projects.slice(0, 6).map((p, idx) => (
+                    <li
+                      key={p.id}
+                      className="flex items-center gap-3 px-5 py-3"
                       style={{
-                        backgroundColor: "var(--bg-muted)",
-                        color: "var(--text-tertiary)",
+                        borderTop:
+                          idx > 0 ? "1px solid var(--border-subtle)" : "none",
                       }}
                     >
-                      <Cog size={18} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className="truncate text-sm font-bold"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          {m.code}
-                        </span>
-                        <Badge variant={badgeVariant} size="sm" dot>
-                          {badgeLabel}
-                        </Badge>
-                      </div>
                       <div
-                        className="mt-0.5 text-[11px]"
-                        style={{ color: "var(--text-tertiary)" }}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                        style={{
+                          backgroundColor: "var(--bg-muted)",
+                          color: "var(--text-tertiary)",
+                        }}
                       >
-                        {m.model}
-                      </div>
-                      {hasContext && (
-                        <div
-                          className="mt-0.5 truncate text-[11px] font-semibold"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {m.current_project && <span>{m.current_project}</span>}
-                          {m.current_piece && (
-                            <>
-                              {m.current_project && <span> · </span>}
-                              <span>{m.current_piece}</span>
-                            </>
-                          )}
-                          {m.current_worker && (
-                            <>
-                              {(m.current_project || m.current_piece) && (
-                                <span> · </span>
-                              )}
-                              <span>{m.current_worker}</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {showProgress && m.display_status !== "idle" && (
-                        <div className="mt-1.5">
-                          <ProgressBar
-                            value={progressPct}
-                            color={
-                              m.display_status === "warning" ? "orange" : "green"
-                            }
-                            size="xs"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-              {machines.length === 0 && (
-                <li
-                  className="px-5 py-6 text-center text-xs"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  {t("setup.noDataYet", { defaultValue: "Aucune machine active" })}
-                </li>
-              )}
-            </ul>
-          </CardBody>
-        </Card>
-
-        {/* Alerts (compact) */}
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle size="md">
-              {t("dashboard.alerts.title", { defaultValue: "Alertes" })}
-            </CardTitle>
-            <CardAction>
-              <button
-                type="button"
-                onClick={() => setView("alerts")}
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {kpi.alertsCount > 0
-                  ? t("common.viewAll", { defaultValue: "Voir tout →" })
-                  : ""}
-              </button>
-            </CardAction>
-          </CardHeader>
-          <CardBody className="!px-0 !pb-2">
-            <ul className="max-h-[340px] space-y-1 overflow-y-auto">
-              {alerts.length === 0 && (
-                <li
-                  className="px-5 py-6 text-center text-xs"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  {t("dashboard.alerts.empty", {
-                    defaultValue: "Aucune alerte — tout est sous contrôle.",
-                  })}
-                </li>
-              )}
-              {alerts.slice(0, 6).map((a) => {
-                const IconComp =
-                  a.kind === "reclamation"
-                    ? Bell
-                    : a.kind === "of_late"
-                      ? AlertCircle
-                      : a.kind === "session_suspect"
-                        ? Timer
-                        : a.kind === "maintenance"
-                          ? Wrench
-                          : FileText;
-
-                const iconBg =
-                  a.severity === "danger"
-                    ? "rgba(239, 68, 68, 0.12)"
-                    : a.severity === "warning"
-                      ? "rgba(245, 158, 11, 0.12)"
-                      : "rgba(59, 130, 246, 0.12)";
-
-                const iconColor =
-                  a.severity === "danger"
-                    ? "#ef4444"
-                    : a.severity === "warning"
-                      ? "#f59e0b"
-                      : "#3b82f6";
-
-                return (
-                  <li key={a.id}>
-                    <div className="flex items-start gap-3 px-5 py-2.5">
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                        style={{ backgroundColor: iconBg, color: iconColor }}
-                      >
-                        <IconComp size={15} />
+                        <Package size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p
-                          className="truncate text-xs font-bold"
+                          className="truncate text-sm font-bold"
                           style={{ color: "var(--text-primary)" }}
                         >
-                          {a.title}
+                          {p.name}
                         </p>
                         <p
-                          className="line-clamp-2 text-[11px]"
+                          className="truncate text-[11px]"
                           style={{ color: "var(--text-tertiary)" }}
                         >
-                          {a.message}
+                          {p.client}
                         </p>
+                        <div className="mt-1.5">
+                          <ProgressBar value={p.progress} size="xs" />
+                        </div>
                       </div>
-                      <span
-                        className="shrink-0 text-[10px]"
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        {timeAgo(a.created_at, i18n.language)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardBody>
-        </Card>
-      </div>
-
-      {/* SECOND GRID */}
-      <div className="grid gap-4 lg:grid-cols-12">
-        {/* OF (compact) */}
-        <Card className="lg:col-span-7">
-          <CardHeader>
-            <CardTitle size="md">
-              {t("dashboard.of.title", { defaultValue: "Ordres de fabrication" })}
-            </CardTitle>
-            <CardAction>
-              <button
-                type="button"
-                onClick={() => setView("of")}
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </button>
-            </CardAction>
-          </CardHeader>
-          <CardBody className="!px-0 !pb-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                    {[
-                      t("dashboard.of.colNumber", { defaultValue: "N° OF" }),
-                      t("dashboard.of.colProject", { defaultValue: "Projet" }),
-                      t("dashboard.of.colProduct", { defaultValue: "Produit" }),
-                      t("dashboard.of.colQty", { defaultValue: "Qté" }),
-                      t("dashboard.of.colProgress", { defaultValue: "Progression" }),
-                      t("dashboard.of.colStatus", { defaultValue: "Statut" }),
-                      t("dashboard.of.colDeadline", { defaultValue: "Échéance" }),
-                    ].map((label, i) => (
-                      <th
-                        key={i}
-                        className={`px-${i === 0 || i === 6 ? "5" : "3"} py-2 text-[10px] font-bold uppercase tracking-wider ${
-                          i === 3 ? "text-center" : "text-start"
-                        }`}
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ofRows.slice(0, 8).map((of) => {
-                    const wpIncomplete = of.wps_total < 2;
-                    return (
-                      <tr
-                        key={of.id}
-                        style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                      >
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`h-2 w-2 shrink-0 rounded-full ${
-                                of.status === "done"
-                                  ? "bg-blue-500"
-                                  : of.status === "late"
-                                    ? "bg-red-500"
-                                    : of.status === "in_progress"
-                                      ? "bg-emerald-500"
-                                      : of.status === "partial"
-                                        ? "bg-amber-500"
-                                        : "bg-slate-400"
-                              }`}
-                            />
-                            <span
-                              className="font-mono text-xs font-semibold"
-                              style={{ color: "var(--text-primary)" }}
-                              dir="ltr"
-                            >
-                              {of.number}
-                            </span>
-                          </div>
-                        </td>
-                        <td
-                          className="px-3 py-3 text-xs"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {of.project_name}
-                        </td>
-                        <td
-                          className="px-3 py-3 text-xs"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {of.product}
-                        </td>
-                        <td
-                          className="px-3 py-3 text-center text-xs tabular-nums"
-                          style={{ color: "var(--text-secondary)" }}
+                      <div className="shrink-0 text-end">
+                        <span
+                          className="text-sm font-bold"
+                          style={{ color: "var(--text-primary)" }}
                           dir="ltr"
                         >
-                          {of.quantity}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex min-w-[110px] items-center gap-2">
-                            <div className="flex-1">
-                              <ProgressBar value={of.progress} size="xs" />
-                            </div>
-                            {wpIncomplete && (
-                              <span
-                                title={t("dashboard.of.wpIncompleteHint", {
-                                  defaultValue:
-                                    "Work packages incomplets (attendu : cnc + classique)",
-                                })}
-                                className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold leading-none text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-                              >
-                                !
-                              </span>
-                            )}
-                          </div>
-                          <span
-                            className="mt-0.5 block text-[10px]"
-                            style={{ color: "var(--text-tertiary)" }}
-                            dir="ltr"
-                          >
-                            {of.wps_done}/{of.wps_total}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <Badge
-                            variant={
-                              of.status === "done"
-                                ? "info"
-                                : of.status === "late"
-                                  ? "danger"
-                                  : of.status === "in_progress"
-                                    ? "success"
-                                    : of.status === "partial"
-                                      ? "warning"
-                                      : "neutral"
-                            }
-                            size="sm"
-                            dot
-                          >
-                            {of.status === "done"
-                              ? t("dashboard.of.done", { defaultValue: "Terminée" })
-                              : of.status === "late"
-                                ? t("dashboard.of.late", {
-                                    defaultValue: "En retard",
-                                  })
-                                : of.status === "in_progress"
-                                  ? t("dashboard.of.inProgress", {
-                                      defaultValue: "En cours",
-                                    })
-                                  : of.status === "partial"
-                                    ? t("dashboard.of.partial", {
-                                        defaultValue: "Partiel",
-                                      })
-                                    : t("dashboard.of.pending", {
-                                        defaultValue: "En attente",
-                                      })}
-                          </Badge>
-                        </td>
-                        <td
-                          className="px-5 py-3 text-xs"
+                          {p.progress}%
+                        </span>
+                        <p
+                          className="text-[10px]"
+                          style={{ color: "var(--text-tertiary)" }}
+                          dir="ltr"
+                        >
+                          {p.piecesDone}/{p.piecesTotal}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                  {projects.length === 0 && (
+                    <li
+                      className="px-5 py-6 text-center text-xs"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {t("setup.noDataYet", { defaultValue: "Aucun projet en cours" })}
+                    </li>
+                  )}
+                </ul>
+              </CardBody>
+            </Card>
+          </div>
+        </>
+      ) : (
+        /* ✅ صفحة "Projets à livrer" (كامل الصفحة) */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-800">
+              {t("dashboard.upcomingProjects.title", { defaultValue: "Projets à livrer" })}
+            </h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+              {upcomingProjects.length}
+            </span>
+          </div>
+          <Card>
+            <CardBody className="!px-0 !pb-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                      {[
+                        t("dashboard.upcomingProjects.colProject", { defaultValue: "Projet" }),
+                        t("dashboard.upcomingProjects.colClient", { defaultValue: "Client" }),
+                        t("dashboard.upcomingProjects.colDueDate", { defaultValue: "Échéance" }),
+                        t("dashboard.upcomingProjects.colStatus", { defaultValue: "Statut" }),
+                        t("dashboard.upcomingProjects.colDaysLeft", { defaultValue: "Jours restants" }),
+                        "",
+                      ].map((label, i) => (
+                        <th
+                          key={i}
+                          className={`px-5 py-2 text-[10px] font-bold uppercase tracking-wider ${i === 4 ? "text-end" : "text-start"}`}
                           style={{ color: "var(--text-tertiary)" }}
                         >
-                          <span dir="ltr">{of.deadline}</span>
-                          {of.days_left !== null && of.status !== "done" && (
-                            <span
-                              className="mt-0.5 block text-[10px]"
-                              style={{
-                                color:
-                                  of.days_left < 0
-                                    ? "#ef4444"
-                                    : of.days_left <= 2
-                                      ? "#f59e0b"
-                                      : "var(--text-tertiary)",
-                              }}
-                              dir="ltr"
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {upcomingProjects.map((p) => {
+                      const isOverdue = p.days_left !== null && p.days_left < 0;
+                      return (
+                        <tr
+                          key={p.id}
+                          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                        >
+                          <td className="px-5 py-3">
+                            <div className="flex flex-col">
+                              <span className="font-semibold" style={{ color: "var(--text-primary)" }}>
+                                {p.name}
+                              </span>
+                              <span className="text-[10px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                                {p.code}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                            {p.client_name ?? "—"}
+                          </td>
+                          <td className="px-3 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                            {p.due_date
+                              ? new Date(p.due_date).toLocaleDateString(i18n.language, {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                })
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-3">
+                            <Badge
+                              variant={
+                                p.status === "in_production"
+                                  ? "success"
+                                  : p.status === "ready_for_production" || p.status === "approved"
+                                    ? "warning"
+                                    : "neutral"
+                              }
+                              size="sm"
+                              dot
                             >
-                              {of.days_left < 0
-                                ? `${Math.abs(of.days_left)} j`
-                                : `${of.days_left} j`}
-                            </span>
-                          )}
+                              {p.status === "in_production"
+                                ? t("dashboard.upcomingProjects.statusInProgress", { defaultValue: "En cours" })
+                                : p.status === "ready_for_production" || p.status === "approved"
+                                  ? t("dashboard.upcomingProjects.statusPending", { defaultValue: "En attente" })
+                                  : p.status}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3 text-end">
+                            {p.days_left !== null ? (
+                              <span
+                                className={`inline-flex items-center gap-1 font-mono text-sm font-bold ${
+                                  isOverdue ? "text-red-600" : "text-emerald-600"
+                                }`}
+                              >
+                                {isOverdue ? "+" : "-"} {Math.abs(p.days_left)}
+                                <span className="text-xs font-normal">
+                                  {t("dashboard.upcomingProjects.daysShort", { defaultValue: "j" })}
+                                </span>
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-5 py-3 text-end">
+                            <button
+                              type="button"
+                              onClick={() => void handleMarkAsDelivered(p.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
+                              title={t("dashboard.upcomingProjects.markDelivered", { defaultValue: "Marquer comme livré" })}
+                            >
+                              <CheckCircle2 size={12} />
+                              {t("dashboard.upcomingProjects.delivered", { defaultValue: "Livré" })}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {upcomingProjects.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="px-5 py-6 text-center text-xs"
+                          style={{ color: "var(--text-tertiary)" }}
+                        >
+                          {t("dashboard.upcomingProjects.empty", {
+                            defaultValue: "Aucun projet à livrer pour le moment.",
+                          })}
                         </td>
                       </tr>
-                    );
-                  })}
-                  {ofRows.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="px-5 py-6 text-center text-xs"
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        {t("setup.noDataYet", {
-                          defaultValue: "Aucun ordre de fabrication",
-                        })}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* Projects (compact) */}
-        <Card className="lg:col-span-5">
-          <CardHeader>
-            <CardTitle size="md">
-              {t("dashboard.projects.title", { defaultValue: "Projets en cours" })}
-            </CardTitle>
-            <CardAction>
-              <button
-                type="button"
-                onClick={() => setView("projects")}
-                className="text-xs font-semibold hover:underline"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                {t("common.viewAll", { defaultValue: "Voir tout →" })}
-              </button>
-            </CardAction>
-          </CardHeader>
-          <CardBody className="!px-0 !pb-0">
-            <ul className="max-h-[340px] overflow-y-auto">
-              {projects.slice(0, 6).map((p, idx) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-3 px-5 py-3"
-                  style={{
-                    borderTop:
-                      idx > 0 ? "1px solid var(--border-subtle)" : "none",
-                  }}
-                >
-                  <div
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-                    style={{
-                      backgroundColor: "var(--bg-muted)",
-                      color: "var(--text-tertiary)",
-                    }}
-                  >
-                    <Package size={18} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className="truncate text-sm font-bold"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {p.name}
-                    </p>
-                    <p
-                      className="truncate text-[11px]"
-                      style={{ color: "var(--text-tertiary)" }}
-                    >
-                      {p.client}
-                    </p>
-                    <div className="mt-1.5">
-                      <ProgressBar value={p.progress} size="xs" />
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-end">
-                    <span
-                      className="text-sm font-bold"
-                      style={{ color: "var(--text-primary)" }}
-                      dir="ltr"
-                    >
-                      {p.progress}%
-                    </span>
-                    <p
-                      className="text-[10px]"
-                      style={{ color: "var(--text-tertiary)" }}
-                      dir="ltr"
-                    >
-                      {p.piecesDone}/{p.piecesTotal}
-                    </p>
-                  </div>
-                </li>
-              ))}
-              {projects.length === 0 && (
-                <li
-                  className="px-5 py-6 text-center text-xs"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  {t("setup.noDataYet", { defaultValue: "Aucun projet en cours" })}
-                </li>
-              )}
-            </ul>
-          </CardBody>
-        </Card>
-      </div>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

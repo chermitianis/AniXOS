@@ -30,6 +30,30 @@
   },
   "dashboard": {
     "subtitle": "Vue d'ensemble de votre production",
+    "tabs": {
+  "overview": "Vue d'ensemble",
+  "upcoming": "Projets à livrer"
+},
+    "upcomingProjects": {
+  "title": "Projets à livrer",
+  "colProject": "Projet",
+  "colClient": "Client",
+  "colDueDate": "Échéance",
+  "colStatus": "Statut",
+  "colDaysLeft": "Jours restants",
+  "statusInProgress": "En cours",
+  "statusPending": "En attente",
+  "daysShort": "j",
+  "empty": "Aucun projet à livrer pour le moment.",
+  "markDelivered": "Marquer comme livré",
+  "delivered": "Livré",
+  "confirmDeliver": "Marquer ce projet comme livré ?",
+  "statusPending": "En attente",
+"statusStudying": "En étude",
+"statusInProduction": "En production",
+"statusCompleted": "Complété",
+"confirmDeliver": "Marquer ce projet comme livré ? Il disparaîtra du tableau."
+},
     "kpi": {
       "machinesRunning": "Machines en production",
       "ofInProgress": "Ordres de fabrication",
