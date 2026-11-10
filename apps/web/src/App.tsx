@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { AppRouter } from "./app/AppRouter";
 import { WorkerPlanningApp } from "./modules/worker-planning/pages/WorkerPlanningApp";
 import { startAutoSync } from "./lib/syncEngine";
-import { supabase } from "./lib/supabaseClient";
 import { OdooAutoSync } from "./modules/settings/components/OdooAutoSync";
 
 // La PWA "Planning opérateur" (Mission 1) vit sur sa propre route /planning,
@@ -21,29 +20,19 @@ function App() {
 }
 
 function AppWithSync() {
+  // ✅ تشغيل المزامنة التلقائية بمجرد تحميل التطبيق
+  // (بغض النظر عن وجود جلسة Auth، لأن جهاز الكشك لا يملك جلسة Auth
+  //  لكنه يحتاج إلى تفريغ طابور المزامنة المحلي).
   useEffect(() => {
-    let stopSync: (() => void) | null = null;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        if (!stopSync) stopSync = startAutoSync();
-      } else {
-        if (stopSync) {
-          stopSync();
-          stopSync = null;
-        }
-      }
-    });
-
+    const stopSync = startAutoSync();
     return () => {
-      subscription.unsubscribe();
-      if (stopSync) stopSync();
+      stopSync();
     };
   }, []);
 
   return (
     <>
-      <OdooAutoSync /> {/* 👈 تمت إضافة هذا السطر هنا */}
+      <OdooAutoSync />
       <AppRouter />
     </>
   );
