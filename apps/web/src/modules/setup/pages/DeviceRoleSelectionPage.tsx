@@ -1,8 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Monitor, Factory, CheckCircle2, AlertCircle } from "lucide-react";
 import { registerCurrentDevice } from "../../../lib/deviceContext";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
+import { getOrCreateFingerprint } from "../../../lib/deviceFingerprint";
+import { supabase } from "../../../lib/supabaseClient";
+import { resolveCompanyId } from "../../../lib/companyContext";
 
 interface DeviceRoleSelectionPageProps {
   onRegistered: () => void;
@@ -17,6 +20,38 @@ export function DeviceRoleSelectionPage({ onRegistered }: DeviceRoleSelectionPag
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
 
+  // ✅ تحميل اسم الجهاز المسجل مسبقاً (بناءً على البصمة)
+  useEffect(() => {
+    async function loadExistingDeviceName() {
+      try {
+        const fingerprint = getOrCreateFingerprint();
+        if (!fingerprint) return;
+
+        const companyId = await resolveCompanyId();
+        if (!companyId) return;
+
+        // ✅ البحث عن جهاز مسجل بنفس البصمة
+        const { data, error } = await supabase
+          .from("devices")
+          .select("device_name, device_mode")
+          .eq("company_id", companyId)
+          .eq("device_fingerprint", fingerprint)
+          .maybeSingle();
+
+        if (!error && data) {
+          setDeviceName(data.device_name);
+          if (data.device_mode === "admin" || data.device_mode === "kiosk") {
+            setSelectedMode(data.device_mode);
+          }
+        }
+      } catch (err) {
+        console.error("[loadExistingDeviceName]", err);
+      }
+    }
+
+    void loadExistingDeviceName();
+  }, []);
+
   async function handleConfirm() {
     if (!selectedMode || !deviceName.trim()) return;
     setIsSubmitting(true);
@@ -26,7 +61,6 @@ export function DeviceRoleSelectionPage({ onRegistered }: DeviceRoleSelectionPag
     const result = await registerCurrentDevice(deviceName.trim(), selectedMode);
 
     if (!result.success) {
-      // ✅ إذا كان الخطأ هو تكرار الاسم، نعرضه تحت الحقل
       if (result.errorCode === "name_taken") {
         setNameError(result.message ?? "Ce nom existe déjà.");
       } else {
@@ -42,7 +76,7 @@ export function DeviceRoleSelectionPage({ onRegistered }: DeviceRoleSelectionPag
 
   function handleNameChange(value: string) {
     setDeviceName(value);
-    if (nameError) setNameError(null); // مسح الخطأ عند التعديل
+    if (nameError) setNameError(null);
   }
 
   return (
