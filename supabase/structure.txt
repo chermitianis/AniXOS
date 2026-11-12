@@ -1,0 +1,146 @@
+﻿supabase
++---.temp
+|   +---.supabase-output-create-checkout-session-54O2W7
+|   +---cli-latest
+|   +---gotrue-version
+|   +---linked-project.json
+|   +---pooler-url
+|   +---postgres-version
+|   +---project-ref
+|   +---rest-version
+|   +---storage-migration
+|   \---storage-version
++---functions
+|   +---accept-quote
+|   |   \---index.ts
+|   +---create-account
+|   |   \---index.ts
+|   +---create-checkout-session
+|   |   \---index.ts
+|   +---create-database
+|   |   \---index.ts
+|   +---delete-database
+|   |   \---index.ts
+|   +---dev-delete-account
+|   |   \---index.ts
+|   +---dev-update-account
+|   |   \---index.ts
+|   +---generate-invoice
+|   |   \---index.ts
+|   +---kiosk-credentials-sync
+|   |   \---index.ts
+|   +---paddle-webhook
+|   |   \---index.ts
+|   +---register-device
+|   |   \---index.ts
+|   +---staff-invite
+|   |   \---index.ts
+|   +---sync-odoo-pull
+|   |   \---index.ts
+|   +---sync-odoo-push
+|   |   \---index.ts
+|   +---tenant-provisioning
+|   |   \---index.ts
+|   +---test-odoo-connection
+|   |   \---index.ts
+|   +---worker-login
+|   |   \---index.ts
+|   +---worker-planning-access
+|   |   \---index.ts
+|   +---.env
+|   \---.env.example
++---migrations
+|   +---0001_companies.sql
+|   +---0002_roles_permissions.sql
+|   +---0003_staff_users.sql
+|   +---0004_devices.sql
+|   +---0005_workers.sql
+|   +---0006_machines.sql
+|   +---0007_clients.sql
+|   +---0008_projects.sql
+|   +---0009_pieces_tasks.sql
+|   +---0010_task_types.sql
+|   +---0011_stop_reasons.sql
+|   +---0012_planning.sql
+|   +---0013_work_sessions.sql
+|   +---0014_activity_log.sql
+|   +---0015_odoo_config.sql
+|   +---0016_rls_helpers.sql
+|   +---0017_rls_policies.sql
+|   +---0018_worker_login_security.sql
+|   +---0019_workers_column_security.sql
+|   +---0020_manufacturing_orders.sql
+|   +---0021_inventory.sql
+|   +---0022_sales.sql
+|   +---0023_new_tables_rls.sql
+|   +---0024_reports_views.sql
+|   +---0025_workflow_linkage_columns.sql
+|   +---0026_completion_triggers.sql
+|   +---0027_piece_actuals_view.sql
+|   +---0028_subscription_trial.sql
+|   +---0029_nomenclature.sql
+|   +---0030_nomenclature_rls.sql
+|   +---0031_kiosk_tools_and_handoffs.sql
+|   +---0032_machine_tools_and_handoffs.sql
+|   +---0041_french_company_roles.sql
+|   +---0042_fix_role_rls_and_backfill.sql
+|   +---0043_fix_machine_tools_schema.sql
+|   +---0044_shifts_corrections_realtime.sql
+|   +---0045_unify_machine_tool_count.sql
+|   +---0046_shift_session_detail_view.sql
+|   +---0047_shift_piece_work.sql
+|   +---0048_tool_length_material_reclamations_maintenance.sql
+|   +---0049_live_operations_production_only.sql
+|   +---0050_live_operations_add_piece.sql
+|   +---0051_workshop_reclamations_read_tracking.sql
+|   +---0052_clients_auto_code.sql
+|   +---0053_nomenclature_costing.sql
+|   +---0054_planning_shift_and_mo.sql
+|   +---0055_nomenclature_stages_and_cnc.sql
+|   +---0056_permissions_operations_key_fix.sql
+|   +---0057_live_operations_by_shift.sql
+|   +---0058_piece_actuals_estimated_cost.sql
+|   +---0059_accounts_and_databases.sql
+|   +---0060_platform_settings.sql
+|   +---0061_machine_report_view.sql
+|   +---0062_fix_auth_company_id.sql
+|   +---0063_harden_insert_policies.sql
+|   +---0064_odoo_config_extend.sql
+|   +---0065_odoo_sync_tracking.sql
+|   +---0066_odoo_sync_modules_extend.sql
+|   +---0067_worker_planning_qr.sql
+|   +---0068_crm_prospects.sql
+|   +---0069_accounting_module.sql
+|   +---0070_costing_redesign.sql
+|   +---0071_production_planning_execution_context.sql
+|   +---0072_worker_single_device_session.sql
+|   +---0073_shift_force_close_and_recovery.sql
+|   +---0074_lifecycle_links.sql
+|   +---0075_crm_opportunity_fields.sql
+|   +---0076_nomenclature_validation_audit.sql
+|   +---0077_unique_codes_and_lifecycle.sql
+|   +---0078_projects_study_workflow.sql
+|   +---0079_project_ready_for_production.sql.sql
+|   +---0080_code_sequences_rls.sql
+|   +---0081_piece_costing_status.sql
+|   +---0082_piece_production_status.sql
+|   +---0083_engineering_optional_enrichment.sql
+|   +---0084_crm_integration_fix.sql
+|   +---0085_production_workflow.sql
+|   +---0086_production_preparation.sql
+|   +---0087_auto_primary_operation.sql
+|   +---0088_machines_interface_type.sql
+|   +---0089_planning_enhancements.sql
+|   +---0090_cleanup_duplicate_stages.sql
+|   +---0091_interface_type_cnc_classique.sql
+|   +---0092_planning_auto_close_on_piece_completion.sql
+|   +---0093_strict_tenant_isolation.sql
+|   +---0094_new_code_formats.sql
+|   +---0096_odoo_integration_ids.sql
+|   +---0097_odoo_realtime_sync.sql
+|   \---0098_odoo_sync_foundation.sql
++---odoo-webhook-receiver
+|   \---index.ts
++---config.toml
++---generate-structure.bat
+\---seed.sql
