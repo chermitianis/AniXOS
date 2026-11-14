@@ -133,13 +133,14 @@ interface ProjectRow {
 
 interface UpcomingProjectRow {
   id: string;
-  name: string;
+  name: string; // هذا سيكون quote_number (DV00011)
   code: string;
+  project_name: string;
+  odoo_reference: string | null;
   status: string;
   due_date: string | null;
   client_name: string | null;
   days_left: number | null;
-  display_status: "pending" | "studying" | "in_production" | "completed";
 }
 
 interface KpiData {
@@ -191,24 +192,24 @@ function formatDuration(minutes: number): string {
 }
 
 async function fetchUpcomingProjects(companyId: string): Promise<UpcomingProjectRow[]> {
-  // ✅ جلب المشاريع غير المسلمة (is_delivered = false) وليست ملغاة
   const { data: projects, error } = await supabase
     .from("projects")
     .select(`
       id,
       name,
       code,
+      description,
       status,
       due_date,
       is_delivered,
-      clients (
-        name
-      )
+      odoo_id,
+      quote_id,
+      clients ( name ),
+      quotes:quote_id ( odoo_reference, quote_number )
     `)
     .eq("company_id", companyId)
+    .eq("is_archived", false)
     .eq("is_delivered", false)
-    .neq("status", "cancelled")
-    .neq("status", "draft")
     .not("due_date", "is", null)
     .order("due_date", { ascending: true });
 
@@ -217,74 +218,51 @@ async function fetchUpcomingProjects(companyId: string): Promise<UpcomingProject
     return [];
   }
 
-  // ✅ جلب حالات القطع لكل مشروع (لحساب الحالة المعروضة)
-  const projectIds = projects.map((p) => p.id);
-  const { data: pieces } = await supabase
-    .from("pieces_tasks")
-    .select("project_id, production_status")
-    .eq("company_id", companyId)
-    .in("project_id", projectIds)
-    .neq("status", "cancelled");
-
-  const piecesByProject = new Map<string, { total: number; completed: number; inProduction: number }>();
-  for (const piece of (pieces ?? []) as any[]) {
-    if (!piece.project_id) continue;
-    const stats = piecesByProject.get(piece.project_id) ?? { total: 0, completed: 0, inProduction: 0 };
-    stats.total++;
-    if (piece.production_status === "completed") stats.completed++;
-    if (
-      piece.production_status === "in_progress" ||
-      piece.production_status === "partially_done" ||
-      piece.production_status === "sent" ||
-      piece.production_status === "in_preparation" ||
-      piece.production_status === "ready_to_start" ||
-      piece.production_status === "scheduled"
-    ) {
-      stats.inProduction++;
-    }
-    piecesByProject.set(piece.project_id, stats);
-  }
-
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
   return projects.map((p) => {
     const due = p.due_date ? new Date(p.due_date) : null;
     const daysLeft = due ? Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
-
-    // ✅ حساب الحالة المعروضة في الجدول
-    const stats = piecesByProject.get(p.id) ?? { total: 0, completed: 0, inProduction: 0 };
-    
-    let displayStatus: "pending" | "studying" | "in_production" | "completed";
-    
-    // إذا كانت جميع القطع منتهية -> complété
-    if (stats.total > 0 && stats.completed === stats.total) {
-      displayStatus = "completed";
-    }
-    // إذا كانت هناك قطعة واحدة على الأقل قيد الإنتاج -> en production
-    else if (stats.inProduction > 0) {
-      displayStatus = "in_production";
-    }
-    // إذا كان المشروع في مرحلة الدراسة -> en étude
-    else if (p.status === "studying" || p.status === "studied") {
-      displayStatus = "studying";
-    }
-    // خلاف ذلك -> en attente
-    else {
-      displayStatus = "pending";
-    }
+    const quote = p.quotes as { odoo_reference: string | null; quote_number: string | null } | null;
 
     return {
       id: p.id,
-      name: p.name,
+      name: quote?.quote_number || p.name, // ✅ استخدام quote_number (DV) بدلاً من p.name (S)
       code: p.code,
+      project_name: p.description || "—",
+      odoo_reference: quote?.odoo_reference || null,
       status: p.status,
       due_date: p.due_date,
       client_name: (p.clients as { name: string } | null)?.name ?? null,
       days_left: daysLeft,
-      display_status: displayStatus, // ✅ الحالة المعروضة
     };
   });
+}
+// ✅ مكوّن مساعد للشريط الذكي
+function MarqueeText({ text }: { text: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [shouldAnimate, setShouldAnimate] = useState(false);
+
+  useEffect(() => {
+    if (containerRef.current && textRef.current) {
+      setShouldAnimate(textRef.current.scrollWidth > containerRef.current.clientWidth);
+    }
+  }, [text]);
+
+  return (
+    <div ref={containerRef} className="relative overflow-hidden w-full">
+      <span
+        ref={textRef}
+        className={`whitespace-nowrap inline-block font-semibold ${
+          shouldAnimate ? "animate-marquee" : ""
+        }`}
+      >
+        {text}
+      </span>
+    </div>
+  );
 }
 
 // ============================================================================
@@ -421,27 +399,18 @@ export function ManagerDashboardPage() {
 
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // ✅ حفظ activeTab في localStorage عند التغيير
   useEffect(() => {
     try {
       localStorage.setItem("anixos_dashboard_tab", activeTab);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [activeTab]);
 
-  // ✅ حفظ view في localStorage عند التغيير
   useEffect(() => {
     try {
       localStorage.setItem("anixos_dashboard_view", view);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [view]);
 
-  // --------------------------------------------------------------------------
-  // Load data
-  // --------------------------------------------------------------------------
   const load = useCallback(async () => {
     const companyId = staffUser?.company_id;
     if (!companyId) {
@@ -608,7 +577,6 @@ export function ManagerDashboardPage() {
         });
       }
 
-      // Enrich with worker context (occupied, no active session yet)
       for (const pw of currentPieces as any[]) {
         const key = `${pw.worker_id}::${pw.piece_task_id}`;
         const plan = planningByKey.get(key);
@@ -635,7 +603,6 @@ export function ManagerDashboardPage() {
           piece?.estimated_time_minutes ?? piece?.estimated_minutes ?? null;
       }
 
-      // Enrich with active sessions
       for (const s of (allActiveSessions ?? []) as any[]) {
         if (!s.machine_id) continue;
         const machineRow = machineRowsMap.get(s.machine_id);
@@ -1085,33 +1052,29 @@ export function ManagerDashboardPage() {
     }
   }, [staffUser?.company_id, i18n.language]);
 
-  // ✅ تغيير حالة المشروع إلى "livré"
   async function handleMarkAsDelivered(projectId: string) {
     if (!confirm(t("dashboard.upcomingProjects.confirmDeliver", {
-      defaultValue: "Marquer ce projet comme livré ? Il disparaîtra du tableau.",
+      defaultValue: "Marquer ce projet comme livré ?",
     }))) return;
-  
-    // ✅ تحديث is_delivered بدلاً من status
+
     const { error } = await supabase
       .from("projects")
-      .update({ is_delivered: true })
+      .update({ status: "completed" })
       .eq("id", projectId);
-  
+
     if (error) {
       alert(error.message);
       return;
     }
-  
-    void load(); // إعادة تحميل البيانات (سيختفي المشروع من الجدول)
+
+    void load();
   }
 
-  // Initial load
   useEffect(() => {
     setIsLoading(true);
     void load();
   }, [load]);
 
-  // Live updates
   useEffect(() => {
     const companyId = staffUser?.company_id;
     if (!companyId) return;
@@ -1154,7 +1117,6 @@ export function ManagerDashboardPage() {
     };
   }, [staffUser?.company_id, load]);
 
-  // Render helpers
   const today = useMemo(
     () =>
       new Date().toLocaleDateString(i18n.language, {
@@ -1175,9 +1137,6 @@ export function ManagerDashboardPage() {
     [i18n.language],
   );
 
-  // --------------------------------------------------------------------------
-  // Loading state
-  // --------------------------------------------------------------------------
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -1190,9 +1149,6 @@ export function ManagerDashboardPage() {
     );
   }
 
-  // ==========================================================================
-  // DETAIL VIEWS
-  // ==========================================================================
   const renderMachinesDetail = () => {
     const badgeLabel = (m: MachineRow): { variant: any; label: string } => {
       switch (m.display_status) {
@@ -1673,27 +1629,39 @@ export function ManagerDashboardPage() {
                           </span>
                         </td>
                         <td className="px-3 py-3">
-                        <Badge
-  variant={
-    p.display_status === "completed"
-      ? "info"
-      : p.display_status === "in_production"
-        ? "success"
-        : p.display_status === "studying"
-          ? "neutral"
-          : "warning"
-  }
-  size="sm"
-  dot
->
-  {p.display_status === "completed"
-    ? t("dashboard.upcomingProjects.statusCompleted", { defaultValue: "Complété" })
-    : p.display_status === "in_production"
-      ? t("dashboard.upcomingProjects.statusInProduction", { defaultValue: "En production" })
-      : p.display_status === "studying"
-        ? t("dashboard.upcomingProjects.statusStudying", { defaultValue: "En étude" })
-        : t("dashboard.upcomingProjects.statusPending", { defaultValue: "En attente" })}
-</Badge>
+                          <Badge
+                            variant={
+                              of.status === "done"
+                                ? "info"
+                                : of.status === "late"
+                                  ? "danger"
+                                  : of.status === "in_progress"
+                                    ? "success"
+                                    : of.status === "partial"
+                                      ? "warning"
+                                      : "neutral"
+                            }
+                            size="sm"
+                            dot
+                          >
+                            {of.status === "done"
+                              ? t("dashboard.of.done", { defaultValue: "Terminée" })
+                              : of.status === "late"
+                                ? t("dashboard.of.late", {
+                                    defaultValue: "En retard",
+                                  })
+                                : of.status === "in_progress"
+                                  ? t("dashboard.of.inProgress", {
+                                      defaultValue: "En cours",
+                                    })
+                                  : of.status === "partial"
+                                    ? t("dashboard.of.partial", {
+                                        defaultValue: "Partiel",
+                                      })
+                                    : t("dashboard.of.pending", {
+                                        defaultValue: "En attente",
+                                      })}
+                          </Badge>
                         </td>
                         <td
                           className="px-4 py-3 text-xs"
@@ -1954,18 +1922,12 @@ export function ManagerDashboardPage() {
     );
   };
 
-  // ==========================================================================
-  // ROUTE
-  // ==========================================================================
   if (view === "machines") return renderMachinesDetail();
   if (view === "operators") return renderOperatorsDetail();
   if (view === "of") return renderOfDetail();
   if (view === "projects") return renderProjectsDetail();
   if (view === "alerts") return renderAlertsDetail();
 
-  // ==========================================================================
-  // HOME VIEW
-  // ==========================================================================
   return (
     <div className="space-y-5">
       {/* ✅ TABS */}
@@ -2781,128 +2743,157 @@ export function ManagerDashboardPage() {
             </span>
           </div>
           <Card>
-            <CardBody className="!px-0 !pb-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                      {[
-                        t("dashboard.upcomingProjects.colProject", { defaultValue: "Projet" }),
-                        t("dashboard.upcomingProjects.colClient", { defaultValue: "Client" }),
-                        t("dashboard.upcomingProjects.colDueDate", { defaultValue: "Échéance" }),
-                        t("dashboard.upcomingProjects.colStatus", { defaultValue: "Statut" }),
-                        t("dashboard.upcomingProjects.colDaysLeft", { defaultValue: "Jours restants" }),
-                        "",
-                      ].map((label, i) => (
-                        <th
-                          key={i}
-                          className={`px-5 py-2 text-[10px] font-bold uppercase tracking-wider ${i === 4 ? "text-end" : "text-start"}`}
-                          style={{ color: "var(--text-tertiary)" }}
-                        >
-                          {label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {upcomingProjects.map((p) => {
-                      const isOverdue = p.days_left !== null && p.days_left < 0;
-                      return (
-                        <tr
-                          key={p.id}
-                          style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                        >
-                          <td className="px-5 py-3">
-                            <div className="flex flex-col">
-                              <span className="font-semibold" style={{ color: "var(--text-primary)" }}>
-                                {p.name}
-                              </span>
-                              <span className="text-[10px] font-mono" style={{ color: "var(--text-tertiary)" }}>
-                                {p.code}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-                            {p.client_name ?? "—"}
-                          </td>
-                          <td className="px-3 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-                            {p.due_date
-                              ? new Date(p.due_date).toLocaleDateString(i18n.language, {
-                                  day: "2-digit",
-                                  month: "short",
-                                  year: "numeric",
-                                })
-                              : "—"}
-                          </td>
-                          <td className="px-3 py-3">
-                            <Badge
-                              variant={
-                                p.status === "in_production"
-                                  ? "success"
-                                  : p.status === "ready_for_production" || p.status === "approved"
-                                    ? "warning"
-                                    : "neutral"
-                              }
-                              size="sm"
-                              dot
-                            >
-                              {p.status === "in_production"
-                                ? t("dashboard.upcomingProjects.statusInProgress", { defaultValue: "En cours" })
-                                : p.status === "ready_for_production" || p.status === "approved"
-                                  ? t("dashboard.upcomingProjects.statusPending", { defaultValue: "En attente" })
-                                  : p.status}
-                            </Badge>
-                          </td>
-                          <td className="px-5 py-3 text-end">
-                            {p.days_left !== null ? (
-                              <span
-                                className={`inline-flex items-center gap-1 font-mono text-sm font-bold ${
-                                  isOverdue ? "text-red-600" : "text-emerald-600"
-                                }`}
-                              >
-                                {isOverdue ? "+" : "-"} {Math.abs(p.days_left)}
-                                <span className="text-xs font-normal">
-                                  {t("dashboard.upcomingProjects.daysShort", { defaultValue: "j" })}
-                                </span>
-                              </span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="px-5 py-3 text-end">
-                            <button
-                              type="button"
-                              onClick={() => void handleMarkAsDelivered(p.id)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
-                              title={t("dashboard.upcomingProjects.markDelivered", { defaultValue: "Marquer comme livré" })}
-                            >
-                              <CheckCircle2 size={12} />
-                              {t("dashboard.upcomingProjects.delivered", { defaultValue: "Livré" })}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {upcomingProjects.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className="px-5 py-6 text-center text-xs"
-                          style={{ color: "var(--text-tertiary)" }}
-                        >
-                          {t("dashboard.upcomingProjects.empty", {
-                            defaultValue: "Aucun projet à livrer pour le moment.",
-                          })}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardBody>
+          <CardBody className="!px-0 !pb-0">
+  <div className="overflow-x-auto">
+    <table className="w-full text-left table-auto">
+    <thead>
+  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+    {[
+      t("dashboard.upcomingProjects.colDevis", { defaultValue: "N° Devis" }),
+      t("dashboard.upcomingProjects.colOdooRef", { defaultValue: "Réf. Odoo" }), // ✅ جديد
+      t("dashboard.upcomingProjects.colClient", { defaultValue: "Client" }),
+      t("dashboard.upcomingProjects.colCode", { defaultValue: "Code Projet" }),
+      t("dashboard.upcomingProjects.colProject", { defaultValue: "Projet" }),
+      t("dashboard.upcomingProjects.colDueDate", { defaultValue: "Échéance" }),
+      t("dashboard.upcomingProjects.colStatus", { defaultValue: "Statut" }),
+      t("dashboard.upcomingProjects.colDaysLeft", { defaultValue: "Jours restants" }),
+      "",
+    ].map((label, i) => (
+      <th
+        key={i}
+        className={`px-4 py-3 text-[10px] font-bold uppercase tracking-wider ${
+          i === 7 ? "text-end" : "text-start"
+        }`}
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        {label}
+      </th>
+    ))}
+  </tr>
+</thead>
+      <tbody>
+        {upcomingProjects.map((p) => {
+          const isOverdue = p.days_left !== null && p.days_left < 0;
+          const clientName = p.client_name || "—";
+
+          return (
+            <tr key={p.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+              {/* N° Devis (AniXOS) */}
+<td className="px-4 py-3 text-xs" style={{ color: "var(--text-primary)" }}>
+  <span className="font-mono font-semibold" dir="ltr">{p.name}</span>
+</td>
+
+{/* ✅ Réf. Odoo */}
+<td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+  {p.odoo_reference ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+      {p.odoo_reference}
+    </span>
+  ) : (
+    <span className="text-[10px] text-slate-400">—</span>
+  )}
+</td>
+
+{/* Client */}
+<td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+  {p.client_name ?? "—"}
+</td>
+
+              {/* Code Projet */}
+              <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                <span className="font-mono text-[11px]" dir="ltr">{p.code || "—"}</span>
+              </td>
+
+              {/* Projet (Nom du produit) - المساحة الأكبر والشريط الذكي */}
+              <td className="px-4 py-3 text-xs min-w-[280px]" style={{ color: "var(--text-primary)" }}>
+                <MarqueeText text={p.project_name} />
+              </td>
+
+              {/* Échéance */}
+              <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                {p.due_date
+                  ? new Date(p.due_date).toLocaleDateString(i18n.language, {
+                      day: "2-digit", month: "short", year: "numeric",
+                    })
+                  : "—"}
+              </td>
+
+              {/* Statut */}
+              <td className="px-4 py-3">
+                <Badge
+                  variant={
+                    p.status === "in_production" ? "success"
+                    : p.status === "ready_for_production" || p.status === "approved" ? "warning"
+                    : "neutral"
+                  }
+                  size="sm"
+                  dot
+                >
+                  {p.status === "in_production"
+                    ? t("dashboard.upcomingProjects.statusInProgress", { defaultValue: "En cours" })
+                    : p.status === "ready_for_production" || p.status === "approved"
+                      ? t("dashboard.upcomingProjects.statusPending", { defaultValue: "En attente" })
+                      : p.status}
+                </Badge>
+              </td>
+
+              {/* Jours restants */}
+              <td className="px-4 py-3 text-end">
+                {p.days_left !== null ? (
+                  <span className={`inline-flex items-center gap-1 font-mono text-sm font-bold ${
+                    isOverdue ? "text-red-600" : "text-emerald-600"
+                  }`}>
+                    {isOverdue ? "+" : "-"} {Math.abs(p.days_left)}
+                    <span className="text-xs font-normal">
+                      {t("dashboard.upcomingProjects.daysShort", { defaultValue: "j" })}
+                    </span>
+                  </span>
+                ) : "—"}
+              </td>
+
+              {/* زر Livré */}
+              <td className="px-4 py-3 text-end">
+                <button
+                  type="button"
+                  onClick={() => void handleMarkAsDelivered(p.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
+                  title={t("dashboard.upcomingProjects.markDelivered", { defaultValue: "Marquer comme livré" })}
+                >
+                  <CheckCircle2 size={12} />
+                  {t("dashboard.upcomingProjects.delivered", { defaultValue: "Livré" })}
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+        {upcomingProjects.length === 0 && (
+          <tr>
+            <td colSpan={8} className="px-5 py-6 text-center text-xs" style={{ color: "var(--text-tertiary)" }}>
+              {t("dashboard.upcomingProjects.empty", { defaultValue: "Aucun projet à livrer pour le moment." })}
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</CardBody>
           </Card>
         </div>
       )}
+
+      {/* ✅ إضافة CSS للشريط المتحرك */}
+      <style>{`
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+  }
+  .animate-marquee {
+    animation: marquee 6s linear infinite;
+  }
+  .animate-marquee:hover {
+    animation-play-state: paused;
+  }
+`}</style>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import {
   FolderSearch, Calculator, FileBox, BadgeCheck,
   Gauge, ClipboardCheck, ClipboardList, CalendarClock,
   HardHat, Wrench, Hammer, Package, Boxes, AlertTriangle, Layers,
-  ListChecks, Users2, Link2, DollarSign,
+  ListChecks, Users2, Link2, DollarSign, FileText, History, TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,91 +32,116 @@ const L = (
 });
 
 export const NAV_TREE: NavNode[] = [
-  // 1. Vue d'ensemble (قابل للطي)
+  // 1. Vue d'ensemble
   {
     key: "vue_ensemble",
     labelKey: "navGroup.overview",
     label: "Vue d'ensemble",
     icon: LayoutDashboard,
     children: [
-      L("dashboard", "Tableau de bord", { page: "dashboard", perm: "dashboard" }),
+      L("dashboard", "Dashboard", { page: "dashboard", perm: "dashboard" }),
       L("reports", "Statistiques", { page: "reports", perm: "reports" }),
     ],
   },
 
-  // 2. Commercial (قابل للطي)
+  // 2. Ventes & Commerce
   {
-    key: "commercial", labelKey: "navGroup.commercial", label: "Commercial", icon: Users,
+    key: "ventes_commerce",
+    labelKey: "navGroup.ventes_commerce",
+    label: "Ventes & Commerce",
+    icon: Users,
     children: [
-      L("crm_home", "Pipeline & Prospects", { page: "crm", perm: "crm" }),
+      L("crm_home", "Pipeline (CRM)", { page: "crm", perm: "crm" }),
       L("crm_clients", "Clients", { page: "clients", perm: "clients" }),
       L("crm_devis", "Devis", { page: "quotes", perm: "quotes" }),
+      L("crm_commandes", "Commandes", { page: "orders", perm: "orders" }),
     ],
   },
 
-  // 3. Ingénierie (قابل للطي)
+  // 3. Achats & Stock
+  {
+    key: "achats_stock", labelKey: "navGroup.achats_stock", label: "Achats & Stock", icon: Package,
+    children: [
+      L("achats_fournisseurs", "Fournisseurs", { page: "suppliers", perm: "suppliers" }),
+      L("achats_commandes", "Commandes d'achat", { page: "purchase_orders", perm: "purchase_orders" }),
+      L("stock_produits", "Produits & Matières", { page: "products", perm: "products" }),
+      L("stock_mouvements", "Mouvements", { page: "stock_movements", perm: "stock_movements" }),
+    ],
+  },
+
+  // 4. Ingénierie
   {
     key: "ingenierie", labelKey: "navGroup.ingenierie", label: "Ingénierie", icon: FolderSearch,
     children: [
       L("ingenierie_projets", "Projets à étudier", { page: "projects", perm: "projects" }),
-      L("ingenierie_nomenclature", "Nomenclature & chiffrage", { page: "nomenclature", perm: "nomenclature" }),
+      L("ingenierie_nomenclature", "Nomenclature", { page: "nomenclature", perm: "nomenclature" }),
       L("ingenierie_dossiers", "Dossiers techniques", { page: "engineering_dossiers", perm: "nomenclature" }),
-      L("ingenierie_rapports_prod", "Rapports production", { page: "production_reports", perm: "reports" }),
-      L("ingenierie_validation", "Validation technique", { page: "engineering_validation", perm: "nomenclature" }),
+      L("ingenierie_validation", "Validation", { page: "engineering_validation", perm: "nomenclature" }),
+      L("ingenierie_documents", "Documents", { page: "engineering_documents", perm: "nomenclature" }),
+      L("ingenierie_revisions", "Révisions", { page: "engineering_revisions", perm: "nomenclature" }),
     ],
   },
 
-  // 4. Production (قابل للطي)
+  // 5. Fabrication
   {
-    key: "production", labelKey: "navGroup.production", label: "Production", icon: Gauge,
+    key: "fabrication", labelKey: "navGroup.fabrication", label: "Fabrication", icon: Gauge,
     children: [
       L("production_dashboard", "Suivi OF", { page: "production_dashboard", perm: "production" }),
-      L("production_preparation", "Préparation des dossiers", { page: "production_preparation", perm: "production" }),
+      L("production_lancement", "Lancement", { page: "production_launch", perm: "production" }),
       L("production_ordres", "Ordres de fabrication", { page: "manufacturing_orders", perm: "manufacturing_orders" }),
       L("production_planification", "Planification", { page: "planning", perm: "planning" }),
+      L("production_qualite", "Qualité", { page: "quality", perm: "quality" }),
+      L("production_couts", "Coûts", { page: "production_costs", perm: "production" }),
+      {
+        key: "atelier", labelKey: "navGroup.atelier", label: "Atelier", icon: Wrench,
+        children: [
+          L("atelier_operateurs", "Opérateurs", { page: "workers", perm: "workers" }),
+          L("atelier_machines", "Machines", { page: "machines", perm: "machines" }),
+          L("atelier_operations", "Opérations", { page: "operations", perm: "operations" }),
+          L("atelier_outillages", "Outillages", { page: "tooling", perm: "tooling" }),
+          L("atelier_matieres", "Matières", { page: "materials", perm: "materials" }),
+          L("atelier_equipements", "Équipements", { page: "equipment", perm: "equipment" }),
+          L("atelier_maintenance", "Maintenance", { page: "maintenance", perm: "maintenance" }),
+          L("atelier_ressources", "Ressources", { page: "resources", perm: "resources" }),
+        ],
+      },
     ],
   },
 
-  // 5. Atelier (قابل للطي)
-  {
-    key: "atelier", labelKey: "navGroup.atelier", label: "Atelier", icon: Wrench,
-    children: [
-      L("atelier_operateurs", "Opérateurs", { page: "workers", perm: "workers" }),
-      L("atelier_machines_cnc", "Machines", { page: "machines", perm: "machines" }),
-      L("atelier_operations", "Opérations", { page: "operations", perm: "operations" }),
-      L("atelier_outillages", "Outillages"),
-      L("atelier_matieres", "Matières & consommables"),
-      L("atelier_equipements", "Équipements"),
-      L("atelier_maintenance", "Maintenance"),
-      L("atelier_ressources", "Ressources disponibles"),
-    ],
-  },
-
-  // 6. Finance (قابل للطي)
+  // 6. Finance
   {
     key: "finance", labelKey: "navGroup.finance", label: "Finance", icon: Landmark,
     children: [
-      L("compta_dashboard", "Tableau de bord financier", { page: "accounting", perm: "accounting" }),
-      L("compta_generale", "Comptabilité générale"),
-      L("compta_clients", "Clients & encaissements"),
-      L("compta_fournisseurs", "Fournisseurs & paiements"),
-      L("compta_banque", "Banque & trésorerie"),
-      L("compta_caisse", "Caisse"),
-      L("compta_stocks", "Stocks & valorisation"),
-      L("compta_analytique", "Comptabilité analytique"),
-      L("compta_controle", "Contrôle de gestion"),
-      L("compta_budgets", "Budgets & prévisions"),
-      L("compta_immobilisations", "Immobilisations"),
-      L("compta_paie", "Paie & charges sociales"),
-      L("compta_fiscalite", "Fiscalité"),
-      L("compta_rapports", "Rapports financiers"),
+      L("compta_dashboard", "Dashboard", { page: "accounting", perm: "accounting" }),
+      L("compta_generale", "Compta. Générale", { page: "accounting_general", perm: "accounting" }),
+      L("compta_encaissements", "Encaissements", { page: "accounting_receipts", perm: "accounting" }),
+      L("compta_paiements", "Paiements", { page: "accounting_payments", perm: "accounting" }),
+      L("compta_tresorerie", "Trésorerie", { page: "accounting_treasury", perm: "accounting" }),
+      L("compta_caisse", "Caisse", { page: "accounting_cash", perm: "accounting" }),
+      L("compta_valorisation", "Valorisation", { page: "accounting_valuation", perm: "accounting" }),
+      L("compta_analytique", "Analytique", { page: "accounting_analytic", perm: "accounting" }),
+      L("compta_controle", "Contrôle", { page: "accounting_control", perm: "accounting" }),
+      L("compta_budgets", "Budgets", { page: "accounting_budgets", perm: "accounting" }),
+      L("compta_immobilisations", "Immobilisations", { page: "accounting_assets", perm: "accounting" }),
+      L("compta_paie", "Paie", { page: "accounting_payroll", perm: "accounting" }),
+      L("compta_fiscalite", "Fiscalité", { page: "accounting_tax", perm: "accounting" }),
+      L("compta_rapports", "Rapports", { page: "accounting_reports", perm: "accounting" }),
     ],
   },
 
-  // 7. Archives (رابط مباشر بدون سهم - أعجبك)
-  L("archive", "Archives", { icon: ArchiveIcon, labelKey: "navGroup.archives", page: "archive", perm: "archive" }),
+  // 7. Archives (موسع)
+  {
+    key: "archives", labelKey: "navGroup.archives", label: "Archives", icon: ArchiveIcon,
+    children: [
+      L("archives_projets", "Tous les projets", { page: "archive_projects", perm: "archive" }),
+      L("archives_pieces", "Toutes les pièces", { page: "archive_pieces", perm: "archive" }),
+      L("archives_couts", "Historique des coûts", { page: "archive_costs", perm: "archive" }),
+      L("archives_clients", "Historique des clients", { page: "archive_clients", perm: "archive" }),
+      L("archives_rapports", "Rapports d'archives", { page: "archive_reports", perm: "archive" }),
+    ],
+  },
 
-  // 8. Administration (قابل للطي)
+  // 8. Administration (كما هي بالضبط)
   {
     key: "administration", labelKey: "navGroup.admin", label: "Administration", icon: Users2,
     children: [
@@ -125,7 +150,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 9. Sécurité & audit (قابل للطي - إعادة الأقسام الفرعية)
+  // 9. Sécurité & audit (كما هي بالضبط)
   {
     key: "securite_audit",
     labelKey: "navGroup.security",
@@ -140,7 +165,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 10. Paramètres (قابل للطي - إعادة الأقسام الفرعية)
+  // 10. Paramètres (كما هي بالضبط)
   {
     key: "parametres",
     labelKey: "navGroup.settings",
@@ -155,7 +180,7 @@ export const NAV_TREE: NavNode[] = [
     ],
   },
 
-  // 11. Intégrations (قابل للطي - إعادة Odoo)
+  // 11. Intégrations (كما هي بالضبط)
   {
     key: "integrations",
     labelKey: "navGroup.integrations",
@@ -165,4 +190,13 @@ export const NAV_TREE: NavNode[] = [
       L("admin_integrations_odoo", "Odoo", { page: "admin_odoo", perm: "settings" }),
     ],
   },
+
+  // في navTree.ts، أضف هذا العنصر (بدون أيقونة، أو في قسم Ventes & Commerce)
+{
+  key: "order_detail",
+  labelKey: "navGroup.orderDetail",
+  label: "Détail Commande",
+  pageKey: "order_detail",
+  // لا نضع icon، لأنها صفحة تفاصيل
+}
 ];

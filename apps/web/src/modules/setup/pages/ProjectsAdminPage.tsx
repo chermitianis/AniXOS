@@ -1,55 +1,62 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Loader2, X, Plus, ClipboardCheck, CheckCircle2,
-  AlertTriangle, Send, Search, Package, Tag, RotateCcw,
+  Loader2, Search, Package, ChevronRight, ChevronDown, FolderTree,
+  ClipboardCheck, CheckCircle2, FileSpreadsheet, Boxes,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 import { useStaffAuth } from "../../../auth/StaffAuthContext";
-import { AdminField, adminInputClass } from "../components/AdminField";
-import { ProjectReportModal } from "../components/ProjectReportModal";
-import { PiecesInput, type PieceDraft } from "../../../shared/components/PiecesInput";
-import { generateProjectCode, generatePieceCode } from "../../../shared/utils/codes";
+import { useNav } from "../../../app/NavContext";
 import { deriveProjectStatus } from "../../production/api/projectsStatusApi";
 import type { Project, PieceTask, Client } from "../../../shared/types/database";
 
 type ClientWithCode = Client & { code: string | null };
-type StatusTab = "all" | "draft" | "studying" | "approved" | "in_production" | "completed";
+type StatusTab = "all" | "draft" | "studying" | "approved";
 type CostingStatus = "non_etudie" | "brouillon" | "en_attente" | "valide";
 type ProductionStatus =
   | "not_sent" | "sent" | "in_preparation" | "ready_to_start"
   | "scheduled" | "in_progress" | "partially_done" | "completed" | "on_hold";
 
+type PieceType = "technical_piece" | "operation";
+
 type PieceWithStatus = PieceTask & {
   costing_status: CostingStatus;
   production_status: ProductionStatus;
+  piece_type: PieceType;
+  parent_piece_id: string | null;
 };
 
+interface OperationNode extends PieceWithStatus {}
+
+interface TechnicalPieceNode extends PieceWithStatus {
+  operations: OperationNode[];
+}
+
+interface MainProductNode extends PieceWithStatus {
+  technical_pieces: TechnicalPieceNode[];
+}
+
+interface ProjectTree extends Project {
+  main_products: MainProductNode[];
+}
+
 const STATUS_TABS: { key: StatusTab; labelKey: string }[] = [
-  { key: "all",            labelKey: "setup.tabAll" },
-  { key: "draft",          labelKey: "setup.tabDraft" },
-  { key: "studying",       labelKey: "setup.tabStudying" },
-  { key: "approved",       labelKey: "setup.tabApproved" },
-  { key: "in_production",  labelKey: "setup.tabInProduction" },
-  { key: "completed",      labelKey: "setup.tabCompleted" },
+  { key: "all", labelKey: "setup.tabAll" },
+  { key: "draft", labelKey: "setup.tabDraft" },
+  { key: "studying", labelKey: "setup.tabStudying" },
+  { key: "approved", labelKey: "setup.tabApproved" },
 ];
 
 const STATUS_STYLES: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
   studying: "bg-amber-100 text-amber-700",
   approved: "bg-blue-100 text-blue-700",
-  ready_for_production: "bg-indigo-100 text-indigo-700",
-  in_production: "bg-indigo-100 text-indigo-700",
-  completed: "bg-green-100 text-green-700",
-  cancelled: "bg-red-100 text-red-600",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
   draft: "setup.statusDraft",
   studying: "setup.statusStudying",
   approved: "setup.statusApproved",
-  ready_for_production: "setup.statusReadyForProduction",
-  completed: "setup.statusCompleted",
 };
 
 const COSTING_BADGE: Record<CostingStatus, { labelKey: string; cls: string }> = {
@@ -73,8 +80,6 @@ const PROD_BADGE: Record<string, { labelKey: string; cls: string }> = {
 
 function matchesTab(status: string, tab: StatusTab): boolean {
   if (tab === "all") return true;
-  if (tab === "in_production")
-    return status === "ready_for_production" || status === "in_production";
   return status === tab;
 }
 
@@ -86,43 +91,37 @@ function formatMinutesAsHM(minutes: number): string {
   return `${h}h ${m}min`;
 }
 
-export function ProjectsAdminPage() {
+export function ProjectsAdminPage({ onNavigate }: { onNavigate?: (key: string) => void }) {
   const { staffUser } = useStaffAuth();
   const { t } = useTranslation();
+  const { consumeParams } = useNav();
   const companyId = staffUser?.company_id ?? null;
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<ClientWithCode[]>([]);
-  const [piecesByProject, setPiecesByProject] = useState<Record<string, PieceWithStatus[]>>({});
-  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
-  const [reportProjectId, setReportProjectId] = useState<string | null>(null);
+  const [projectTrees, setProjectTrees] = useState<Record<string, ProjectTree>>({});
+  
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [expandedMainProducts, setExpandedMainProducts] = useState<Set<string>>(new Set());
+  const [expandedTechnicalPieces, setExpandedTechnicalPieces] = useState<Set<string>>(new Set());
 
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [search, setSearch] = useState("");
-
-  // Modal création
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newClientId, setNewClientId] = useState("");
-  const [newDueDate, setNewDueDate] = useState("");
-  const [newNotes, setNewNotes] = useState("");
-  const [newPieces, setNewPieces] = useState<PieceDraft[]>([]);
-  const [codePreview, setCodePreview] = useState<string | null>(null);
-  const [isCodeLoading, setIsCodeLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [duplicateMatches, setDuplicateMatches] = useState<Project[] | null>(null);
-
-  // Modal ajout pièces
-  const [showPieceForm, setShowPieceForm] = useState(false);
-  const [pieceProjectId, setPieceProjectId] = useState("");
-  const [pieceDrafts, setPieceDrafts] = useState<PieceDraft[]>([]);
-  const [isImportingPieces, setIsImportingPieces] = useState(false);
-
   const [busyPieceId, setBusyPieceId] = useState<string | null>(null);
+  
+  const [initialProjectId, setInitialProjectId] = useState<string | null>(null);
+
+  // ✅ قراءة projectId من navigation params (مرة واحدة فقط)
+  useEffect(() => {
+    const params = consumeParams();
+    if (params?.projectId) {
+      setInitialProjectId(params.projectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // -----------------------------------------------------------------------
-  // Chargements
+  // تحميل المشاريع والعملاء
   // -----------------------------------------------------------------------
   async function loadProjects() {
     if (!companyId) return;
@@ -131,6 +130,7 @@ export function ProjectsAdminPage() {
       .select("*")
       .eq("company_id", companyId)
       .eq("is_archived", false)
+      .in("status", ["draft", "studying", "approved"])
       .order("created_at", { ascending: false });
     setProjects((data as Project[]) ?? []);
   }
@@ -145,17 +145,44 @@ export function ProjectsAdminPage() {
     setClients((data as ClientWithCode[]) ?? []);
   }
 
-  async function loadPieces(projectId: string) {
+  // ✅ تحميل الشجرة
+  async function loadProjectTree(projectId: string) {
     if (!companyId) return;
-    const { data } = await supabase
+
+    const { data: allPieces } = await supabase
       .from("pieces_tasks")
       .select("*")
       .eq("company_id", companyId)
       .eq("project_id", projectId)
       .order("sequence_order");
-    setPiecesByProject((prev) => ({
+
+    const pieces = (allPieces as PieceWithStatus[]) ?? [];
+
+    // 3 مستويات: main_products (parent_piece_id = null) -> technical_pieces -> operations
+    const mainProducts = pieces.filter((p) => p.piece_type === "technical_piece" && !p.parent_piece_id);
+    const technicalPieces = pieces.filter((p) => p.piece_type === "technical_piece" && p.parent_piece_id);
+    const operations = pieces.filter((p) => p.piece_type === "operation");
+
+    const mainProductNodes: MainProductNode[] = mainProducts.map((mp) => {
+      const tpNodes: TechnicalPieceNode[] = technicalPieces
+        .filter((tp) => tp.parent_piece_id === mp.id)
+        .map((tp) => ({
+          ...tp,
+          operations: operations.filter((op) => op.parent_piece_id === tp.id),
+        }));
+
+      return {
+        ...mp,
+        technical_pieces: tpNodes,
+      };
+    });
+
+    setProjectTrees((prev) => ({
       ...prev,
-      [projectId]: (data as PieceWithStatus[]) ?? [],
+      [projectId]: {
+        ...projects.find((p) => p.id === projectId)!,
+        main_products: mainProductNodes,
+      },
     }));
   }
 
@@ -165,129 +192,22 @@ export function ProjectsAdminPage() {
   }, [companyId]);
 
   useEffect(() => {
-    if (!companyId || !newClientId) {
-      setCodePreview(null);
-      return;
-    }
-    let mounted = true;
-    setIsCodeLoading(true);
-    void generateProjectCode(companyId, newClientId).then((code) => {
-      if (mounted) {
-        setCodePreview(code);
-        setIsCodeLoading(false);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [companyId, newClientId]);
-
-  // Auto-expand : pour chaque projet visible, charger ses pièces
-  useEffect(() => {
     for (const p of projects) {
-      if (!piecesByProject[p.id]) void loadPieces(p.id);
+      if (!projectTrees[p.id]) void loadProjectTree(p.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects]);
 
-  // -----------------------------------------------------------------------
-  // Création projet
-  // -----------------------------------------------------------------------
-  function detectDuplicates(nameToCheck: string): Project[] {
-    const normalized = nameToCheck.trim().toLowerCase();
-    if (!normalized) return [];
-    return projects.filter((p) => p.name.trim().toLowerCase() === normalized);
-  }
-
-  function handleCreateAttempt(e: FormEvent) {
-    e.preventDefault();
-    setCreateError(null);
-    if (!newName.trim()) { setCreateError("Le nom du projet est obligatoire."); return; }
-    if (!newClientId) { setCreateError("Le client est obligatoire."); return; }
-    if (newPieces.length === 0) { setCreateError("Le projet doit contenir au moins une pièce."); return; }
-    const matches = detectDuplicates(newName);
-    if (matches.length > 0) { setDuplicateMatches(matches); return; }
-    void performCreate();
-  }
-
-  async function performCreate() {
-    if (!staffUser || !companyId) return;
-    setIsSaving(true);
-    setCreateError(null);
-    try {
-      let inserted: { id: string; code: string | null } | null = null;
-      let lastError: { message?: string; code?: string } | null = null;
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const finalCode = await generateProjectCode(companyId, newClientId);
-        const { data, error } = await supabase
-          .from("projects")
-          .insert({
-            company_id: companyId,
-            client_id: newClientId,
-            name: newName.trim(),
-            code: finalCode,
-            description: newNotes.trim() || null,
-            due_date: newDueDate || null,
-            status: "draft",
-          } as never)
-          .select("id, code")
-          .single();
-
-        if (!error && data) {
-          inserted = data as { id: string; code: string | null };
-          break;
-        }
-        lastError = error as { message?: string; code?: string } | null;
-        if (lastError?.code !== "23505") break;
-      }
-
-      if (!inserted) {
-        setCreateError(lastError?.message ?? "Erreur lors de la création.");
-        return;
-      }
-      const projectRow = inserted;
-      const projectCode = projectRow.code ?? "—";
-
-      const pieceRows = newPieces.map((p, i) => ({
-        company_id: companyId,
-        project_id: projectRow.id,
-        name: p.name.trim(),
-        code: generatePieceCode(projectCode, i),
-        sequence_order: i,
-        costing_status: "non_etudie",
-        production_status: "not_sent",
-      }));
-
-      const { error: piecesError } = await supabase
-        .from("pieces_tasks")
-        .insert(pieceRows);
-
-      if (piecesError) {
-        await supabase
-          .from("projects")
-          .delete()
-          .eq("id", projectRow.id)
-          .eq("company_id", companyId);
-        setCreateError(piecesError.message);
-        return;
-      }
-
-      setNewName(""); setNewClientId(""); setNewDueDate("");
-      setNewNotes(""); setNewPieces([]); setCodePreview(null);
-      setDuplicateMatches(null); setIsCreateOpen(false);
-      await loadProjects();
-      await loadPieces(projectRow.id);
-    } finally {
-      setIsSaving(false);
+  // ✅ فتح المشروع المحدد تلقائياً بعد تحميل الشجرة
+  useEffect(() => {
+    if (initialProjectId && projectTrees[initialProjectId]) {
+      setExpandedProjects((prev) => new Set(prev).add(initialProjectId));
     }
-  }
+  }, [initialProjectId, projectTrees]);
 
   // -----------------------------------------------------------------------
-  // Actions PIÈCE (pas projet)
+  // Actions
   // -----------------------------------------------------------------------
-
-  /** Étudier : piece.non_etudie → piece.en_attente (déclenche l'entrée en étude) */
   async function handleStudyPiece(piece: PieceWithStatus) {
     if (!companyId) return;
     setBusyPieceId(piece.id);
@@ -313,7 +233,7 @@ export function ProjectsAdminPage() {
         } as never);
       }
 
-      await loadPieces(piece.project_id);
+      await loadProjectTree(piece.project_id);
       await deriveProjectStatus(piece.project_id, companyId);
       await loadProjects();
     } finally {
@@ -321,143 +241,35 @@ export function ProjectsAdminPage() {
     }
   }
 
-  /** Reprendre l'étude : piece.brouillon → piece.en_attente */
-  async function handleResumeStudy(piece: PieceWithStatus) {
-    if (!companyId) return;
-    setBusyPieceId(piece.id);
-    try {
-      await supabase
-        .from("pieces_tasks")
-        .update({ costing_status: "en_attente" } as never)
-        .eq("id", piece.id)
-        .eq("company_id", companyId);
-      await loadPieces(piece.project_id);
-      await deriveProjectStatus(piece.project_id, companyId);
-      await loadProjects();
-    } finally {
-      setBusyPieceId(null);
-    }
+  function toggleProject(projectId: string) {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
   }
 
-  /** Envoyer la pièce seule en production */
-  async function handleSendPieceToProduction(piece: PieceWithStatus) {
-    if (!companyId) return;
-    setBusyPieceId(piece.id);
-    try {
-      await supabase
-        .from("pieces_tasks")
-        .update({
-          production_status: "sent",
-          sent_to_production_at: new Date().toISOString(),
-        } as never)
-        .eq("id", piece.id)
-        .eq("company_id", companyId);
-      await loadPieces(piece.project_id);
-      await deriveProjectStatus(piece.project_id, companyId);
-      await loadProjects();
-    } finally {
-      setBusyPieceId(null);
-    }
+  function toggleMainProduct(id: string) {
+    setExpandedMainProducts((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTechnicalPiece(id: string) {
+    setExpandedTechnicalPieces((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   // -----------------------------------------------------------------------
-  // Modal ajouter pièces
-  // -----------------------------------------------------------------------
-  function openPieceForm() {
-    setPieceProjectId("");
-    setPieceDrafts([]);
-    setShowPieceForm(true);
-  }
-
-  async function handleAddPiecesToExisting(e: FormEvent) {
-    e.preventDefault();
-    if (!companyId || !pieceProjectId || pieceDrafts.length === 0) return;
-    setIsImportingPieces(true);
-    try {
-      const { data: proj } = await supabase
-        .from("projects")
-        .select("code")
-        .eq("id", pieceProjectId)
-        .eq("company_id", companyId)
-        .maybeSingle();
-      const projectCode = (proj as { code: string | null } | null)?.code ?? "PRJ";
-      
-      // 1. جلب القطع الموجودة مسبقاً في المشروع
-      const currentPieces = piecesByProject[pieceProjectId] ?? [];
-      const existingNames = new Set(
-        currentPieces.map((p) => p.name.trim().toLowerCase())
-      );
-
-      // 2. تصفية القطع الجديدة: تجاهل أي قطعة تحمل نفس الاسم
-      const newDrafts = pieceDrafts.filter(
-        (p) => !existingNames.has(p.name.trim().toLowerCase())
-      );
-
-      // 3. إذا كانت كل القطع مكررة، نعرض رسالة تنبيه
-      if (newDrafts.length === 0) {
-        alert("القطع التالية موجودة مسبقاً في هذا المشروع ولا يمكن إضافتها مرة أخرى.");
-        setIsImportingPieces(false);
-        return;
-      }
-
-      // 4. إذا كانت بعض القطع مكررة، نعرض رسالة تنبيه ثم نضيف الجديدة فقط
-      if (newDrafts.length < pieceDrafts.length) {
-        alert(`تم تجاهل بعض القطع لأنها موجودة مسبقاً. سيتم إضافة ${newDrafts.length} قطعة جديدة فقط.`);
-      }
-
-      const offset = currentPieces.length;
-
-      const rows = newDrafts.map((p, i) => ({
-        company_id: companyId,
-        project_id: pieceProjectId,
-        name: p.name.trim(),
-        code: generatePieceCode(projectCode, offset + i),
-        sequence_order: offset + i,
-        costing_status: "non_etudie",
-        production_status: "not_sent",
-      }));
-
-      const { error } = await supabase.from("pieces_tasks").insert(rows);
-      
-      if (error) {
-        if (error.code === "23505") {
-          alert("خطأ: القطعة موجودة مسبقاً في هذا المشروع (قيد فريد).");
-        } else {
-          alert(`خطأ أثناء الإضافة: ${error.message}`);
-        }
-        setIsImportingPieces(false);
-        return;
-      }
-      
-      setShowPieceForm(false);
-      setPieceDrafts([]);
-      await loadPieces(pieceProjectId);
-    } finally {
-      setIsImportingPieces(false);
-    }
-  }
-
-  function toggleExpand(projectId: string) {
-    if (expandedProjectId === projectId) {
-      setExpandedProjectId(null);
-    } else {
-      setExpandedProjectId(projectId);
-      if (!piecesByProject[projectId]) void loadPieces(projectId);
-    }
-  }
-
-  async function archiveProject(projectId: string) {
-    if (!companyId) return;
-    await supabase
-      .from("projects")
-      .update({ is_archived: true, archived_at: new Date().toISOString() })
-      .eq("id", projectId)
-      .eq("company_id", companyId);
-    await loadProjects();
-  }
-
-  // -----------------------------------------------------------------------
-  // Filtrage
+  // Filtering
   // -----------------------------------------------------------------------
   const searchedProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -477,33 +289,18 @@ export function ProjectsAdminPage() {
       ? searchedProjects.length
       : searchedProjects.filter((p) => matchesTab(p.status, tab)).length;
 
-  const existingPieceNamesForModal = useMemo(() => {
-    if (!pieceProjectId) return [];
-    return (piecesByProject[pieceProjectId] ?? []).map((p) => p.name);
-  }, [pieceProjectId, piecesByProject]);
-
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setIsCreateOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"
-        >
-          <Plus size={14} />
-          {t("setup.createProject")}
-        </button>
-        <button
-          type="button"
-          onClick={openPieceForm}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-        >
-          <Plus size={14} />
-          {t("setup.addPiece")}
-        </button>
+        <h1 className="text-lg font-bold text-slate-800">
+          {t("setup.projectsToStudy", { defaultValue: "Projets à étudier" })}
+        </h1>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+          {filteredProjects.length}
+        </span>
         <div className="relative ms-auto max-w-xs flex-1">
           <Search size={14} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -547,139 +344,162 @@ export function ProjectsAdminPage() {
         <ul className="flex flex-col gap-3">
           {filteredProjects.map((p) => {
             const client = clients.find((c) => c.id === p.client_id);
-            const pieces = piecesByProject[p.id] ?? [];
-            const isExpanded = expandedProjectId === p.id;
-            const sentCount = pieces.filter((x) =>
-              ["sent", "in_preparation", "ready_to_start", "scheduled",
-               "in_progress", "partially_done", "completed"].includes(x.production_status),
-            ).length;
-            const validatedCount = pieces.filter((x) => x.costing_status === "valide").length;
+            const tree = projectTrees[p.id];
+            const isExpanded = expandedProjects.has(p.id);
+            const mainProducts = tree?.main_products ?? [];
+            const totalTechPieces = mainProducts.reduce((sum, mp) => sum + mp.technical_pieces.length, 0);
+            const totalOps = mainProducts.reduce((sum, mp) => sum + mp.technical_pieces.reduce((s, tp) => s + tp.operations.length, 0), 0);
 
             return (
               <li key={p.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                <button
-                  onClick={() => toggleExpand(p.id)}
-                  className="flex w-full items-start justify-between gap-2 text-start"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-700">{p.name}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      <span dir="ltr" className="font-mono">{p.code ?? "—"}</span>
-                      {client && <span>· {client.name}</span>}
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[p.status] ?? "bg-slate-100 text-slate-500"}`}>
-                        {t(STATUS_LABEL_KEYS[p.status] ?? p.status)}
-                      </span>
-                      {pieces.length > 0 && (
-                        <span className="text-indigo-600">
-                          · {validatedCount}/{pieces.length} validée(s) · {sentCount}/{pieces.length} envoyée(s)
+                {/* رأس المشروع */}
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    onClick={() => toggleProject(p.id)}
+                    className="flex flex-1 items-start gap-2 text-start"
+                  >
+                    {isExpanded ? <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400" /> : <ChevronRight size={16} className="mt-0.5 shrink-0 text-slate-400" />}
+                    <FolderTree size={16} className="mt-0.5 shrink-0 text-indigo-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-slate-700">{p.name}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span dir="ltr" className="font-mono">{p.code ?? "—"}</span>
+                        {client && <span>· {client.name}</span>}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_STYLES[p.status] ?? "bg-slate-100 text-slate-500"}`}>
+                          {t(STATUS_LABEL_KEYS[p.status] ?? p.status)}
                         </span>
-                      )}
+                        {mainProducts.length > 0 && (
+                          <span className="text-indigo-600">
+                            · {mainProducts.length} produit(s) · {totalTechPieces} pièce(s) tech. · {totalOps} opération(s)
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <span className="shrink-0 text-slate-400">{isExpanded ? "▲" : "▼"}</span>
-                </button>
+                  </button>
 
-                {p.status === "completed" && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      onClick={() => void archiveProject(p.id)}
-                      className="rounded bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
-                    >
-                      {t("setup.archiveAction")}
-                    </button>
-                    <button
-                      onClick={() => setReportProjectId(p.id)}
-                      className="rounded bg-slate-800 px-3 py-1 text-xs font-semibold text-white"
-                    >
-                      {t("setup.viewReport")}
-                    </button>
-                  </div>
-                )}
+                  <button
+                    onClick={() => {
+                      if (onNavigate) onNavigate("nomenclature");
+                      else window.location.hash = "#/nomenclature";
+                    }}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-700"
+                  >
+                    <FileSpreadsheet size={11} />
+                    {t("setup.createNomenclature", { defaultValue: "Créer nomenclature" })}
+                  </button>
+                </div>
 
+                {/* الشجرة */}
                 {isExpanded && (
                   <div className="mt-3 border-t border-slate-200 pt-3">
                     <p className="mb-2 text-xs font-semibold text-slate-500">
-                      {t("setup.piecesUnder")}
+                      {t("setup.mainProducts", { defaultValue: "Produits principaux" })}
                     </p>
-                    <ul className="flex flex-col gap-1.5">
-                      {pieces.map((piece) => {
-                        const costing = COSTING_BADGE[piece.costing_status] ?? COSTING_BADGE.non_etudie;
-                        const prod = PROD_BADGE[piece.production_status] ?? PROD_BADGE.not_sent;
-                        const busy = busyPieceId === piece.id;
-                        const canStudy = piece.costing_status === "non_etudie";
-                        const canResume = piece.costing_status === "brouillon";
-                        const canSend = piece.costing_status === "valide" && piece.production_status === "not_sent";
-                        const isSent = piece.production_status !== "not_sent";
+                    <ul className="flex flex-col gap-2">
+                      {mainProducts.map((mp) => {
+                        const isMpExpanded = expandedMainProducts.has(mp.id);
+                        const costing = COSTING_BADGE[mp.costing_status] ?? COSTING_BADGE.non_etudie;
+                        const prod = PROD_BADGE[mp.production_status] ?? PROD_BADGE.not_sent;
+                        const busy = busyPieceId === mp.id;
+                        const canStudy = mp.costing_status === "non_etudie";
 
                         return (
-                          <li
-                            key={piece.id}
-                            className="flex flex-wrap items-center gap-2 rounded bg-white px-2.5 py-2 text-xs"
-                          >
-                            <Package size={13} className="shrink-0 text-slate-400" />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate font-semibold text-slate-700">{piece.name}</span>
-                                <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">
-                                  {piece.code ?? "—"}
-                                </span>
-                              </div>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
-                                {piece.material && <span>{piece.material}</span>}
-                                {piece.estimated_time_minutes && (
-                                  <span>· {formatMinutesAsHM(piece.estimated_time_minutes)}</span>
+                          <li key={mp.id} className="rounded-lg border border-indigo-200 bg-indigo-50/30 overflow-hidden">
+                            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                              <button
+                                onClick={() => toggleMainProduct(mp.id)}
+                                className="flex items-center gap-1 text-slate-500 hover:text-slate-700"
+                              >
+                                {isMpExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                              <Boxes size={14} className="shrink-0 text-indigo-600" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate font-semibold text-slate-700">{mp.name}</span>
+                                  <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">
+                                    {mp.code ?? "—"}
+                                  </span>
+                                </div>
+                                {mp.technical_pieces.length > 0 && (
+                                  <div className="mt-0.5 text-[10px] text-slate-400">
+                                    {mp.technical_pieces.length} pièce(s) technique(s)
+                                  </div>
                                 )}
-                                {piece.phase && <span>· Phase {piece.phase}</span>}
                               </div>
+
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${costing.cls}`}>
+                                {t(costing.labelKey)}
+                              </span>
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${prod.cls}`}>
+                                {t(prod.labelKey)}
+                              </span>
+
+                              {canStudy && (
+                                <button
+                                  onClick={() => void handleStudyPiece(mp)}
+                                  disabled={busy}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+                                >
+                                  {busy ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />}
+                                  {t("setup.studyProject")}
+                                </button>
+                              )}
                             </div>
 
-                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${costing.cls}`}>
-                              {t(costing.labelKey)}
-                            </span>
-                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${prod.cls}`}>
-                              {t(prod.labelKey)}
-                            </span>
+                            {isMpExpanded && (
+                              <ul className="border-t border-indigo-100 bg-white/50 px-3 py-2 space-y-1.5">
+                                {mp.technical_pieces.map((tp) => {
+                                  const isTpExpanded = expandedTechnicalPieces.has(tp.id);
+                                  const tpCosting = COSTING_BADGE[tp.costing_status] ?? COSTING_BADGE.non_etudie;
+                                  const tpProd = PROD_BADGE[tp.production_status] ?? PROD_BADGE.not_sent;
 
-                            {canStudy && (
-                              <button
-                                onClick={() => void handleStudyPiece(piece)}
-                                disabled={busy}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-                              >
-                                {busy ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />}
-                                {t("setup.studyProject")}
-                              </button>
-                            )}
-                            {canResume && (
-                              <button
-                                onClick={() => void handleResumeStudy(piece)}
-                                disabled={busy}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-                              >
-                                {busy ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-                                {t("setup.continueStudy")}
-                              </button>
-                            )}
-                            {canSend && (
-                              <button
-                                onClick={() => void handleSendPieceToProduction(piece)}
-                                disabled={busy}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                              >
-                                {busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-                                {t("setup.sendToProduction")}
-                              </button>
-                            )}
-                            {isSent && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                                <CheckCircle2 size={10} />
-                                {t("setup.pieceSentToProduction")}
-                              </span>
+                                  return (
+                                    <li key={tp.id} className="rounded border border-slate-200 bg-white overflow-hidden">
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5">
+                                        <button
+                                          onClick={() => toggleTechnicalPiece(tp.id)}
+                                          className="text-slate-400 hover:text-slate-600"
+                                        >
+                                          {isTpExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                        </button>
+                                        <Package size={12} className="shrink-0 text-slate-500" />
+                                        <span className="flex-1 truncate text-xs font-semibold text-slate-700">{tp.name}</span>
+                                        <span className="shrink-0 font-mono text-[10px] text-slate-400" dir="ltr">{tp.code ?? "—"}</span>
+                                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${tpCosting.cls}`}>
+                                          {t(tpCosting.labelKey)}
+                                        </span>
+                                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${tpProd.cls}`}>
+                                          {t(tpProd.labelKey)}
+                                        </span>
+                                      </div>
+
+                                      {isTpExpanded && tp.operations.length > 0 && (
+                                        <ul className="border-t border-slate-100 bg-slate-50/30 px-2 py-1.5 space-y-1">
+                                          {tp.operations.map((op) => (
+                                            <li key={op.id} className="flex items-center gap-2 text-[11px]">
+                                              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 shrink-0" />
+                                              <span className="font-medium text-slate-700 truncate">{op.name}</span>
+                                              {op.estimated_time_minutes && (
+                                                <span className="text-[10px] text-slate-400 font-mono" dir="ltr">
+                                                  {formatMinutesAsHM(op.estimated_time_minutes)}
+                                                </span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                                {mp.technical_pieces.length === 0 && (
+                                  <li className="text-xs text-slate-400">{t("setup.noPiecesYet")}</li>
+                                )}
+                              </ul>
                             )}
                           </li>
                         );
                       })}
-                      {pieces.length === 0 && (
+                      {mainProducts.length === 0 && (
                         <li className="text-xs text-slate-400">{t("setup.noPiecesYet")}</li>
                       )}
                     </ul>
@@ -694,233 +514,6 @@ export function ProjectsAdminPage() {
           )}
         </ul>
       </div>
-
-      {/* Modal Nouveau projet */}
-      {isCreateOpen && !duplicateMatches && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <form
-            onSubmit={handleCreateAttempt}
-            className="flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-xl"
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-              <h2 className="text-base font-bold text-slate-800">{t("setup.createProject")}</h2>
-              <button
-                type="button"
-                onClick={() => setIsCreateOpen(false)}
-                className="rounded p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <AdminField label={`${t("setup.client")} *`}>
-                  <select
-                    value={newClientId}
-                    onChange={(e) => setNewClientId(e.target.value)}
-                    className={adminInputClass}
-                    required
-                  >
-                    <option value="">— Choisir un client —</option>
-                    {clients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.code ? `[${c.code}] ` : ""}
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </AdminField>
-
-                <AdminField label={t("setup.projectCode")}>
-                  <div className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 font-mono text-sm text-slate-600" dir="ltr">
-                    {isCodeLoading ? (
-                      <Loader2 size={13} className="animate-spin text-slate-400" />
-                    ) : (
-                      codePreview ?? "—"
-                    )}
-                  </div>
-                </AdminField>
-              </div>
-
-              <AdminField label={`${t("setup.projectName")} *`}>
-                <input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className={adminInputClass}
-                  required
-                  autoFocus
-                />
-              </AdminField>
-
-              <AdminField label="Date de livraison">
-                <input
-                  type="date"
-                  value={newDueDate}
-                  onChange={(e) => setNewDueDate(e.target.value)}
-                  className={adminInputClass}
-                />
-              </AdminField>
-
-              <div>
-                <div className="mb-2 flex items-center gap-2">
-                  <Tag size={13} className="text-slate-500" />
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                    Pièces du projet *
-                  </span>
-                </div>
-                <PiecesInput value={newPieces} onChange={setNewPieces} compact />
-                <p className="mt-1 text-[11px] text-slate-400">
-                  Au moins une pièce est requise pour créer le projet.
-                </p>
-              </div>
-
-              <AdminField label="Notes">
-                <textarea
-                  value={newNotes}
-                  onChange={(e) => setNewNotes(e.target.value)}
-                  rows={2}
-                  className={adminInputClass}
-                />
-              </AdminField>
-
-              {createError && (
-                <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-                  {createError}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
-              <button
-                type="button"
-                onClick={() => setIsCreateOpen(false)}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {isSaving && <Loader2 size={13} className="animate-spin" />}
-                {isSaving ? t("setup.saving") : t("setup.createProject")}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Modal Doublon */}
-      {duplicateMatches && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-            <div className="mb-3 flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
-                <AlertTriangle size={20} />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-800">
-                  {t("setup.duplicateWarningTitle")}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {t("setup.duplicateWarningBody", { count: duplicateMatches.length })}
-                </p>
-              </div>
-            </div>
-            <ul className="mb-4 max-h-40 space-y-1 overflow-y-auto rounded-lg bg-slate-50 p-3">
-              {duplicateMatches.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="truncate font-semibold text-slate-700">{p.name}</span>
-                  <span className="shrink-0 font-mono text-slate-400" dir="ltr">{p.code}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setDuplicateMatches(null)}
-                className="flex-1 rounded-lg border border-slate-300 bg-white py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                onClick={() => void performCreate()}
-                disabled={isSaving}
-                className="flex-1 rounded-lg bg-amber-600 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-50"
-              >
-                {isSaving ? t("setup.saving") : t("setup.duplicateConfirm")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal ajouter pièces à projet existant */}
-      {showPieceForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <form
-            onSubmit={handleAddPiecesToExisting}
-            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-800">{t("setup.addPiece")}</h2>
-              <button
-                type="button"
-                onClick={() => setShowPieceForm(false)}
-                className="rounded p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <AdminField label={`${t("setup.selectProject")} *`}>
-              <select
-                value={pieceProjectId}
-                onChange={(e) => {
-                  setPieceProjectId(e.target.value);
-                  if (e.target.value && !piecesByProject[e.target.value]) {
-                    void loadPieces(e.target.value);
-                  }
-                }}
-                className={adminInputClass}
-                required
-              >
-                <option value="">{t("setup.selectProject")}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.code ?? "—"}
-                  </option>
-                ))}
-              </select>
-            </AdminField>
-
-            <div className="mt-3">
-              <PiecesInput
-                value={pieceDrafts}
-                onChange={setPieceDrafts}
-                existingNames={existingPieceNamesForModal}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isImportingPieces || !pieceProjectId || pieceDrafts.length === 0}
-              className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {isImportingPieces && <Loader2 size={13} className="animate-spin" />}
-              {isImportingPieces ? t("setup.saving") : `Ajouter ${pieceDrafts.length} pièce(s)`}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {reportProjectId && (
-        <ProjectReportModal
-          projectId={reportProjectId}
-          onClose={() => setReportProjectId(null)}
-        />
-      )}
     </div>
   );
 }

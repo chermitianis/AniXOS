@@ -1,9 +1,12 @@
 // ============================================================================
 // accept-quote Edge Function
 //
-// Accepter un devis → créer un Project en 'draft' + un Manufacturing Order
-// initial. Le projet entre automatiquement dans le workflow Ingénierie.
-// Le code (PRJ-YYYY-NNNN) est généré par le trigger DB.
+// Accepter un devis → créer un Project + Pièces techniques.
+// Supporte 2 modes :
+//   - Mode Standard : quote_items sans piece_type → 1 pièce par ligne
+//   - Mode Hiérarchique : quote_items avec piece_type → parent + enfants
+// Si le produit a une nomenclature validée → créer un OF.
+// ✅ Nouveau : vérifie si Odoo est actif pour éviter les doublons.
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -58,7 +61,16 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // 1) Récupérer le devis + items
+    // ✅ 1. التحقق من حالة Odoo
+    const { data: odooConfig } = await adminClient
+      .from("odoo_config")
+      .select("is_active")
+      .eq("company_id", companyId)
+      .maybeSingle();
+
+    const odooActive = (odooConfig as { is_active: boolean } | null)?.is_active ?? false;
+
+    // 2. جلب الـ Devis + العناصر
     const { data: quote, error: quoteError } = await adminClient
       .from("quotes")
       .select("*, quote_items(*)")
@@ -78,31 +90,36 @@ Deno.serve(async (req) => {
     }
 
     const quoteItems = (quote.quote_items ?? []) as {
+      id: string;
+      description: string;
       quantity: number;
       unit_price: number;
-      description: string;
+      piece_type?: string;
+      parent_item_id?: string | null;
     }[];
+    
     const totalAmount = quoteItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0);
 
     let createdProjectId: string | null = null;
     let createdOrderId: string | null = null;
 
     try {
-      // 2) Créer le projet — démarre en 'draft', entre dans Ingénierie
+      // 3. إنشاء المشروع
       const { data: project, error: projectError } = await adminClient
-        .from("projects")
-        .insert({
-          company_id: companyId,
-          client_id: quote.client_id,
-          name: project_name,
-          code: null,                                 // ← trigger 0077 le génère
-          status: "draft",                            // ← entre dans Ingénierie
-          quoted_price: totalAmount,                  // ← prix convenu
-          estimated_cost: null,                       // ← sera calculé en Ingénierie
-          opportunity_id: quote.prospect_id ?? null,
-        })
-        .select()
-        .single();
+      .from("projects")
+      .insert({
+        company_id: companyId,
+        client_id: quote.client_id,
+        name: project_name,
+        code: null,
+        status: "draft",
+        quoted_price: totalAmount,
+        estimated_cost: null,
+        opportunity_id: quote.prospect_id ?? null,
+        quote_id: quote.id, // ✅ ربط المشروع بالـ Devis
+      })
+      .select()
+      .single();
 
       if (projectError || !project) {
         throw new Error(
@@ -113,29 +130,108 @@ Deno.serve(async (req) => {
       }
       createdProjectId = project.id;
 
-      // 3) Créer un ordre de fabrication initial
-      const firstItemDescription = quoteItems[0]?.description ?? project_name;
+      // 4. إنشاء القطع التقنية (هيكل هرمي: main_product ← technical_pieces)
+      const hasPieceType = quoteItems.some((it) => it.piece_type !== undefined);
+      
+      if (hasPieceType) {
+        // ✅ الوضع الجديد: Hierarchical
+        const mainProducts = quoteItems.filter((it) => it.piece_type === "main_product");
+        const technicalPieces = quoteItems.filter((it) => it.piece_type === "technical_piece");
 
-      const { data: order, error: orderError } = await adminClient
-        .from("manufacturing_orders")
-        .insert({
-          company_id: companyId,
-          project_id: project.id,
-          quote_id: quote.id,
-          order_number: `MO-${quote.quote_number}`,
-          product_name: firstItemDescription,
-          quantity: 1,
-          status: "confirmed",
-        })
-        .select()
-        .single();
+        let parentPieceId: string | null = null;
+        
+        for (const mp of mainProducts) {
+          const { data: insertedMain, error: mainError } = await adminClient
+            .from("pieces_tasks")
+            .insert({
+              company_id: companyId,
+              project_id: project.id,
+              name: mp.description,
+              quantity: mp.quantity,
+              piece_type: "technical_piece",
+              status: "pending",
+              production_status: "not_sent",
+              material: null,
+              estimated_time_minutes: null,
+              parent_piece_id: null,
+            })
+            .select("id")
+            .single();
 
-      if (orderError || !order) {
-        throw new Error("تعذر إنشاء أمر التصنيع");
+          if (!mainError && insertedMain) {
+            parentPieceId = (insertedMain as { id: string }).id;
+          }
+        }
+
+        for (const tp of technicalPieces) {
+          await adminClient
+            .from("pieces_tasks")
+            .insert({
+              company_id: companyId,
+              project_id: project.id,
+              name: tp.description,
+              quantity: tp.quantity,
+              piece_type: "technical_piece",
+              status: "pending",
+              production_status: "not_sent",
+              material: null,
+              estimated_time_minutes: null,
+              parent_piece_id: parentPieceId,
+            });
+        }
+      } else {
+        // ✅ الوضع القديم: Flat
+        for (const item of quoteItems) {
+          await adminClient
+            .from("pieces_tasks")
+            .insert({
+              company_id: companyId,
+              project_id: project.id,
+              name: item.description,
+              quantity: item.quantity,
+              piece_type: "technical_piece",
+              status: "pending",
+              production_status: "not_sent",
+              material: null,
+              estimated_time_minutes: null,
+            });
+        }
       }
-      createdOrderId = order.id;
 
-      // 4) Marquer le devis comme accepté
+      // ✅ 5. إنشاء OF فقط إذا كان Odoo غير متصل (لتجنب التكرار)
+      if (!odooActive) {
+        const productNames = quoteItems.map((it) => it.description.trim());
+        
+        const { data: nomenclatures } = await adminClient
+          .from("nomenclatures")
+          .select("id, name, project_id, status")
+          .eq("company_id", companyId)
+          .eq("status", "valide")
+          .in("name", productNames);
+
+        if (nomenclatures && nomenclatures.length > 0) {
+          const firstItemDescription = quoteItems[0]?.description ?? project_name;
+          const { data: order, error: orderError } = await adminClient
+            .from("manufacturing_orders")
+            .insert({
+              company_id: companyId,
+              project_id: project.id,
+              quote_id: quote.id,
+              order_number: `MO-${quote.quote_number}`,
+              product_name: firstItemDescription,
+              quantity: 1,
+              status: "confirmed",
+            })
+            .select()
+            .single();
+
+          if (!orderError && order) {
+            createdOrderId = order.id;
+          }
+        }
+      }
+
+      // 6. تحديث الـ Devis
       const { error: updateQuoteError } = await adminClient
         .from("quotes")
         .update({ status: "accepted", project_id: project.id })
@@ -148,23 +244,17 @@ Deno.serve(async (req) => {
       return jsonResponse({
         success: true,
         project: { id: project.id, name: project.name, code: project.code },
-        manufacturing_order: { id: order.id, order_number: order.order_number },
+        odoo_active: odooActive,
+        manufacturing_order: createdOrderId ? { id: createdOrderId } : null,
       });
     } catch (innerErr) {
-      // Rollback manuel
+      // Rollback
       if (createdOrderId) {
-        await adminClient
-          .from("manufacturing_orders")
-          .delete()
-          .eq("id", createdOrderId)
-          .catch(() => {});
+        await adminClient.from("manufacturing_orders").delete().eq("id", createdOrderId).catch(() => {});
       }
       if (createdProjectId) {
-        await adminClient
-          .from("projects")
-          .delete()
-          .eq("id", createdProjectId)
-          .catch(() => {});
+        await adminClient.from("pieces_tasks").delete().eq("project_id", createdProjectId).catch(() => {});
+        await adminClient.from("projects").delete().eq("id", createdProjectId).catch(() => {});
       }
       throw innerErr;
     }

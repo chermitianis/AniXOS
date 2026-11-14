@@ -47,6 +47,8 @@ import { GeneralSettingsPage } from "../../../app/GeneralSettingsPage";
 import { MaterialPricesPage } from "../../settings/pages/MaterialPricesPage";
 import { CompanyWorkSettingsPage } from "../../settings/pages/CompanyWorkSettingsPage";
 import { ProductionReportsPage } from "../../production-reports/pages/ProductionReportsPage";
+import { OrdersAdminPage } from "./OrdersAdminPage";
+import { OrderDetailPage } from "./OrderDetailPage";
 
 export interface AdminPageProps {
   onNavigate?: (keyOrPageKey: string) => void;
@@ -58,6 +60,7 @@ const PAGES: Record<string, React.ComponentType<any>> = {
   reports: ReportsPage,
   crm: CRMAdminPage,
   clients: ClientsAdminPage,
+  orders: OrdersAdminPage,
   nomenclature: NomenclaturePage,
   projects: ProjectsAdminPage,
   engineering_dossiers: DossiersTechniquesPage,
@@ -87,6 +90,7 @@ const PAGES: Record<string, React.ComponentType<any>> = {
   admin_subscription: SubscriptionPage,
   admin_security_qr: PlanningQrSecurityCard,
   admin_odoo: OdooIntegrationPanel,
+  order_detail: OrderDetailPage,
 };
 
 const SIDEBAR_COLLAPSED_KEY = "anixos_sidebar_collapsed";
@@ -227,12 +231,12 @@ export function AdminHomePage({
   const currentLabel = currentNode ? t(currentNode.labelKey, { defaultValue: currentNode.label }) : "";
   const CurrentIcon = currentNode?.icon;
 
-  function handleSelect(keyOrPageKey: string) {
+  function handleSelect(keyOrPageKey: string, params?: Record<string, string>) {
     const resolved = resolveNode(NAV_TREE, keyOrPageKey);
     const newKey = resolved?.key ?? keyOrPageKey;
     setActiveSection(newKey);
     try { localStorage.setItem(ACTIVE_SECTION_KEY, newKey); } catch { /* ignore */ }
-    setNavParams(null);
+    setNavParams(params ?? null);
     setIsSidebarOpen(false);
     setShowProfile(false);
   }
